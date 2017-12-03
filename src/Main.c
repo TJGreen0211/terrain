@@ -175,53 +175,6 @@ vec3 *generateNormals(vec3 normals[], float *vertices, int size) {
 	return normals;
 }
 
-GLuint initBufferTangents(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec3 *tangents, int tanSize, vec2 *texCoords, int texSize) {
-	GLuint vbo, vao;
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertSize+normSize+texSize+tanSize, NULL, GL_STATIC_DRAW);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertSize, vertices);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize, normSize, normals);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize+normSize, texSize, texCoords);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize+normSize+texSize, tanSize, tangents);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(0));
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(vertSize));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2*sizeof(GLfloat), BUFFER_OFFSET(vertSize+normSize));
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(vertSize+normSize+texSize));
-	glEnableVertexAttribArray(3);
-
-	glBindVertexArray(0);
-	return vao;
-}
-
-GLuint initBuffers(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
-	GLuint vbo, vao;
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertSize+normSize+texSize, NULL, GL_STATIC_DRAW);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertSize, vertices);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize, normSize, normals);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize+normSize, texSize, texCoords);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(0));
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(vertSize));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2*sizeof(GLfloat), BUFFER_OFFSET(vertSize+normSize));
-	glEnableVertexAttribArray(2);
-
-	glBindVertexArray(0);
-	return vao;
-}
-
 GLuint initFramebuffer(GLuint *textureID) {
 	GLuint fbo;
 	glGenFramebuffers(1, &fbo);
@@ -278,55 +231,6 @@ GLuint initDepthbuffer() {
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	return fbo;
-}
-
-GLuint initSubQuad() {
-	int divisions = 200;
-	float fdivisions = 200.0;
-
-	GLuint vao;
-	vec3 vertices[divisions*divisions*6];
-	vec2 texCoords[divisions*divisions*6];
-
-	vec3 start = {1.0, 1.0, -1.0};
-	float offset = 2.0/(fdivisions);
-	int index = 0;
-	for(int i = 0; i < divisions; i++) {
-		start.x = 1.0;
-		for(int j = 0; j < divisions; j++) {
-			vec3 face0 = {start.x,   	  start.y,   start.z};
-			vec3 face1 = {start.x-offset, start.y-offset, start.z};
-			vec3 face2 = {start.x,        start.y-offset, start.z};
-			vec3 face3 = {start.x-offset, start.y,   start.z};
-
-			vertices[index++] = face2;
-			texCoords[index-1].x = (face2.x+1.0)/2.0;
-			texCoords[index-1].y = (face2.y+1.0)/2.0;
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0)/2.0;
-			texCoords[index-1].y = (face1.y+1.0)/2.0;
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0)/2.0;
-			texCoords[index-1].y = (face0.y+1.0)/2.0;
-
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0)/2.0;
-			texCoords[index-1].y = (face1.y+1.0)/2.0;
-			vertices[index++] = face3;
-			texCoords[index-1].x = (face3.x+1.0)/2.0;
-			texCoords[index-1].y = (face3.y+1.0)/2.0;
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0)/2.0;
-			texCoords[index-1].y = (face0.y+1.0)/2.0;
-
-			start.x = start.x - offset;
-		}
-		start.y -= offset;
-	}
-
-    //*normArray = *generateNormals(normArray, vertices, numVertices);
-    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
-    return vao;
 }
 
 GLuint initQuad() {

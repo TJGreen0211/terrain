@@ -22,6 +22,7 @@
 #include "Water.h"
 #include "Common.h"
 #include "Textures.h"
+#include "Buffers.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 

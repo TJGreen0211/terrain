@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "LinearAlg.h"
+#include "Buffers.h"
 
 typedef struct ring {
 	int size;
@@ -20,5 +21,6 @@ typedef struct ring {
 ring createRing(int numDivides, float innerRad, float outerRad);
 vec3 *generateTangents(int vertexNumber, vec3 *points, vec3 *tangent);
 vec3 *generateSmoothNormals(vec3 vna[], vec3 *vertices, vec3 *normals, int size);
+unsigned int initSubQuad();
 
 #endif
