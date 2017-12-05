@@ -20,10 +20,7 @@ out vec3 fPosition;
 out vec3 fragPos;
 out vec3 fTangent;
 out vec3 fN;
-out vec3 fT;
-out vec3 fB;
 out vec3 lightDir;
-out vec3 waveNormal;
 out vec3 vColor;
 
 out vec2 fTexCoords;
@@ -59,18 +56,6 @@ float gerstnerWaves(vec2 uv, float A, float L, vec2 K) {
 	return wv;//pow(pow(wv,1.5),0.9);
 }*/
 
-vec3 getNormal(vec2 uv) {
-	vec2 size = vec2(1.0,0.0);
-	vec2 texelSize = 1.0 / textureSize(texture1, 0);
-
-	float p0 = texture(texture1, vec2(uv.x, uv.y+texelSize.y)).x;
-	float p1 = texture(texture1, vec2(uv.x, uv.y-texelSize.y)).x;
-	float p2 = texture(texture1, vec2(uv.x+texelSize.x, uv.y)).x;
-	float p3 = texture(texture1, vec2(uv.x-texelSize.x, uv.y)).x;
-
-	return cross(normalize(vec3(size.xy, p1-p0)), normalize(vec3(size.yx, p3-p2)));
-}
-
 void main()
 {
 	fTangent = vTangent;
@@ -88,7 +73,7 @@ void main()
 
 	//mix(dyTex, dxTex, t1.a)
 	//vec3 heightVec = (vWavePosition.xyz * vec3(texture(noiseTexture, longlat)).z)/15.0;
-	vec3 heightVec = (vWavePosition.xyz * mix(dyTex, dxTex, 1.0))/40.0;
+	vec3 heightVec = (vWavePosition.xyz * mix(dyTex, dxTex, 1.0))/50.0;
 
 	vWavePosition.xyz = vec3(vWavePosition.x+heightVec.x, vWavePosition.y+heightVec.y, vWavePosition.z+heightVec.z);
 
@@ -100,12 +85,7 @@ void main()
 	mat3 normalMatrix = transpose(inverse(mat3(model)));
 	vec4 lightPos = vec4(lightPosition, 1.0);
 
-	fT = normalize(vec3(vec4(vTangent, 0.0) * model));
-	fN = normalize(vec3(vec4(vNormal, 0.0)) * normalMatrix);
-	fT = normalize(fT - dot(fT, fN) * fN);
-	fB = cross(fN, fT);
-
-	waveNormal = getNormal(longlat);
+	fN = vPosition.xyz;
 
 	lightDir = normalize(vWavePosition*model - lightPos).xyz;
 
