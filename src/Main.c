@@ -183,7 +183,7 @@ GLuint initRockBuffer(char *path) {
     	texCoords[i].x = 1.0;
     	texCoords[i].y = 0.0;
     }
-    vao = initInstanceBuffer(object.points, object.size, object.normals, object.nsize, texCoords, sizeof(texCoords[0])*object.vertexNumber);
+    vao = initBuffers(object.points, object.size, object.normals, object.nsize, texCoords, sizeof(texCoords[0])*object.vertexNumber);
 
 	return vao;
 }
@@ -551,7 +551,7 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 }*/
 
 void checkQuadtree(mat4 quadtreeModel, float maxLength) {
-	vec4 cameraPos = getCameraPosition(quadtreeModel);
+	//vec4 cameraPos = getCameraPosition(quadtreeModel);
 	//printf("cam: %f, %f, %f\n", cameraPos.x, cameraPos.y, cameraPos.z);
 }
 
@@ -774,7 +774,7 @@ int main(int argc, char *argv[])
 		//Atmosphere
 		atmo = multiplymat4(translatevec3(translation), scale(fScale*fScaleFactor));
 		//draw(quadCubeVAO, ringShader, qc.vertexNumber, earthTex, atmo, translation, lightPosition, lightSpaceMatrix);
-		//drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
+		drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);
