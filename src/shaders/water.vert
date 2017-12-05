@@ -16,11 +16,14 @@ uniform sampler2D depthMap;
 uniform sampler2D noiseTexture;
 
 out vec4 fLightSpace;
+out vec3 fPosition;
 out vec3 fragPos;
+out vec3 fTangent;
 out vec3 fN;
 out vec3 fT;
 out vec3 fB;
 out vec3 lightDir;
+out vec3 waveNormal;
 out vec3 vColor;
 
 out vec2 fTexCoords;
@@ -56,23 +59,36 @@ float gerstnerWaves(vec2 uv, float A, float L, vec2 K) {
 	return wv;//pow(pow(wv,1.5),0.9);
 }*/
 
+vec3 getNormal(vec2 uv) {
+	vec2 size = vec2(1.0,0.0);
+	vec2 texelSize = 1.0 / textureSize(texture1, 0);
+
+	float p0 = texture(texture1, vec2(uv.x, uv.y+texelSize.y)).x;
+	float p1 = texture(texture1, vec2(uv.x, uv.y-texelSize.y)).x;
+	float p2 = texture(texture1, vec2(uv.x+texelSize.x, uv.y)).x;
+	float p3 = texture(texture1, vec2(uv.x-texelSize.x, uv.y)).x;
+
+	return cross(normalize(vec3(size.xy, p1-p0)), normalize(vec3(size.yx, p3-p2)));
+}
+
 void main()
 {
+	fTangent = vTangent;
+	fPosition = vPosition.xyz;
 	vec4 wavePositionModel = vPosition*model;
 	vec4 vWavePosition = vPosition;
 	//float wavePos = map(wavePositionModel.xy/7.0);
 	//vWavePosition.x += wavePos.x;
 	//vWavePosition.x += wavePos;
-	//float wv = iFFT(abs(vPosition.xy*5.0), vec2(256, 256));
 	vec2 longlat = vec2((atan(vWavePosition.x, vWavePosition.y) / 3.1415926 + 1.0) * 0.5,
                         (asin(vWavePosition.z) / 3.1415926 + 0.5));
-	vec2 tc = vTexCoords*3.0;
+	vec2 tc = longlat*3.0;
 	vec3 dyTex = vec3(texture(texture1, tc));
 	vec3 dxTex = vec3(texture(noiseTexture, tc));
 
 	//mix(dyTex, dxTex, t1.a)
-	vec3 heightVec = vec3(0.0);//(vWavePosition.xyz * vec3(texture(noiseTexture, longlat)).z)/15.0;
-	//vec3 heightVec = (vWavePosition.xyz * mix(dyTex, dxTex, 1.0))/10.0;
+	//vec3 heightVec = (vWavePosition.xyz * vec3(texture(noiseTexture, longlat)).z)/15.0;
+	vec3 heightVec = (vWavePosition.xyz * mix(dyTex, dxTex, 1.0))/40.0;
 
 	vWavePosition.xyz = vec3(vWavePosition.x+heightVec.x, vWavePosition.y+heightVec.y, vWavePosition.z+heightVec.z);
 
@@ -88,6 +104,8 @@ void main()
 	fN = normalize(vec3(vec4(vNormal, 0.0)) * normalMatrix);
 	fT = normalize(fT - dot(fT, fN) * fN);
 	fB = cross(fN, fT);
+
+	waveNormal = getNormal(longlat);
 
 	lightDir = normalize(vWavePosition*model - lightPos).xyz;
 

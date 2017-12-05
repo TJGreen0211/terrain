@@ -8,8 +8,7 @@
 #include <pthread.h>
 
 float zNear = 0.5, zFar = 100000.0;
-int mousePosX, mousePosY, actionPress, keys, mouseZoomOffset;
-GLuint depthMap, textureColorBuffer, textureColorBuffer3D, sunNoiseTexture;
+GLuint depthMap;
 struct sphere planet;
 struct obj object, ship;
 struct ring planetRing;
@@ -35,33 +34,6 @@ GLuint generateDepthCubemap(int width, int height)
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 
     return textureID;
-}
-
-GLuint generateTextureAttachment3D(int depth, int stencil, vec2 size) {
-	GLuint textureID;
-	GLenum attachment_type;
-	if(!depth && !stencil)
-		attachment_type = GL_RGB;
-	else if(depth && !stencil)
-		attachment_type = GL_DEPTH_COMPONENT;
-	else if(!depth && stencil)
-		attachment_type = GL_STENCIL_INDEX;
-
-	glGenTextures(1, &textureID);
-	glBindTexture(GL_TEXTURE_3D, textureID);
-	if(!depth && !stencil)
-		glTexImage3D(GL_TEXTURE_3D, 0, attachment_type, getWindowWidth(), getWindowHeight(), 1, 0, attachment_type, GL_UNSIGNED_BYTE, NULL);
-	else if(depth && !stencil)
-		glTexImage3D(GL_TEXTURE_3D, 0, attachment_type, getWindowWidth(), getWindowHeight(), 1, 0, attachment_type, GL_FLOAT, NULL);
-
-	else
-		glTexImage3D(GL_TEXTURE_3D, 0, GL_DEPTH24_STENCIL8, size.x, size.y, 1, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);//GL_CLAMP_TO_BORDER
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);//GL_CLAMP_TO_BORDER
-    glBindTexture(GL_TEXTURE_3D, 0);
-	return textureID;
 }
 
 GLuint initInstanceBuffer(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
@@ -130,13 +102,6 @@ GLuint initDepthShader() {
 	return shader;
 }
 
-GLuint initFramebufferShader() {
-	GLuint shader;
-	createShader(&shader, "shaders/framebuffer.vert",
-		"shaders/framebuffer.frag");
-	return shader;
-}
-
 GLuint initTessShader() {
 	GLuint shader;
 	GLuint vertShader = LoadShader("shaders/tess.vert", GL_VERTEX_SHADER);
@@ -155,67 +120,6 @@ GLuint initTessShader() {
 	return shader;
 }
 
-vec3 *generateNormals(vec3 normals[], float *vertices, int size) {
-	vec3 one, two;
-	int c = 0;
-	for(int i = 0; i < size; i+=9) {
-		one.x = vertices[i+3] - vertices[i];
-		one.y = vertices[i+4] - vertices[i+1];
-		one.z = vertices[i+5] - vertices[i+2];
-
-		two.x = vertices[i+6] - vertices[i+3];
-		two.y = vertices[i+7] - vertices[i+4];
-		two.z = vertices[i+8] - vertices[i+5];
-		vec3 normal = normalizevec3(crossvec3(one, two));
-		normals[c] = normal; c++;
-		normals[c] = normal; c++;
-		normals[c] = normal; c++;
-	}
-
-	return normals;
-}
-
-GLuint initFramebuffer(GLuint *textureID) {
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	*textureID = generateTextureAttachment(0, 0, 1024.0, 512.0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *textureID, 0);
-
-	GLuint rbo;
-	glGenRenderbuffers(1, &rbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1024.0, 512.0);
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-	if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		printf("ERROR: Framebuffer is not complete");
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-	return fbo;
-}
-
-GLuint initFramebuffer3D() {
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	vec2 size = {1024.0, 512.0};
-	textureColorBuffer = generateTextureAttachment3D(0, 0, size);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorBuffer, 0);
-
-	GLuint rbo;
-	glGenRenderbuffers(1, &rbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, getWindowWidth(), getWindowHeight());
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-	if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		printf("ERROR: Framebuffer is not complete");
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-	return fbo;
-}
-
 GLuint initDepthbuffer() {
 	GLuint fbo;
 	glGenFramebuffers(1, &fbo);
@@ -231,54 +135,6 @@ GLuint initDepthbuffer() {
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	return fbo;
-}
-
-GLuint initQuad() {
-	GLuint vao;
-	float vertices[] = {
-		-1.0f, -1.0f, 1.0f,
-        -1.0f,  1.0f, 1.0f,
-         1.0f,  1.0f, 1.0f,
-         1.0f,  1.0f, 1.0f,
-         1.0f, -1.0f, 1.0f,
-        -1.0f, -1.0f, 1.0f
-	};
-
-	float texCoords[] = {
-		0.0f, 0.0f,
-    	0.0f, 1.0f,
-		1.0f, 1.0f,
-
-        1.0f, 1.0f,
-        1.0f, 0.0f,
-        0.0f, 0.0f
-	};
-	int numVertices = (sizeof(vertices)/sizeof(vertices[0]));
-    int numTexCoords = (sizeof(texCoords)/sizeof(texCoords[0]));
-	int vecSize = numVertices/3;
-	int texSize = numTexCoords/2;
-
-    vec3 vertArray[vecSize];
-    vec3 normArray[vecSize];
-    vec2 texArray[texSize];
-    int c = 0;
-    for(int i = 0; i < numVertices; i+=3) {
-    	vertArray[c].x = vertices[i];
-    	vertArray[c].y = vertices[i+1];
-    	vertArray[c].z = vertices[i+2];
-    	c++;
-    }
-    c = 0;
-    for(int i = 0; i < numTexCoords; i+=2) {
-    	texArray[c].x = texCoords[i];
-    	texArray[c].y = texCoords[i+1];
-    	c++;
-    }
-    *normArray = *generateNormals(normArray, vertices, numVertices);
-    vec3 vna[vecSize];
-	*vna = *generateSmoothNormals(vna, vertArray, normArray, vecSize);
-    vao = initBuffers(vertArray, sizeof(vertices), vna, sizeof(vertices), texArray, sizeof(texCoords));
-    return vao;
 }
 
 GLuint initQuadCube(int divisions) {
@@ -353,14 +209,6 @@ GLuint initRing() {
 	planetRing = createRing(1, 1.5, 2.0);
 	vao = initBuffers(planetRing.points, planetRing.size, planetRing.normals, planetRing.nsize, planetRing.texCoords, planetRing.texsize);
 	return vao;
-}
-
-vec4 getCameraPosition(mat4 position) {
-	mat4 mvTranspose = transposemat4(multiplymat4(position, getViewPosition()));
-	vec4 inverseCamera = {-mvTranspose.m[3][0], -mvTranspose.m[3][1], -mvTranspose.m[3][2], -mvTranspose.m[3][3]};
-	vec4 camPosition = multiplymat4vec4(mvTranspose, inverseCamera);
-
-	return camPosition;
 }
 
 vec4 getPositionModelspace(mat4 position, mat4 model) {
@@ -622,22 +470,6 @@ void drawDepth(GLuint vao, GLuint shader, int vertices, vec4 lightPosition, mat4
 	glBindVertexArray(0);
 }
 
-void drawNoiseFramebuffer() {
-
-}
-
-void doMovement(float deltaTime) {
-	float deltaSpeed = 1.0;
-	if(keys == GLFW_KEY_W && actionPress == GLFW_PRESS)
-        processKeyboard(FORWARD, deltaTime, deltaSpeed);
-    if(keys == GLFW_KEY_S && actionPress == GLFW_PRESS)
-        processKeyboard(BACKWARD, deltaTime, deltaSpeed);
-    if(keys == GLFW_KEY_A && actionPress == GLFW_PRESS)
-        processKeyboard(LEFT, deltaTime, deltaSpeed);
-    if(keys == GLFW_KEY_D && actionPress == GLFW_PRESS)
-        processKeyboard(RIGHT, deltaTime, deltaSpeed);
-}
-
 float getDeltaTime(float lastFrame) {
 	GLfloat currentFrame = glfwGetTime();
 	float deltaTime = currentFrame - lastFrame;
@@ -718,12 +550,19 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 	return NULL;
 }*/
 
+void checkQuadtree(mat4 quadtreeModel, float maxLength) {
+	vec4 cameraPos = getCameraPosition(quadtreeModel);
+	//printf("cam: %f, %f, %f\n", cameraPos.x, cameraPos.y, cameraPos.z);
+}
+
 int main(int argc, char *argv[])
 {
 	float theta = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	chdir("/Users/tjgreen/Documents/OpenGL/terrain/src");
 	GLFWwindow *window = setupGLFW();
+
+	GLuint textureColorBuffer, sunNoiseTexture;
 
 	initializeWaves(256);
 	initializeNoise();
@@ -738,6 +577,16 @@ int main(int argc, char *argv[])
 		return 2;
 	}*/
 
+	int qtKey = 10;
+	quadtree *tree = quadtreeNew(1.0, 1.0, 10.0, 10.0);
+	quadtreeInsert(tree, 8.0, 2.0, &qtKey);
+	quadtreeInsert(tree, 6.0, 1.0, &qtKey);
+	quadtreeInsert(tree, 2.0, 9.0, &qtKey);
+	quadtreeInsert(tree, 1.0, 1.0, &qtKey);
+	quadtreeInsert(tree, 5.0, 5.0, &qtKey);
+	quadtreeInsert(tree, 9.0, 9.0, &qtKey);
+	quadtreeWalk(tree->root, quadtreeAscent, quadtreeDescent);
+	printf("tree->length: %u\n", tree->length);
 
 	GLuint tessShader = initTessShader();
 	GLuint skyShader = initSkyShader();
@@ -768,14 +617,13 @@ int main(int argc, char *argv[])
 	GLuint depthbuffer = initDepthbuffer();
 	GLuint framebuffer = initFramebuffer(&textureColorBuffer);
 	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture);
-	//GLuint framebuffer3D = initFramebuffer3D();
-	GLuint quadVAO = initQuad();
+	GLuint quadVAO = initQuadVAO();
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
-	int instancedDraws = 720;
+	int instancedDraws = 300;
 
 	vec3 pos1[instancedDraws];
 	*pos1 = *getRandomPositions(pos1, instancedDraws);
@@ -824,6 +672,9 @@ int main(int argc, char *argv[])
 			vertTime = getFileLastChangeTime(vertCheck);
 			fragTime = getFileLastChangeTime(fragCheck);
 		}
+
+		mat4 quadtreeModel = identityMatrix();
+		checkQuadtree(quadtreeModel, 100.0);
 
 		clock_t start,end;
 		float time_spent;
@@ -886,10 +737,6 @@ int main(int argc, char *argv[])
 		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 		glClearColor(0.1, 0.0, 0.2, 1.0);
 
-		model = multiplymat4(translate(-25.0, 5.0, 5.0), scale(10.0));
-		//draw(quadCubeVAO, ringShader, qc.vertexNumber, moonTex, model, translation, lightPosition);
-
-		//draw(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, model, translation);
 		drawOrbit(quadCubeVAO, ringShader, qc.vertexNumber, moonTex, theta, model, translation);
 		//Planet ring
 		model = multiplymat4(multiplymat4(translatevec3(translation), rotateX(80.0)), scale(fScale*1.5));
@@ -916,66 +763,22 @@ int main(int argc, char *argv[])
 		draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Flat quad
-		model = multiplymat4(translate(-100.0, 0.0, 0.0), scale(100.0));
-		draw(subQuadVAO, waterShader, 200*200*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
+		//model = multiplymat4(translate(-100.0, 0.0, 0.0), scale(100.0));
+		//draw(subQuadVAO, waterShader, 200*200*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
-		//glUseProgram(instanceShader);
-		//drawInstanced(rockVAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos1, rotations, model, scaleArray, theta, lightPosition);
-		//drawInstanced(rock2VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos2, rotations, model, scaleArray, theta, lightPosition);
-		//drawInstanced(rock3VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos3, rotations, model, scaleArray, theta, lightPosition);
+		glUseProgram(instanceShader);
+		drawInstanced(rockVAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos1, rotations, model, scaleArray, theta, lightPosition);
+		drawInstanced(rock2VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos2, rotations, model, scaleArray, theta, lightPosition);
+		drawInstanced(rock3VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos3, rotations, model, scaleArray, theta, lightPosition);
 
 		//Atmosphere
-		//atmo = multiplymat4(translatevec3(translation), scale(fScale*fScaleFactor));
+		atmo = multiplymat4(translatevec3(translation), scale(fScale*fScaleFactor));
 		//draw(quadCubeVAO, ringShader, qc.vertexNumber, earthTex, atmo, translation, lightPosition, lightSpaceMatrix);
-		//drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
+		drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);
 	}
 	glfwTerminate();
 	return 0;
-}
-
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
-{
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, GL_TRUE);
-	if(action == GLFW_PRESS)
-    	actionPress = GLFW_PRESS;
-    else if(action == GLFW_RELEASE)
-    	actionPress = 0;
-
-    if (key == GLFW_KEY_W && action == GLFW_PRESS){
-    	keys = GLFW_KEY_W;
-    }
-    if (key == GLFW_KEY_S && action == GLFW_PRESS){
-    	keys = GLFW_KEY_S;
-    }
-    if (key == GLFW_KEY_A && action == GLFW_PRESS){
-    	keys = GLFW_KEY_A;
-    }
-    if (key == GLFW_KEY_D && action == GLFW_PRESS){
-    	keys = GLFW_KEY_D;
-    }
-    if(action == GLFW_RELEASE)
-    	keys = 0;
-}
-
-void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-	int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
-	//xpos = 1.0*xpos/getWindowWidth()*2 - 1.0;
-	//ypos =  1.0*ypos/getWindowHeight()*2 - 1.0;
-	if (state == GLFW_PRESS)
-	{
-		processMouseMovement(xpos, ypos, 0);
-	}
-	else {
-		processMouseMovement(xpos, ypos, 1);
-	}
-	mousePosX = xpos;
-	mousePosY = ypos;
-}
-
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-	mouseZoomOffset = processMouseScroll(yoffset, mouseZoomOffset);
 }

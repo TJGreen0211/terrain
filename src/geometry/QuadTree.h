@@ -34,6 +34,9 @@ typedef struct quadtree {
 	unsigned int length;
 } quadtree;
 
+void quadtreeAscent(quadtreeNode *node);
+void quadtreeDescent(quadtreeNode *node);
+
 quadtreePoint *quadtreePointNew(double x, double y);
 void quadtreePointFree(quadtreePoint *point);
 

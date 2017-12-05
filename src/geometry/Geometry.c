@@ -136,6 +136,26 @@ vec3 *generateSmoothNormals(vec3 vna[], vec3 *vertices, vec3 *normals, int size)
 	return vna;
 }
 
+vec3 *generateNormals(vec3 normals[], float *vertices, int size) {
+	vec3 one, two;
+	int c = 0;
+	for(int i = 0; i < size; i+=9) {
+		one.x = vertices[i+3] - vertices[i];
+		one.y = vertices[i+4] - vertices[i+1];
+		one.z = vertices[i+5] - vertices[i+2];
+
+		two.x = vertices[i+6] - vertices[i+3];
+		two.y = vertices[i+7] - vertices[i+4];
+		two.z = vertices[i+8] - vertices[i+5];
+		vec3 normal = normalizevec3(crossvec3(one, two));
+		normals[c] = normal; c++;
+		normals[c] = normal; c++;
+		normals[c] = normal; c++;
+	}
+
+	return normals;
+}
+
 unsigned int initSubQuad() {
 	int divisions = 200;
 	float fdivisions = 200.0;
@@ -182,5 +202,53 @@ unsigned int initSubQuad() {
 
     //*normArray = *generateNormals(normArray, vertices, numVertices);
     vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
+    return vao;
+}
+
+unsigned int initQuadVAO() {
+	unsigned int vao;
+	float vertices[] = {
+		-1.0f, -1.0f, 1.0f,
+        -1.0f,  1.0f, 1.0f,
+         1.0f,  1.0f, 1.0f,
+         1.0f,  1.0f, 1.0f,
+         1.0f, -1.0f, 1.0f,
+        -1.0f, -1.0f, 1.0f
+	};
+
+	float texCoords[] = {
+		0.0f, 0.0f,
+    	0.0f, 1.0f,
+		1.0f, 1.0f,
+
+        1.0f, 1.0f,
+        1.0f, 0.0f,
+        0.0f, 0.0f
+	};
+	int numVertices = (sizeof(vertices)/sizeof(vertices[0]));
+    int numTexCoords = (sizeof(texCoords)/sizeof(texCoords[0]));
+	int vecSize = numVertices/3;
+	int texSize = numTexCoords/2;
+
+    vec3 vertArray[vecSize];
+    vec3 normArray[vecSize];
+    vec2 texArray[texSize];
+    int c = 0;
+    for(int i = 0; i < numVertices; i+=3) {
+    	vertArray[c].x = vertices[i];
+    	vertArray[c].y = vertices[i+1];
+    	vertArray[c].z = vertices[i+2];
+    	c++;
+    }
+    c = 0;
+    for(int i = 0; i < numTexCoords; i+=2) {
+    	texArray[c].x = texCoords[i];
+    	texArray[c].y = texCoords[i+1];
+    	c++;
+    }
+    *normArray = *generateNormals(normArray, vertices, numVertices);
+    vec3 vna[vecSize];
+	*vna = *generateSmoothNormals(vna, vertArray, normArray, vecSize);
+    vao = initBuffers(vertArray, sizeof(vertices), vna, sizeof(vertices), texArray, sizeof(texCoords));
     return vao;
 }

@@ -21,6 +21,8 @@ typedef struct ring {
 ring createRing(int numDivides, float innerRad, float outerRad);
 vec3 *generateTangents(int vertexNumber, vec3 *points, vec3 *tangent);
 vec3 *generateSmoothNormals(vec3 vna[], vec3 *vertices, vec3 *normals, int size);
+vec3 *generateNormals(vec3 normals[], float *vertices, int size);
+unsigned int initQuadVAO();
 unsigned int initSubQuad();
 
 #endif

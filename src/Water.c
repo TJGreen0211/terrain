@@ -168,7 +168,7 @@ void horizontalButterfly(int dim, vec4 *twiddleIndices, vec4 *pingpong0, vec4 *p
 }*/
 
 float phillips(vec2 k) {
-	float A = 1.0;
+	float A = 4.0;
 	float g = 9.81;
 	vec2 waveDir = {30.0, 0.0};
 
@@ -197,7 +197,7 @@ void initGlobalVars(int dim) {
 
 void initH0(int dim) {
 	int waveTexSize = dim;
-	float L = 2000.0;
+	float L = 1000.0;
 	int offset = 0;
 	for(float N = 0.0; N < waveTexSize; N +=1.0) {
 		for(float M = 0.0; M < waveTexSize; M +=1.0) {
@@ -218,7 +218,7 @@ void initH0(int dim) {
 void calcH0(int dim, complex *dx, complex *dy, complex *dz, complex *tildeh0kTemp, complex *conjTildeh0MKTemp) {
 	int waveTexSize = dim;
 
-	float L = 2000.0;
+	float L = 1000.0;
 	int offset = 0;
 	for(float N = 0.0; N < waveTexSize; N +=1.0) {
 		for(float M = 0.0; M < waveTexSize; M +=1.0) {

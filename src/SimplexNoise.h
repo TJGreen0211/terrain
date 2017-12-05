@@ -11,6 +11,7 @@
 
 #include "LinearAlg.h"
 #include "LoadShader.h"
+#include "CommonGL.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 

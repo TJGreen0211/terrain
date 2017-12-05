@@ -19,10 +19,13 @@
 #include "SimplexNoise.h"
 #include "Obj.h"
 #include "QuadCube.h"
+#include "QuadTree.h"
 #include "Water.h"
 #include "Common.h"
 #include "Textures.h"
 #include "Buffers.h"
+#include "CommonGL.h"
+#include "Input.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 

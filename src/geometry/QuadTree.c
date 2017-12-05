@@ -14,6 +14,16 @@ static int splitNode(quadtree *tree, quadtreeNode *node);
 static int nodeContains(quadtreeNode *outer, quadtreePoint *it);
 static quadtreeNode *getQuadrant(quadtreeNode *root, quadtreePoint *point);
 
+void quadtreeAscent(quadtreeNode *node) {
+  printf("\n");
+}
+
+void quadtreeDescent(quadtreeNode *node) {
+  if(node->bounds != NULL)
+    printf("{ nw.x:%f, nw.y:%f, se.x:%f, se.y:%f }: ", node->bounds->nw->x,
+      node->bounds->nw->y, node->bounds->se->x, node->bounds->se->y);
+}
+
 quadtreePoint *quadtreePointNew(double x, double y) {
 	quadtreePoint *point;
 	if(!(point = malloc(sizeof(*point)))) {
@@ -30,9 +40,9 @@ void quadtreePointFree(quadtreePoint *point) {
 
 void quadtreeBoundsExtend(quadtreeBounds *bounds, double x, double y) {
 	bounds->nw->x = fmin(x, bounds->nw->x);
-	bounds->nw->x = fmax(y, bounds->nw->y);
+	bounds->nw->y = fmax(y, bounds->nw->y);
 	bounds->se->x = fmax(x, bounds->se->x);
-	bounds->se->x = fmin(y, bounds->se->y);
+	bounds->se->y = fmin(y, bounds->se->y);
 	bounds->width = fabs(bounds->nw->x - bounds->se->x);
 	bounds->height = fabs(bounds->nw->y - bounds->se->y);
 }
@@ -73,7 +83,7 @@ void quadtreeNodeFree(quadtreeNode *node, void (*keyFree)(void*)) {
 	if(node->ne != NULL) quadtreeNodeFree(node->ne, keyFree);
 	if(node->sw != NULL) quadtreeNodeFree(node->sw, keyFree);
 	if(node->se != NULL) quadtreeNodeFree(node->se, keyFree);
-	
+
 	quadtreeBoundsFree(node->bounds);
 	quadtreeNodeReset(node, keyFree);
 	free(node);
@@ -149,27 +159,27 @@ static int splitNode(quadtree *tree, quadtreeNode *node) {
 	quadtreeNode *se;
 	quadtreePoint *old;
 	void *key;
-	
+
 	double x = node->bounds->nw->x;
 	double y = node->bounds->nw->y;
 	double hw = node->bounds->width / 2;
 	double hh = node->bounds->height / 2;
-	
+
 	if(!(nw = quadtreeNodeWithBounds(x,    y-hh,   x+hw,   y))) return 0;
 	if(!(ne = quadtreeNodeWithBounds(x+hw, y-hh,   x+hw*2, y))) return 0;
 	if(!(sw = quadtreeNodeWithBounds(x,    y-hh*2, x+hw,   y-hh))) return 0;
 	if(!(se = quadtreeNodeWithBounds(x+hw, y-hh*2, x+hw*2, y-hh))) return 0;
-	
+
 	node->nw = nw;
 	node->ne = ne;
 	node->sw = sw;
 	node->se = se;
-	
+
 	old = node->point;
 	key = node->key;
 	node->point = NULL;
 	node->key = NULL;
-	
+
 	return insert(tree, node, old, key);
 }
 
@@ -230,7 +240,7 @@ quadtree *quadtreeNew(double minx, double miny, double maxx, double maxy) {
 int quadtreeInsert(quadtree *tree, double x, double y, void *key) {
 	quadtreePoint *point;
 	int insertStatus;
-	
+
 	if(!(point = quadtreePointNew(x, y))) return 0;
 	if(!nodeContains(tree->root, point)) {
 		quadtreePointFree(point);
@@ -257,11 +267,11 @@ void quadtreeFree(quadtree *tree) {
 	free(tree);
 }
 
-void quadtreeWalk(quadtreeNode *root, void (*descent)(quadtreeNode *node), void (*ascent)(quadtreeNode *node)) {
-	(*descent)(root);
-	if(root->nw != NULL) quadtreeWalk(root->nw, descent, ascent);
-	if(root->ne != NULL) quadtreeWalk(root->nw, descent, ascent);
-	if(root->sw != NULL) quadtreeWalk(root->nw, descent, ascent);
-	if(root->se != NULL) quadtreeWalk(root->nw, descent, ascent);
-	(*ascent)(root);
+void quadtreeWalk(quadtreeNode *root, void (*quadtreeDescent)(quadtreeNode *node), void (*quadtreeAscent)(quadtreeNode *node)) {
+	(*quadtreeDescent)(root);
+	if(root->nw != NULL) quadtreeWalk(root->nw, quadtreeDescent, quadtreeAscent);
+	if(root->ne != NULL) quadtreeWalk(root->nw, quadtreeDescent, quadtreeAscent);
+	if(root->sw != NULL) quadtreeWalk(root->nw, quadtreeDescent, quadtreeAscent);
+	if(root->se != NULL) quadtreeWalk(root->nw, quadtreeDescent, quadtreeAscent);
+	(*quadtreeAscent)(root);
 }
