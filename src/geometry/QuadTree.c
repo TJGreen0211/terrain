@@ -211,6 +211,7 @@ static int insert(quadtree *tree, quadtreeNode *root, quadtreePoint *point, void
 			root->key = key;
 			return 2;
 		} else {
+			printf("SPLIT");
 			if(!splitNode(tree, root)) {
 				return 0;
 			}

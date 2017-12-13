@@ -5,7 +5,6 @@ in vec3 fTangent;
 in vec3 fragPos;
 in vec3 fPosition;
 in vec3 fN;
-in vec3 lightDir;
 in vec3 vColor;
 in vec2 fTexCoords;
 
@@ -96,7 +95,7 @@ void main()
 {
 	vec2 longlat = vec2((atan(fN.x, fN.y) / 3.1415926 + 1.0) * 0.5,
                         (asin(fN.z) / 3.1415926 + 0.5));
-	vec2 tc = longlat*30.0;
+	vec2 tc = longlat*3.0;
 	vec3 dyTex = vec3(texture(texture1, tc));
 	vec3 dxTex = vec3(texture(noiseTexture, tc));
 	//vec3 color = vec3(mix(dyTex, dxTex, 1.0));

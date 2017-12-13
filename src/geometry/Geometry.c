@@ -157,8 +157,8 @@ vec3 *generateNormals(vec3 normals[], float *vertices, int size) {
 }
 
 unsigned int initSubQuad() {
-	int divisions = 200;
-	float fdivisions = 200.0;
+	int divisions = 20;
+	float fdivisions = 20.0;
 
 	unsigned int vao;
 	vec3 vertices[divisions*divisions*6];
@@ -176,28 +176,36 @@ unsigned int initSubQuad() {
 			vec3 face3 = {start.x-offset, start.y,   start.z};
 
 			vertices[index++] = face2;
-			texCoords[index-1].x = (face2.x+1.0)/2.0;
-			texCoords[index-1].y = (face2.y+1.0)/2.0;
+			texCoords[index-1].x = (face2.x+1.0);
+			texCoords[index-1].y = (face2.y+1.0);
 			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0)/2.0;
-			texCoords[index-1].y = (face1.y+1.0)/2.0;
+			texCoords[index-1].x = (face1.x+1.0);
+			texCoords[index-1].y = (face1.y+1.0);
 			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0)/2.0;
-			texCoords[index-1].y = (face0.y+1.0)/2.0;
+			texCoords[index-1].x = (face0.x+1.0);
+			texCoords[index-1].y = (face0.y+1.0);
 
 			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0)/2.0;
-			texCoords[index-1].y = (face1.y+1.0)/2.0;
+			texCoords[index-1].x = (face1.x+1.0);
+			texCoords[index-1].y = (face1.y+1.0);
 			vertices[index++] = face3;
-			texCoords[index-1].x = (face3.x+1.0)/2.0;
-			texCoords[index-1].y = (face3.y+1.0)/2.0;
+			texCoords[index-1].x = (face3.x+1.0);
+			texCoords[index-1].y = (face3.y+1.0);
 			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0)/2.0;
-			texCoords[index-1].y = (face0.y+1.0)/2.0;
+			texCoords[index-1].x = (face0.x+1.0);
+			texCoords[index-1].y = (face0.y+1.0);
 
 			start.x = start.x - offset;
 		}
 		start.y -= offset;
+	}
+
+	for(int i = 0; i < divisions*divisions*6; i++) {
+		//printf("x:%f, y:%f, z:%f\n", newQuadCube.points[i].x, newQuadCube.points[i].y, newQuadCube.points[i].z);
+		//vec3 temp = normalizevec3(vertices[i]);
+		vertices[i].x = (vertices[i].x+1.0)/2.0;
+		vertices[i].y = (vertices[i].y+1.0)/2.0;
+		//vertices[i].z = (vertices[i].z+1.0)/2.0;
 	}
 
     //*normArray = *generateNormals(normArray, vertices, numVertices);

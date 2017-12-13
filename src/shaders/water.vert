@@ -20,7 +20,6 @@ out vec3 fPosition;
 out vec3 fragPos;
 out vec3 fTangent;
 out vec3 fN;
-out vec3 lightDir;
 out vec3 vColor;
 
 out vec2 fTexCoords;
@@ -60,40 +59,23 @@ void main()
 {
 	fTangent = vTangent;
 	fPosition = vPosition.xyz;
-	vec4 wavePositionModel = vPosition*model;
 	vec4 vWavePosition = vPosition;
-	//float wavePos = map(wavePositionModel.xy/7.0);
-	//vWavePosition.x += wavePos.x;
-	//vWavePosition.x += wavePos;
+
 	vec2 longlat = vec2((atan(vWavePosition.x, vWavePosition.y) / 3.1415926 + 1.0) * 0.5,
                         (asin(vWavePosition.z) / 3.1415926 + 0.5));
 	vec2 tc = longlat*3.0;
 	vec3 dyTex = vec3(texture(texture1, tc));
 	vec3 dxTex = vec3(texture(noiseTexture, tc));
-
-	//mix(dyTex, dxTex, t1.a)
-	//vec3 heightVec = (vWavePosition.xyz * vec3(texture(noiseTexture, longlat)).z)/15.0;
-	vec3 heightVec = (vWavePosition.xyz * mix(dyTex, dxTex, 1.0))/50.0;
-
+	vec3 wavePosition = mix(dyTex, dxTex, 1.0);
+	vec3 heightVec = (vWavePosition.xyz * wavePosition)/50.0;
 	vWavePosition.xyz = vec3(vWavePosition.x+heightVec.x, vWavePosition.y+heightVec.y, vWavePosition.z+heightVec.z);
-
-	//vec4 color = vec4(texture(texture1, tc)).rgba;
-	vec4 color = vec4(vec3(mix(dyTex, dxTex, 1.0)), 1.0);
-	//vWavePosition.z += (color.x/15.0);
-	gl_Position = vWavePosition*model*view*projection;
-
-	mat3 normalMatrix = transpose(inverse(mat3(model)));
-	vec4 lightPos = vec4(lightPosition, 1.0);
+	vec4 color = vec4(wavePosition, 1.0);
 
 	fN = vPosition.xyz;
-
-	lightDir = normalize(vWavePosition*model - lightPos).xyz;
-
 	fLightSpace = vWavePosition*model*lightSpace;
 	fragPos = vec3(vWavePosition*model).xyz;
-	//fTexCoords = vTexCoords;
-
 	fTexCoords = longlat;
-
 	vColor = vec3(color.xyz);
+
+	gl_Position = vWavePosition*model*view*projection;
 }

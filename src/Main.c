@@ -10,31 +10,8 @@
 float zNear = 0.5, zFar = 100000.0;
 GLuint depthMap;
 struct sphere planet;
-struct obj object, ship;
 struct ring planetRing;
 struct quadCube qc, qc2;
-mat4 lightView;
-
-GLuint generateDepthCubemap(int width, int height)
-{
-	GLuint textureID;
-    glGenTextures(1, &textureID);
-
-    glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
-    for (int i = 0; i < 6; i++)
-    {
-        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-
-    }
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-
-    return textureID;
-}
 
 GLuint initInstanceBuffer(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
 	GLuint vbo, vao;
@@ -57,6 +34,13 @@ GLuint initInstanceBuffer(vec3 *vertices, int vertSize, vec3 *normals, int normS
 
 	glBindVertexArray(0);
 	return vao;
+}
+
+GLuint initQuadShader() {
+	GLuint shader;
+	createShader(&shader, "shaders/quad.vert",
+		"shaders/quad.frag");
+	return shader;
 }
 
 GLuint initInstanceShader() {
@@ -156,34 +140,18 @@ GLuint initQuadCube(int divisions) {
     return vao;
 }
 
-GLuint initObjectBuffer(char *path) {
+GLuint initObjectBuffer(char *path, obj *object) {
 	GLuint vao;
-	ship = ObjLoadModel(path);
-	vec3 vna[ship.vertexNumber];
-	vec2 texCoords[ship.vertexNumber];
-	*vna = *generateSmoothNormals(vna, ship.points, ship.normals, ship.vertexNumber);
+	*object = ObjLoadModel(path);
+	vec3 vna[object->vertexNumber];
+	vec2 texCoords[object->vertexNumber];
+	*vna = *generateSmoothNormals(vna, object->points, object->normals, object->vertexNumber);
 
-	for(int i = 0; i < ship.vertexNumber; i++) {
+	for(int i = 0; i < object->vertexNumber; i++) {
     	texCoords[i].x = 1.0;
     	texCoords[i].y = 0.0;
     }
-    vao = initBuffers(ship.points, ship.size, ship.normals, ship.nsize, texCoords, sizeof(texCoords[0])*ship.vertexNumber);
-
-	return vao;
-}
-
-GLuint initRockBuffer(char *path) {
-	GLuint vao;
-	object = ObjLoadModel(path);
-	vec3 vna[object.vertexNumber];
-	vec2 texCoords[object.vertexNumber];
-	*vna = *generateSmoothNormals(vna, object.points, object.normals, object.vertexNumber);
-
-	for(int i = 0; i < object.vertexNumber; i++) {
-    	texCoords[i].x = 1.0;
-    	texCoords[i].y = 0.0;
-    }
-    vao = initBuffers(object.points, object.size, object.normals, object.nsize, texCoords, sizeof(texCoords[0])*object.vertexNumber);
+    vao = initBuffers(object->points, object->size, object->normals, object->nsize, texCoords, sizeof(texCoords[0])*object->vertexNumber);
 
 	return vao;
 }
@@ -225,8 +193,8 @@ mat4 getLookAtMatrix(vec4 lightPosition, vec3 lookAt) {
 	d = normalizevec3(d);
 	float rad = 180.0 / M_PI;
 	float lightYaw = asin(-d.y) * rad;
-	float lightPitch = atan2(d.x, d.z) * rad;
-	printf("Yaw: %f, Pitch: %f\n", lightYaw, lightPitch);
+	float lightPitch = atan2(d.x, -d.z) * rad;
+	//printf("Yaw: %f, Pitch: %f\n", lightYaw, lightPitch);
 	/*if(lookAt.x == 1.0 || lookAt.z == -1.0) {
 		//printf("%f, %f, %f\n", lookAt.x, lookAt.y, lookAt.z);
 		//rxry = multiplymat4(rotateZ(180.0), multiplymat4(rotateX(lightYaw), rotateY(lightPitch)));
@@ -403,7 +371,7 @@ void draw(GLuint vao, GLuint shader, int vertices, GLuint texture, GLuint normal
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, normal);
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
-	glDrawArrays(GL_TRIANGLES, 0, vertices);
+	glDrawArrays(GL_LINES, 0, vertices);
 	glBindVertexArray(0);
 	glEnable(GL_CULL_FACE);
 	//glCullFace(GL_BACK);
@@ -551,12 +519,14 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 }*/
 
 void checkQuadtree(mat4 quadtreeModel, float maxLength) {
-	//vec4 cameraPos = getCameraPosition(quadtreeModel);
+	vec4 cameraPos = getCameraPosition(quadtreeModel);
 	//printf("cam: %f, %f, %f\n", cameraPos.x, cameraPos.y, cameraPos.z);
 }
 
 int main(int argc, char *argv[])
 {
+	struct obj object, ship;
+	mat4 lightView;
 	float theta = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	chdir("/Users/tjgreen/Documents/OpenGL/terrain/src");
@@ -579,6 +549,7 @@ int main(int argc, char *argv[])
 
 	int qtKey = 10;
 	quadtree *tree = quadtreeNew(1.0, 1.0, 10.0, 10.0);
+	quadtreePointNew(4.0, 4.0);
 	quadtreeInsert(tree, 8.0, 2.0, &qtKey);
 	quadtreeInsert(tree, 6.0, 1.0, &qtKey);
 	quadtreeInsert(tree, 2.0, 9.0, &qtKey);
@@ -586,6 +557,7 @@ int main(int argc, char *argv[])
 	quadtreeInsert(tree, 5.0, 5.0, &qtKey);
 	quadtreeInsert(tree, 9.0, 9.0, &qtKey);
 	quadtreeWalk(tree->root, quadtreeAscent, quadtreeDescent);
+
 	printf("tree->length: %u\n", tree->length);
 
 	GLuint tessShader = initTessShader();
@@ -596,6 +568,7 @@ int main(int argc, char *argv[])
 	GLuint depthShader = initDepthShader();
 	GLuint fboShader = initFramebufferShader();
 	GLuint instanceShader = initInstanceShader();
+	GLuint quadShader = initQuadShader();
 
 	GLuint earthTex = loadTexture("../assets/earth.jpg", 0);
 	GLuint moonTex = loadTexture("../assets/moon.jpg", 0);
@@ -606,10 +579,10 @@ int main(int argc, char *argv[])
 	GLuint ringTex = loadTexture("../assets/ring.png", 1);
 	GLuint sphereVAO = initSphere();
 	GLuint ringVAO = initRing();
-	GLuint objectVAO = initObjectBuffer("../assets/rifter.obj");
-	GLuint rockVAO = initRockBuffer("../assets/rock.obj");
-	GLuint rock2VAO = initRockBuffer("../assets/rock2.obj");
-	GLuint rock3VAO = initRockBuffer("../assets/rock3.obj");
+	//GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
+	GLuint rockVAO = initObjectBuffer("../assets/rock.obj", &object);
+	GLuint rock2VAO = initObjectBuffer("../assets/rock2.obj", &object);
+	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
 	GLuint subQuadVAO = initSubQuad();
 
 	GLuint quadCubeVAO = initQuadCube(30);
@@ -648,8 +621,7 @@ int main(int argc, char *argv[])
 
 	float deltaTime = 0.0;
 	float lastFrame = 0.0;
-	float rad = 180.0 / M_PI;
-	vec3 translation = {65.0, 0.0, 0.0};
+	vec3 translation = {650.0, 0.0, 0.0};
 	mat4 lightProjection = ortho(-400.0, 400.0, -400.0, 400.0, zNear, zFar);
 	//mat4 lightProjection = perspective(90.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 
@@ -705,14 +677,8 @@ int main(int argc, char *argv[])
 		//Light calculations per frame
 		vec4 lightPosition = rotateLight(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, theta, translation);
 		vec3 lightPositionXYZ = {lightPosition.x, lightPosition.y, lightPosition.z};
-		vec3 d = {lightPosition.x - translation.x, lightPosition.y - translation.y, lightPosition.z - translation.z};
-		d = normalizevec3(d);
-		float lightYaw = asin(-d.y) * rad;
-		float lightPitch = atan2(d.x, -d.z) * rad;
-		//printf("yaw:%f, pitch:%f\n", lightYaw, lightPitch);
-		mat4 rxry = multiplymat4(rotateX(lightYaw), rotateY(lightPitch));
-		vec4 negativeLight = {lightPosition.x, lightPosition.y, lightPosition.z, lightPosition.w};
-		lightView = multiplymat4(rxry, translatevec4(negativeLight));
+		//vec4 negativeLight = {lightPosition.x, lightPosition.y, lightPosition.z, lightPosition.w};
+		lightView = getLookAtMatrix(lightPosition, translation);//multiplymat4(rxry, translatevec4(negativeLight));
 		mat4 lightSpaceMatrix = multiplymat4(lightProjection, lightView);
 
 		glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
@@ -740,7 +706,7 @@ int main(int argc, char *argv[])
 		drawOrbit(quadCubeVAO, ringShader, qc.vertexNumber, moonTex, theta, model, translation);
 		//Planet ring
 		model = multiplymat4(multiplymat4(translatevec3(translation), rotateX(80.0)), scale(fScale*1.5));
-		draw(ringVAO, ringShader, planetRing.vertexNumber, ringTex, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
+		//draw(ringVAO, ringShader, planetRing.vertexNumber, ringTex, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
 		//Planet
 		mat4 matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
 		model = multiplymat4(translatevec3(translation), scale(fScale));
@@ -760,11 +726,59 @@ int main(int argc, char *argv[])
 		vec3 arcBallPos = getCamera();
 		float modelRotationAngle = 0.0;
 		model = multiplymat4(multiplymat4(translate(-arcBallPos.x, -arcBallPos.y, -arcBallPos.z), rotateX(modelRotationAngle)), scale(0.5));
-		draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
+		//draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Flat quad
-		//model = multiplymat4(translate(-100.0, 0.0, 0.0), scale(100.0));
-		//draw(subQuadVAO, waterShader, 200*200*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
+		mat4 posMatrix;
+
+			posMatrix = translate(-1.0, 0.0, 0.0);
+			model = identityMatrix();//scale(30.0);//multiplymat4(translate(0.0, 0.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = translate(0.0, 0.0, 0.0);
+			model = identityMatrix();//multiplymat4(translate(50.0, 0.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = translate(0.0, -1.0, 0.0);
+			model = identityMatrix();//multiplymat4(translate(0.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = translate(-1.0, -1.0, 0.0);
+			model = identityMatrix();//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.5, 0.5, 1.0), translate(-1.0, 0.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.5, 0.5, 1.0), translate(-2.0, 0.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.5, 0.5, 1.0), translate(-1.0, 1.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.5, 0.5, 1.0), translate(-2.0, 1.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+//
+			posMatrix = multiplymat4(scalevec4(0.25, 0.25, 1.0), translate(-1.0, 1.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.25, 0.25, 1.0), translate(-2.0, 1.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.25, 0.25, 1.0), translate(-1.0, 0.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
+			posMatrix = multiplymat4(scalevec4(0.25, 0.25, 1.0), translate(-2.0, 0.0, 0.0));
+			model = identityMatrix();//multiplymat4(translate(0.0, 0.0, 0.0), scale(15.0));//multiplymat4(translate(50.0, 50.0, 0.0), scale(50.0));
+			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
+
 
 		glUseProgram(instanceShader);
 		drawInstanced(rockVAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos1, rotations, model, scaleArray, theta, lightPosition);
@@ -774,7 +788,7 @@ int main(int argc, char *argv[])
 		//Atmosphere
 		atmo = multiplymat4(translatevec3(translation), scale(fScale*fScaleFactor));
 		//draw(quadCubeVAO, ringShader, qc.vertexNumber, earthTex, atmo, translation, lightPosition, lightSpaceMatrix);
-		drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
+		//drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);
