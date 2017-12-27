@@ -13,40 +13,6 @@ struct sphere planet;
 struct ring planetRing;
 struct quadCube qc, qc2;
 
-typedef struct qTreeNode {
-	vec3 center;
-	vec3 nw;
-	float width;
-} qTreeNode;
-
-typedef struct qTree {
-	qTreeNode *root;
-	unsigned int length;
-} qTree;
-
-GLuint initInstanceBuffer(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
-	GLuint vbo, vao;
-
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertSize+normSize+texSize, NULL, GL_STATIC_DRAW);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertSize, vertices);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize, normSize, normals);
-	glBufferSubData(GL_ARRAY_BUFFER, vertSize+normSize, texSize, texCoords);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(0));
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3*sizeof(GLfloat), BUFFER_OFFSET(vertSize));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2*sizeof(GLfloat), BUFFER_OFFSET(vertSize+normSize));
-	glEnableVertexAttribArray(2);
-
-	glBindVertexArray(0);
-	return vao;
-}
-
 GLuint initQuadShader() {
 	GLuint shader;
 	createShader(&shader, "shaders/quad.vert",
@@ -529,10 +495,6 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 	return NULL;
 }*/
 
-float pointDistance(vec3 u, vec3 v) {
-	return sqrt((v.x - u.x)*(v.x - u.x) + (v.y - u.y)*(v.y - u.y) + (v.z - u.z)*(v.z - u.z));
-}
-
 int main(int argc, char *argv[])
 {
 	struct obj object, ship;
@@ -581,6 +543,7 @@ int main(int argc, char *argv[])
 	GLuint rock2VAO = initObjectBuffer("../assets/rock2.obj", &object);
 	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
 	GLuint subQuadVAO = initSubQuad(10);
+	GLuint subQuadXVAO = initSubQuadX(10);
 
 	GLuint quadCubeVAO = initQuadCube(30);
 
@@ -612,6 +575,9 @@ int main(int argc, char *argv[])
 
 	GLuint positionsVBO;
 	glGenBuffers(1, &positionsVBO);
+
+	GLuint quadtreeVBO;
+	glGenBuffers(1, &quadtreeVBO);
 
 	mat4 model, atmo;
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
@@ -722,173 +688,9 @@ int main(int argc, char *argv[])
 		model = multiplymat4(multiplymat4(translate(-arcBallPos.x, -arcBallPos.y, -arcBallPos.z), rotateX(modelRotationAngle)), scale(0.5));
 		//draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
-		//Flat quad
-		mat4 posMatrix;
-		float qScale = 1.0;
-		float quadrant = 0.0;
-		vec3 t = {0.0, 0.0, 0.0};
-
-		int globalCount = 0;
-		struct qTreeNode qq[128];
-		t.x = 0.0 + quadrant; t.y = 0.0 + quadrant;
-		posMatrix = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(t.x, t.y, 0.0));
-		model = scale(10.0);
-		draw(subQuadVAO, quadShader, 10*10*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
-		qq[globalCount].nw.x = qScale; qq[globalCount].nw.y = qScale; qq[globalCount].nw.z = 0.0;
-		qq[globalCount].width = 2.0;
-		qq[globalCount].center.x = 0.0; qq[globalCount].center.y = 0.0; qq[globalCount].center.z = 0.0;
-
-		int numNodes = 1;
-
-		float width = 2.0;
-		float x0 = 0.0;
-		float y0 = 0.0;
-
-		vec4 camToWorld = getCameraPosition(identityMatrix());
-		vec3 v3CamToWorld = {camToWorld.x, camToWorld.y, camToWorld.z};
-		float splitLOD = 8.0;
-		int terrainMaxLOD = (int)(log(splitLOD)/log(2));
-		float level = 128.0;
-		int lastNodeCount = 0;
-
-		for(int i = 0; i < terrainMaxLOD; i++) {
-			printf("i:%d\n", i);
-			width = qScale;
-			qScale /= 2.0;
-
-			for(int k = lastNodeCount; k < numNodes; k++) {
-				//printf("x0: %f, y0 %f\n", x0, y0);
-				printf("globalCount: %d, lastNodeCount: %d, numNodes: %d, k %d\n", globalCount, lastNodeCount, numNodes, k);
-				vec2 c = {qScale, qScale};
-				if(pointDistance(qq[k].center, v3CamToWorld) < level) {
-					for(int j = 0; j < 4; j++) {
-						globalCount++;
-						t.x = 0.0 + quadrant; t.y = 0.0 + quadrant;
-						posMatrix = multiplymat4(translate(c.x+x0, c.y+y0, 0.0), scalevec4(qScale, qScale, 1.0));
-						//printf("j:%d, c.x+x0: %f, c.y+y0: %f\n", j, c.x+x0, c.y+y0);
-						model = scale(10.0);
-						draw(subQuadVAO, quadShader, 10*10*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
-
-						qq[globalCount].nw.x = c.x+x0; qq[globalCount].nw.y = c.y+y0; qq[globalCount].nw.z = 0.0;
-						qq[globalCount].width = width;
-						qq[globalCount].center.x = (c.x+x0 - qScale)*10.0; qq[globalCount].center.y = (c.y+y0 - qScale)*10.0; qq[globalCount].center.z = -10.0;
-
-						printf("width %f\n", width);
-						printf("qq[globalCount].nw.x: %f, y: %f, z: %f\n", qq[globalCount].nw.x, qq[globalCount].nw.y,qq[globalCount].nw.z);
-						printf("qq[globalCount].center.x: %f, y: %f, z: %f\n", qq[globalCount].center.x, qq[globalCount].center.y,qq[globalCount].center.z);
-
-						//printf("width: %d, c.x: %f, c.y: %f\n", globalCount, c.x, c.y);
-
-						c.y = c.x == qScale ? c.y : c.y - width;
-						c.x = c.y == qScale ? c.x - width : c.x;
-						if(j == 2) {c.x = qScale; c.y = -qScale;}
-					}
-				}
-				//printf("k:%d, qq[%d].nw.x: %f, y: %f, z: %f\n", k, k, qq[k].nw.x, qq[k].nw.y, qq[k].nw.z);
-				x0 = qq[k+1].nw.x;
-				y0 = qq[k+1].nw.y;
-			}
-			lastNodeCount = numNodes;
-			numNodes += globalCount-lastNodeCount+1;
-			//x0 = qq[2].nw.x;
-			//y0 = qq[2].nw.y;
-			level /= 2;
-		}
-
-		/*for(int i = 0; i < globalCount; i++) {
-			printf("%d width: %f\n", i, width);
-			printf("qq[i].nw.y: %f, qq[i].nw.y: %f, qq[i].nw.z: %f\n", qq[i].nw.x, qq[i].nw.y, qq[i].nw.z);
-			printf("qq[i].center.x: %f, qq[i].center.y: %f, qq[i].center.z: %f\n", qq[i].center.x, qq[i].center.y, qq[i].center.z);
-		}*/
-		printf("\n");
-
-
-		/*float quadScale = 10.0;
-		qq[0].center.x = quadScale/2.0; qq[0].center.y = quadScale/2.0; qq[0].center.z = -quadScale;
-		qq[1].center.x = -quadScale/2.0; qq[1].center.y = quadScale/2.0; qq[1].center.z = -quadScale;
-		qq[2].center.x = quadScale/2.0; qq[2].center.y = -quadScale/2.0; qq[2].center.z = -quadScale;
-		qq[3].center.x = -quadScale/2.0; qq[3].center.y = -quadScale/2.0; qq[3].center.z = -quadScale;
-
-		float level = 32.0;
-		int splitLevelCount = 0;
-		int totalSplit = 4;
-		int numSplit = 4;
-
-		for(int i = 0; i < 2; i++) {
-
-			quadrant = 1.0;
-			qScale = qScale / 2.0;
-
-			float step = 2.0;
-			for(int k = splitLevelCount; k < totalSplit; k++) {
-				float negateX = qq[k].center.x > 0.0 ? step*0.0 : step*-1.0;
-				float negateY = qq[k].center.y > 0.0 ? step*0.0 : step*-1.0;
-				vec2 c = {0.0, 0.0};
-				printf("center x: %f, y: %f, z: %f\n", qq[k].center.x, qq[k].center.y, qq[k].center.z);
-				if(pointDistance(qq[k].center, v3CamToWorld) < level) {
-					float nX = negateX == 0.0 ? 1.0 : negateX;
-					float nY = negateY == 0.0 ? 1.0 : negateY;
-					//printf("qq[splitLevelCount].center x: %f, y: %f, z: %f\n", qq[splitLevelCount].center.x, qq[splitLevelCount].center.y, qq[splitLevelCount].center.z);
-					//printf("Div2 x: %f, y: %f\n", (negateX/step)*q[k].center.x/2.0, (negateY/step)*q[k].center.y/2.0);
-
-					for(int j = 0; j < 4; j++) {
-
-						totalSplit++;
-						qq[totalSplit].quadrant.x = c.x+negateX; qq[totalSplit].quadrant.y = c.y+negateY; qq[totalSplit].quadrant.z = 1.0;
-						qq[totalSplit].center.x = qq[k].center.x + ((nX/step)*qq[k].center.x/2.0);
-						qq[totalSplit].center.y = qq[k].center.y + ((nY/step)*qq[k].center.y/2.0);
-						qq[totalSplit].center.z = -10.0;
-
-						qq[j].quadrant.x = c.x+negateX; qq[j].quadrant.y = c.y+negateY; qq[j].quadrant.z = 1.0;
-						printf("totalSplit: %d\n", totalSplit);
-						//printf("quadrant x: %f, y: %f, z: %f\n", q[divideCount].quadrant.x, q[divideCount].quadrant.y, q[divideCount].quadrant.z);
-
-						posMatrix = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(qq[j].quadrant.x, qq[j].quadrant.y, 0.0));
-						model = scale(10.0);
-						draw(subQuadVAO, quadShader, 20*20*6, earthTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
-
-						c.y = fabsf(c.x) == 0.0 ? 0.0 : 1.0;
-						c.x = fabsf(c.y) == 0.0 ? 1.0 : 0.0;
-						if(j == 2) {c.x = 1.0; c.y = 1.0;}
-					}
-				}
-			}
-			//qScale = qScale / 2.0;
-			level /= 2.0;
-			splitLevelCount += 4;
-			//numSplit = totalSplit - splitLevelCount;*/
-
-			/*qScale = 0.5;
-			posMatrix = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(-1.0, 1.0, 0.0));
-			model = scale(10.0);
-			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
-
-			posMatrix = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(-2.0, 1.0, 0.0));
-			model = scale(10.0);
-			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
-
-			posMatrix = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(-1.0, 0.0, 0.0));
-			model = scale(10.0);
-			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);
-
-			posMatrix = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(-2.0, 0.0, 0.0));
-			model = scale(10.0);
-			draw(subQuadVAO, quadShader, 20*20*6, dyWaveTex, dxWaveTex, model, lightPositionXYZ, lightPosition, posMatrix);*/
-
-
-			/*if(fabsf(lenCamToWorld - quadrantTested) < 64.0) {
-				//Add to quadrants;
-				//rootNode = quadrantTested;
-
-
-
-				//need to test all new quadrants of root node
-				splitLOD /= 2;
-				qScale = qScale / 2.0;
-			}
-		}
-		free(q);
-		free(qq);*/
+		//Quadtree
+		traverseQuad(subQuadVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
+		//traverseQuad(subQuadXVAO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
 
 
 		glUseProgram(instanceShader);

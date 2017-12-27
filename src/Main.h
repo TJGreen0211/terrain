@@ -19,7 +19,7 @@
 #include "SimplexNoise.h"
 #include "Obj.h"
 #include "QuadCube.h"
-#include "QuadTree.h"
+#include "Quadtree.h"
 #include "Water.h"
 #include "Common.h"
 #include "Textures.h"
