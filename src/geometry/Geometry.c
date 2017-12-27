@@ -156,9 +156,8 @@ vec3 *generateNormals(vec3 normals[], float *vertices, int size) {
 	return normals;
 }
 
-unsigned int initSubQuad() {
-	int divisions = 20;
-	float fdivisions = 20.0;
+unsigned int initSubQuad(int divisions) {
+	float fdivisions = (float)divisions;
 
 	unsigned int vao;
 	vec3 vertices[divisions*divisions*6];
@@ -203,8 +202,8 @@ unsigned int initSubQuad() {
 	for(int i = 0; i < divisions*divisions*6; i++) {
 		//printf("x:%f, y:%f, z:%f\n", newQuadCube.points[i].x, newQuadCube.points[i].y, newQuadCube.points[i].z);
 		//vec3 temp = normalizevec3(vertices[i]);
-		vertices[i].x = (vertices[i].x+1.0)/2.0;
-		vertices[i].y = (vertices[i].y+1.0)/2.0;
+		//vertices[i].x = (vertices[i].x+1.0)/2.0;
+		//vertices[i].y = (vertices[i].y+1.0)/2.0;
 		//vertices[i].z = (vertices[i].z+1.0)/2.0;
 	}
 
