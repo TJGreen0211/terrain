@@ -23,9 +23,8 @@ vec3 *generateTangents(int vertexNumber, vec3 *points, vec3 *tangent);
 vec3 *generateSmoothNormals(vec3 vna[], vec3 *vertices, vec3 *normals, int size);
 vec3 *generateNormals(vec3 normals[], float *vertices, int size);
 unsigned int initQuadVAO();
-unsigned int initSubQuad(int divisions);
-unsigned int initSubQuadX(int divisions);
-unsigned int initSubQuadY(int divisions);
-unsigned int initSubQuadZ(int divisions);
+unsigned int initSubQuadX(int divisions, int reverseOrder);
+unsigned int initSubQuadY(int divisions, int reverseOrder);
+unsigned int initSubQuadZ(int divisions, int reverseOrder);
 
 #endif

@@ -49,7 +49,7 @@ static void drawTree(GLuint vao, GLuint vbo, GLuint shader, int vertices, GLuint
 	glBindTexture(GL_TEXTURE_2D, normal);
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
 	//glDrawArrays(GL_LINES, 0, vertices);
-	glDrawArraysInstanced(GL_TRIANGLES, 0, vertices, drawAmount);
+	glDrawArraysInstanced(GL_LINES, 0, vertices, drawAmount);
 	glBindVertexArray(0);
 	glEnable(GL_CULL_FACE);
 	//glCullFace(GL_BACK);
@@ -62,19 +62,21 @@ static float pointDistance(vec3 u, vec3 v) {
 
 void traverseQuad(int *order, GLuint VAO, GLuint VBO, GLuint shader, vec3 position, vec4 lightPosition, GLuint texture1, GLuint texture2, GLuint depthMap, float negate) {
 	//Flat quad
-	float scaleSize = 10.0;
+	float scaleSize = 30.0;
 	int globalCount = 0;
 	mat4 model;
 	float qScale = 1.0;
 	float quadrant = 0.0;
 
-	//int order[3] = {0, 1, 2};
 	float values[3];
 	float scaleVals[3];
 	float centerVals[3];
+	float offsetVals[3];
 
+	values[0] = quadrant; values[1] = quadrant; values[2] = 0.0;
+	scaleVals[0] = qScale; scaleVals[1] = qScale; scaleVals[2] = negate*1.0;
 	struct qTreeNode qq[512];
-	pos[globalCount] = multiplymat4(scalevec4(qScale, qScale, 1.0), translate(quadrant, quadrant, 0.0));
+	pos[globalCount] = multiplymat4(translate(values[order[0]], values[order[1]], values[order[2]]), scalevec4(scaleVals[order[0]], scaleVals[order[1]], scaleVals[order[2]]));
 	model = scale(scaleSize);
 	qq[globalCount].nw.x = qScale; qq[globalCount].nw.y = qScale; qq[globalCount].nw.z = 0.0;
 	qq[globalCount].width = 2.0;
@@ -85,6 +87,10 @@ void traverseQuad(int *order, GLuint VAO, GLuint VBO, GLuint shader, vec3 positi
 	float width = 2.0;
 	float x0 = 0.0;
 	float y0 = 0.0;
+
+	offsetVals[0] = 0.0;
+	offsetVals[1] = 0.0;
+	offsetVals[2] = 0.0;
 
 	vec4 camToWorld = getCameraPosition(identityMatrix());
 	vec3 v3CamToWorld = {camToWorld.x, camToWorld.y, camToWorld.z};
@@ -101,8 +107,10 @@ void traverseQuad(int *order, GLuint VAO, GLuint VBO, GLuint shader, vec3 positi
 		for(int k = lastNodeCount; k < numNodes; k++) {
 			//printf("x0: %f, y0 %f\n", x0, y0);
 			//printf("globalCount: %d, lastNodeCount: %d, numNodes: %d, k %d\n", globalCount, lastNodeCount, numNodes, k);
+			//printf("k: %d\n", k);
 			vec2 c = {qScale, qScale};
 			if(pointDistance(qq[k].center, v3CamToWorld) < level) {
+				pos[k] = scale(0.0);
 				for(int j = 0; j < 4; j++) {
 					globalCount++;
 
@@ -110,32 +118,34 @@ void traverseQuad(int *order, GLuint VAO, GLuint VBO, GLuint shader, vec3 positi
 					scaleVals[0] = qScale; scaleVals[1] = qScale; scaleVals[2] = negate*1.0;
 
 					pos[globalCount] = multiplymat4(translate(values[order[0]], values[order[1]], values[order[2]]), scalevec4(scaleVals[order[0]], scaleVals[order[1]], scaleVals[order[2]]));
-					//printf("j:%d, c.x+x0: %f, c.y+y0: %f\n", j, c.x+x0, c.y+y0);
 					model = scale(scaleSize);
 
 					qq[globalCount].nw.x = values[order[0]]; qq[globalCount].nw.y = values[order[1]]; qq[globalCount].nw.z = values[order[2]];
 					qq[globalCount].width = width;
-					qq[globalCount].center.x = (c.x+x0 - qScale); qq[globalCount].center.y = (c.y+y0 - qScale); qq[globalCount].center.z = 0.0;
-					vec3 cc = normalizevec3(qq[globalCount].center);
-					centerVals[0] = cc.x*scaleSize; centerVals[1] = c.y*scaleSize; centerVals[2] = -scaleSize;
+					//qq[globalCount].center.x = (c.x+x0 - qScale); qq[globalCount].center.y = (c.y+y0 - qScale); qq[globalCount].center.z = 0.0;
+					vec3 cc = {values[0], values[1], values[2]};
+					cc = normalizevec3(cc);
+					//vec3 cc = qq[globalCount].center;
+					centerVals[0] = cc.x*scaleSize; centerVals[1] = cc.y*scaleSize; centerVals[2] = -negate*scaleSize;
 					qq[globalCount].center.x = centerVals[order[0]]; qq[globalCount].center.y = centerVals[order[1]]; qq[globalCount].center.z = centerVals[order[2]];
-
+					//printf("nw.x: %f, y: %f, z: %f\n", qq[globalCount].nw.x, qq[globalCount].nw.y, qq[globalCount].nw.z);
+					printf("center.x: %f, y: %f, z: %f\n", qq[globalCount].center.x, qq[globalCount].center.y, qq[globalCount].center.z);
 
 					c.y = c.x == qScale ? c.y : c.y - width;
 					c.x = c.y == qScale ? c.x - width : c.x;
 					if(j == 2) {c.x = qScale; c.y = -qScale;}
 				}
 			}
-			//printf("k:%d, qq[%d].nw.x: %f, y: %f, z: %f\n", k, k, qq[k].nw.x, qq[k].nw.y, qq[k].nw.z);
-			x0 = qq[k+1].nw.x;
-			y0 = qq[k+1].nw.y;
+			offsetVals[order[0]] = qq[k+1].nw.x;
+			offsetVals[order[1]] = qq[k+1].nw.y;
+			offsetVals[order[2]] = qq[k+1].nw.z;
+			x0 = offsetVals[0];
+			y0 = offsetVals[1];
+			//printf("offsetVals[0]: %f, offsetVals[1]: %f, offsetVals[2]: %f\n", offsetVals[0], offsetVals[1], offsetVals[2]);
 		}
 		lastNodeCount = numNodes;
 		numNodes += globalCount-lastNodeCount+1;
-		//x0 = qq[2].nw.x;
-		//y0 = qq[2].nw.y;
-		level /= 3.0;
+		level /= 2.0;
 	}
-	//printf("globalCount %d\n", globalCount);
 	drawTree(VAO, VBO, shader, 10*10*6, texture1, texture2, depthMap, model, position, lightPosition, globalCount+1);
 }

@@ -156,8 +156,74 @@ vec3 *generateNormals(vec3 normals[], float *vertices, int size) {
 	return normals;
 }
 
-unsigned int initSubQuadY(int divisions) {
+unsigned int initSubQuadX(int divisions, int reverseOrder) {
 	float fdivisions = (float)divisions;
+
+	vec3 face[4];
+	int order[6];
+	if(reverseOrder) {
+		order[0] = 2; order[1] = 1; order[2] = 0; order[3] = 1; order[4] = 3; order[5] = 0;
+	}
+	else {
+		order[0] = 0; order[1] = 1; order[2] = 2; order[3] = 0; order[4] = 3; order[5] = 1;
+	}
+
+	unsigned int vao;
+	vec3 vertices[divisions*divisions*6];
+	vec2 texCoords[divisions*divisions*6];
+
+	vec3 start = {1.0, 1.0, -1.0};
+	float offset = 2.0/(fdivisions);
+	int index = 0;
+	for(int i = 0; i < divisions; i++) {
+		start.x = 1.0;
+		for(int j = 0; j < divisions; j++) {
+			face[0].x = start.x; face[0].y = start.y; face[0].z = start.z;
+			face[1].x = start.x-offset; face[1].y = start.y-offset; face[1].z = start.z;
+			face[2].x = start.x; face[2].y = start.y-offset; face[2].z = start.z;
+			face[3].x = start.x-offset; face[3].y = start.y; face[3].z = start.z;
+
+			vertices[index++] = face[order[0]];
+			texCoords[index-1].x = (face[order[0]].x+1.0);
+			texCoords[index-1].y = (face[order[0]].y+1.0);
+			vertices[index++] = face[order[1]];
+			texCoords[index-1].x = (face[order[1]].x+1.0);
+			texCoords[index-1].y = (face[order[1]].y+1.0);
+			vertices[index++] = face[order[2]];
+			texCoords[index-1].x = (face[order[2]].x+1.0);
+			texCoords[index-1].y = (face[order[2]].y+1.0);
+
+			vertices[index++] = face[order[3]];
+			texCoords[index-1].x = (face[order[3]].x+1.0);
+			texCoords[index-1].y = (face[order[3]].y+1.0);
+			vertices[index++] = face[order[4]];
+			texCoords[index-1].x = (face[order[4]].x+1.0);
+			texCoords[index-1].y = (face[order[4]].y+1.0);
+			vertices[index++] = face[order[5]];
+			texCoords[index-1].x = (face[order[5]].x+1.0);
+			texCoords[index-1].y = (face[order[5]].y+1.0);
+
+			start.x = start.x - offset;
+		}
+		start.y -= offset;
+	}
+
+    //*normArray = *generateNormals(normArray, vertices, numVertices);
+    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
+    return vao;
+}
+
+unsigned int initSubQuadY(int divisions, int reverseOrder) {
+	float fdivisions = (float)divisions;
+
+	vec3 face[4];
+	int order[6];
+	if(reverseOrder) {
+		order[0] = 2; order[1] = 1; order[2] = 0; order[3] = 1; order[4] = 3; order[5] = 0;
+	}
+	else {
+		order[0] = 0; order[1] = 1; order[2] = 2; order[3] = 0; order[4] = 3; order[5] = 1;
+	}
 
 	unsigned int vao;
 	vec3 vertices[divisions*divisions*6];
@@ -169,30 +235,30 @@ unsigned int initSubQuadY(int divisions) {
 	for(int i = 0; i < divisions; i++) {
 		start.x = 1.0;
 		for(int j = 0; j < divisions; j++) {
-			vec3 face0 = {start.x, 		  start.y, start.z};
-			vec3 face1 = {start.x-offset, start.y, start.z-offset};
-			vec3 face2 = {start.x,        start.y, start.z-offset};
-			vec3 face3 = {start.x-offset, start.y, start.z};
+			face[0].x = start.x; face[0].y = start.y; face[0].z = start.z;
+			face[1].x = start.x-offset; face[1].y = start.y; face[1].z = start.z-offset;
+			face[2].x = start.x; face[2].y = start.y; face[2].z = start.z-offset;
+			face[3].x = start.x-offset; face[3].y = start.y; face[3].z = start.z;
 
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
-			vertices[index++] = face2;
-			texCoords[index-1].x = (face2.x+1.0);
-			texCoords[index-1].y = (face2.y+1.0);
+			vertices[index++] = face[order[0]];
+			texCoords[index-1].x = (face[order[0]].x+1.0);
+			texCoords[index-1].y = (face[order[0]].y+1.0);
+			vertices[index++] = face[order[1]];
+			texCoords[index-1].x = (face[order[1]].x+1.0);
+			texCoords[index-1].y = (face[order[1]].y+1.0);
+			vertices[index++] = face[order[2]];
+			texCoords[index-1].x = (face[order[2]].x+1.0);
+			texCoords[index-1].y = (face[order[2]].y+1.0);
 
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-			vertices[index++] = face3;
-			texCoords[index-1].x = (face3.x+1.0);
-			texCoords[index-1].y = (face3.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
+			vertices[index++] = face[order[3]];
+			texCoords[index-1].x = (face[order[3]].x+1.0);
+			texCoords[index-1].y = (face[order[3]].y+1.0);
+			vertices[index++] = face[order[4]];
+			texCoords[index-1].x = (face[order[4]].x+1.0);
+			texCoords[index-1].y = (face[order[4]].y+1.0);
+			vertices[index++] = face[order[5]];
+			texCoords[index-1].x = (face[order[5]].x+1.0);
+			texCoords[index-1].y = (face[order[5]].y+1.0);
 
 			start.x = start.x - offset;
 		}
@@ -204,8 +270,17 @@ unsigned int initSubQuadY(int divisions) {
     return vao;
 }
 
-unsigned int initSubQuadZ(int divisions) {
+unsigned int initSubQuadZ(int divisions, int reverseOrder) {
 	float fdivisions = (float)divisions;
+
+	vec3 face[4];
+	int order[6];
+	if(reverseOrder) {
+		order[0] = 2; order[1] = 1; order[2] = 0; order[3] = 1; order[4] = 3; order[5] = 0;
+	}
+	else {
+		order[0] = 0; order[1] = 1; order[2] = 2; order[3] = 0; order[4] = 3; order[5] = 1;
+	}
 
 	unsigned int vao;
 	vec3 vertices[divisions*divisions*6];
@@ -217,30 +292,31 @@ unsigned int initSubQuadZ(int divisions) {
 	for(int i = 0; i < divisions; i++) {
 		start.z = 1.0;
 		for(int j = 0; j < divisions; j++) {
-			vec3 face0 = {start.x, start.y, 	   start.z};
-			vec3 face1 = {start.x, start.y-offset, start.z-offset};
-			vec3 face2 = {start.x, start.y-offset, start.z};
-			vec3 face3 = {start.x, start.y, 	   start.z-offset};
 
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
-			vertices[index++] = face2;
-			texCoords[index-1].x = (face2.x+1.0);
-			texCoords[index-1].y = (face2.y+1.0);
+			face[0].x = start.x; face[0].y = start.y; face[0].z = start.z;
+			face[1].x = start.x; face[1].y = start.y-offset; face[1].z = start.z-offset;
+			face[2].x = start.x; face[2].y = start.y-offset; face[2].z = start.z;
+			face[3].x = start.x; face[3].y = start.y; face[3].z = start.z-offset;
 
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-			vertices[index++] = face3;
-			texCoords[index-1].x = (face3.x+1.0);
-			texCoords[index-1].y = (face3.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
+			vertices[index++] = face[order[0]];
+			texCoords[index-1].x = (face[order[0]].x+1.0);
+			texCoords[index-1].y = (face[order[0]].y+1.0);
+			vertices[index++] = face[order[1]];
+			texCoords[index-1].x = (face[order[1]].x+1.0);
+			texCoords[index-1].y = (face[order[1]].y+1.0);
+			vertices[index++] = face[order[2]];
+			texCoords[index-1].x = (face[order[2]].x+1.0);
+			texCoords[index-1].y = (face[order[2]].y+1.0);
+
+			vertices[index++] = face[order[3]];
+			texCoords[index-1].x = (face[order[3]].x+1.0);
+			texCoords[index-1].y = (face[order[3]].y+1.0);
+			vertices[index++] = face[order[4]];
+			texCoords[index-1].x = (face[order[4]].x+1.0);
+			texCoords[index-1].y = (face[order[4]].y+1.0);
+			vertices[index++] = face[order[5]];
+			texCoords[index-1].x = (face[order[5]].x+1.0);
+			texCoords[index-1].y = (face[order[5]].y+1.0);
 
 			start.z = start.z - offset;
 		}
@@ -252,101 +328,6 @@ unsigned int initSubQuadZ(int divisions) {
     return vao;
 }
 
-unsigned int initSubQuad(int divisions) {
-	float fdivisions = (float)divisions;
-
-	unsigned int vao;
-	vec3 vertices[divisions*divisions*6];
-	vec2 texCoords[divisions*divisions*6];
-
-	vec3 start = {1.0, 1.0, -1.0};
-	float offset = 2.0/(fdivisions);
-	int index = 0;
-	for(int i = 0; i < divisions; i++) {
-		start.x = 1.0;
-		for(int j = 0; j < divisions; j++) {
-			vec3 face0 = {start.x,   	  start.y,   start.z};
-			vec3 face1 = {start.x-offset, start.y-offset, start.z};
-			vec3 face2 = {start.x,        start.y-offset, start.z};
-			vec3 face3 = {start.x-offset, start.y,   start.z};
-
-			vertices[index++] = face2;
-			texCoords[index-1].x = (face2.x+1.0);
-			texCoords[index-1].y = (face2.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
-			vertices[index++] = face3;
-			texCoords[index-1].x = (face3.x+1.0);
-			texCoords[index-1].y = (face3.y+1.0);
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-
-			start.x = start.x - offset;
-		}
-		start.y -= offset;
-	}
-
-    //*normArray = *generateNormals(normArray, vertices, numVertices);
-    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
-    return vao;
-}
-
-unsigned int initSubQuadX(int divisions) {
-	float fdivisions = (float)divisions;
-
-	unsigned int vao;
-	vec3 vertices[divisions*divisions*6];
-	vec2 texCoords[divisions*divisions*6];
-
-	vec3 start = {1.0, 1.0, -1.0};
-	float offset = 2.0/(fdivisions);
-	int index = 0;
-	for(int i = 0; i < divisions; i++) {
-		start.x = 1.0;
-		for(int j = 0; j < divisions; j++) {
-			vec3 face0 = {start.x,   	  start.y,   start.z};
-			vec3 face1 = {start.x-offset, start.y-offset, start.z};
-			vec3 face2 = {start.x,        start.y-offset, start.z};
-			vec3 face3 = {start.x-offset, start.y,   start.z};
-
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
-			vertices[index++] = face2;
-			texCoords[index-1].x = (face2.x+1.0);
-			texCoords[index-1].y = (face2.y+1.0);
-
-			vertices[index++] = face0;
-			texCoords[index-1].x = (face0.x+1.0);
-			texCoords[index-1].y = (face0.y+1.0);
-			vertices[index++] = face3;
-			texCoords[index-1].x = (face3.x+1.0);
-			texCoords[index-1].y = (face3.y+1.0);
-			vertices[index++] = face1;
-			texCoords[index-1].x = (face1.x+1.0);
-			texCoords[index-1].y = (face1.y+1.0);
-
-			start.x = start.x - offset;
-		}
-		start.y -= offset;
-	}
-
-    //*normArray = *generateNormals(normArray, vertices, numVertices);
-    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
-    return vao;
-}
 
 unsigned int initQuadVAO() {
 	unsigned int vao;

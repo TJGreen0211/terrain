@@ -542,10 +542,12 @@ int main(int argc, char *argv[])
 	GLuint rockVAO = initObjectBuffer("../assets/rock.obj", &object);
 	GLuint rock2VAO = initObjectBuffer("../assets/rock2.obj", &object);
 	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
-	GLuint subQuadVAO = initSubQuad(10);
-	GLuint subQuadXVAO = initSubQuadX(10);
-	GLuint subQuadYVAO = initSubQuadY(10);
-	GLuint subQuadZVAO = initSubQuadZ(10);
+	GLuint sphereFrontXVAO = initSubQuadX(10, 0);
+	GLuint sphereBackXVAO = initSubQuadX(10, 1);
+	GLuint sphereFrontYVAO = initSubQuadY(10, 0);
+	GLuint sphereBackYVAO = initSubQuadY(10, 1);
+	GLuint sphereFrontZVAO = initSubQuadZ(10, 0);
+	GLuint sphereBackZVAO = initSubQuadZ(10, 1);
 
 	GLuint quadCubeVAO = initQuadCube(30);
 
@@ -694,26 +696,21 @@ int main(int argc, char *argv[])
 		int order[3];
 		float negate = 1.0;
 		order[0] = 0; order[1] = 1; order[2] = 2;
-		traverseQuad(order, subQuadVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(order, sphereFrontXVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(order, subQuadVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap , negate);
+		traverseQuad(order, sphereBackXVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap , negate);
 
 		negate = 1.0;
 		order[0] = 0; order[1] = 2; order[2] = 1;
-		traverseQuad(order, subQuadYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(order, sphereFrontYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(order, subQuadYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(order, sphereBackYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
 
 		negate = 1.0;
 		order[0] = 2; order[1] = 0; order[2] = 1;
-		traverseQuad(order, subQuadZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(order, sphereFrontZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(order, subQuadZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
-
-
-		//traverseQuadZ(face, subQuadZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
-		//face.x = -1.0; face.w = -1.0;
-		//traverseQuad(face, subQuadXVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
+		traverseQuad(order, sphereBackZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
 
 		//Ring
 		glUseProgram(instanceShader);
