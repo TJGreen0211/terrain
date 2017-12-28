@@ -25,5 +25,7 @@ vec3 *generateNormals(vec3 normals[], float *vertices, int size);
 unsigned int initQuadVAO();
 unsigned int initSubQuad(int divisions);
 unsigned int initSubQuadX(int divisions);
+unsigned int initSubQuadY(int divisions);
+unsigned int initSubQuadZ(int divisions);
 
 #endif

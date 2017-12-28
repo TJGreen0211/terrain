@@ -544,6 +544,8 @@ int main(int argc, char *argv[])
 	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
 	GLuint subQuadVAO = initSubQuad(10);
 	GLuint subQuadXVAO = initSubQuadX(10);
+	GLuint subQuadYVAO = initSubQuadY(10);
+	GLuint subQuadZVAO = initSubQuadZ(10);
 
 	GLuint quadCubeVAO = initQuadCube(30);
 
@@ -689,10 +691,31 @@ int main(int argc, char *argv[])
 		//draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Quadtree
-		traverseQuad(subQuadVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
-		//traverseQuad(subQuadXVAO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
+		int order[3];
+		float negate = 1.0;
+		order[0] = 0; order[1] = 1; order[2] = 2;
+		traverseQuad(order, subQuadVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		negate = -1.0;
+		traverseQuad(order, subQuadVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap , negate);
+
+		negate = 1.0;
+		order[0] = 0; order[1] = 2; order[2] = 1;
+		traverseQuad(order, subQuadYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		negate = -1.0;
+		traverseQuad(order, subQuadYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+
+		negate = 1.0;
+		order[0] = 2; order[1] = 0; order[2] = 1;
+		traverseQuad(order, subQuadZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		negate = -1.0;
+		traverseQuad(order, subQuadZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
 
 
+		//traverseQuadZ(face, subQuadZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
+		//face.x = -1.0; face.w = -1.0;
+		//traverseQuad(face, subQuadXVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap);
+
+		//Ring
 		glUseProgram(instanceShader);
 		drawInstanced(rockVAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos1, rotations, model, scaleArray, theta, lightPosition);
 		drawInstanced(rock2VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos2, rotations, model, scaleArray, theta, lightPosition);
