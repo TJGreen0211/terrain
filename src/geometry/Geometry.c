@@ -110,6 +110,7 @@ vec3 *generateTangents(int vertexNumber, vec3 *points, vec3 *tangent)
 		deltaUV2.x = points[i+2].x - points[i].x;
 		deltaUV2.y = points[i+2].y - points[i].y;
 
+		//float fDiv = (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y)
 		float f = 1.0 / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
 		tangent[i].x = f  * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
 		tangent[i].y = f  * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
@@ -209,7 +210,16 @@ unsigned int initSubQuadX(int divisions, int reverseOrder) {
 	}
 
     //*normArray = *generateNormals(normArray, vertices, numVertices);
-    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
+	vec3 tangent[index];
+	//printf("sizeof(vertices): %lu\n\n", index);
+	vec3 vertNorms[index];
+	for(int i = 0; i < index; i++) {
+		vertNorms[i] = normalizevec3(vertices[i]);
+		printf("x: %f, y: %f, z: %f\n", vertices[i].x, vertices[i].y, vertices[i].z);
+	}
+	*tangent = *generateTangents(index, vertNorms, tangent);
+    //vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
+	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
     return vao;
 }
 
@@ -242,32 +252,41 @@ unsigned int initSubQuadY(int divisions, int reverseOrder) {
 
 			vertices[index++] = face[order[0]];
 			texCoords[index-1].x = (face[order[0]].x+1.0);
-			texCoords[index-1].y = (face[order[0]].y+1.0);
+			texCoords[index-1].y = (face[order[0]].z+1.0);
 			vertices[index++] = face[order[1]];
 			texCoords[index-1].x = (face[order[1]].x+1.0);
-			texCoords[index-1].y = (face[order[1]].y+1.0);
+			texCoords[index-1].y = (face[order[1]].z+1.0);
 			vertices[index++] = face[order[2]];
 			texCoords[index-1].x = (face[order[2]].x+1.0);
-			texCoords[index-1].y = (face[order[2]].y+1.0);
+			texCoords[index-1].y = (face[order[2]].z+1.0);
 
 			vertices[index++] = face[order[3]];
 			texCoords[index-1].x = (face[order[3]].x+1.0);
-			texCoords[index-1].y = (face[order[3]].y+1.0);
+			texCoords[index-1].y = (face[order[3]].z+1.0);
 			vertices[index++] = face[order[4]];
 			texCoords[index-1].x = (face[order[4]].x+1.0);
-			texCoords[index-1].y = (face[order[4]].y+1.0);
+			texCoords[index-1].y = (face[order[4]].z+1.0);
 			vertices[index++] = face[order[5]];
 			texCoords[index-1].x = (face[order[5]].x+1.0);
-			texCoords[index-1].y = (face[order[5]].y+1.0);
+			texCoords[index-1].y = (face[order[5]].z+1.0);
 
 			start.x = start.x - offset;
 		}
 		start.z -= offset;
 	}
 
-    //*normArray = *generateNormals(normArray, vertices, numVertices);
-    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
-    return vao;
+	vec3 tangent[index];
+	vec3 vertNorms[index];
+	for(int i = 0; i < index; i++) {
+		vertNorms[i] = normalizevec3(vertices[i]);
+		printf("x: %f, y: %f, z: %f\n", vertices[i].x, vertices[i].y, vertices[i].z);
+	}
+	*tangent = *generateTangents(index, vertNorms, tangent);
+	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	for(int i = 0; i < index; i++) {
+		//printf("x: %f, y: %f, z: %f\n", tangent[i].x, tangent[i].y, tangent[i].z);
+	}
+	return vao;
 }
 
 unsigned int initSubQuadZ(int divisions, int reverseOrder) {
@@ -299,32 +318,38 @@ unsigned int initSubQuadZ(int divisions, int reverseOrder) {
 			face[3].x = start.x; face[3].y = start.y; face[3].z = start.z-offset;
 
 			vertices[index++] = face[order[0]];
-			texCoords[index-1].x = (face[order[0]].x+1.0);
-			texCoords[index-1].y = (face[order[0]].y+1.0);
+			texCoords[index-1].x = (face[order[0]].y+1.0);
+			texCoords[index-1].y = (face[order[0]].z+1.0);
 			vertices[index++] = face[order[1]];
-			texCoords[index-1].x = (face[order[1]].x+1.0);
-			texCoords[index-1].y = (face[order[1]].y+1.0);
+			texCoords[index-1].x = (face[order[1]].y+1.0);
+			texCoords[index-1].y = (face[order[1]].z+1.0);
 			vertices[index++] = face[order[2]];
-			texCoords[index-1].x = (face[order[2]].x+1.0);
-			texCoords[index-1].y = (face[order[2]].y+1.0);
+			texCoords[index-1].x = (face[order[2]].y+1.0);
+			texCoords[index-1].y = (face[order[2]].z+1.0);
 
 			vertices[index++] = face[order[3]];
-			texCoords[index-1].x = (face[order[3]].x+1.0);
-			texCoords[index-1].y = (face[order[3]].y+1.0);
+			texCoords[index-1].x = (face[order[3]].y+1.0);
+			texCoords[index-1].y = (face[order[3]].z+1.0);
 			vertices[index++] = face[order[4]];
-			texCoords[index-1].x = (face[order[4]].x+1.0);
-			texCoords[index-1].y = (face[order[4]].y+1.0);
+			texCoords[index-1].x = (face[order[4]].y+1.0);
+			texCoords[index-1].y = (face[order[4]].z+1.0);
 			vertices[index++] = face[order[5]];
-			texCoords[index-1].x = (face[order[5]].x+1.0);
-			texCoords[index-1].y = (face[order[5]].y+1.0);
+			texCoords[index-1].x = (face[order[5]].y+1.0);
+			texCoords[index-1].y = (face[order[5]].z+1.0);
 
 			start.z = start.z - offset;
 		}
 		start.y -= offset;
 	}
 
-    //*normArray = *generateNormals(normArray, vertices, numVertices);
-    vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
+	vec3 tangent[index];
+	vec3 vertNorms[index];
+	for(int i = 0; i < index; i++) {
+		vertNorms[i] = normalizevec3(vertices[i]);
+		printf("x: %f, y: %f, z: %f\n", vertices[i].x, vertices[i].y, vertices[i].z);
+	}
+	*tangent = *generateTangents(index, vertNorms, tangent);
+	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
     return vao;
 }
 

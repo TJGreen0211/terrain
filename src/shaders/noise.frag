@@ -100,7 +100,7 @@ void main() {
 	else {
 		//n = snoise(gl_FragCoord.xy*scale);
 		float nx = gl_FragCoord.x/1024.0 * scale;
-		float ny = gl_FragCoord.y/512.0 * scale;
+		float ny = gl_FragCoord.y/1024.0 * scale;
 
 		n = 1 * snoise(vec2(nx, ny)) +
 			0.5 * snoise(2.0 * vec2(nx, ny)) +

@@ -20,6 +20,24 @@ GLuint initQuadShader() {
 	return shader;
 }
 
+GLuint initPlanetShader() {
+	GLuint shader;
+	GLuint vertShader = LoadShader("shaders/planet.vert", GL_VERTEX_SHADER);
+	GLuint tcshShader = LoadShader("shaders/planet.tcsh", GL_TESS_CONTROL_SHADER);
+	GLuint teshShader = LoadShader("shaders/planet.tesh", GL_TESS_EVALUATION_SHADER);
+	//GLuint geomShader = LoadShader("shaders/tess.geom", GL_GEOMETRY_SHADER);
+	GLuint fragShader = LoadShader("shaders/planet.frag", GL_FRAGMENT_SHADER);
+	shader = glCreateProgram();
+	glAttachShader(shader, vertShader);
+	glAttachShader(shader, tcshShader);
+	glAttachShader(shader, teshShader);
+	//glAttachShader(shader, geomShader);
+	glAttachShader(shader, fragShader);
+	glLinkProgram(shader);
+
+	return shader;
+}
+
 GLuint initInstanceShader() {
 	GLuint shader;
 	createShader(&shader, "shaders/instance.vert",
@@ -348,7 +366,7 @@ void draw(GLuint vao, GLuint shader, int vertices, GLuint texture, GLuint normal
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, normal);
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
-	glDrawArrays(GL_LINES, 0, vertices);
+	glDrawArrays(GL_TRIANGLES, 0, vertices);
 	glBindVertexArray(0);
 	glEnable(GL_CULL_FACE);
 	//glCullFace(GL_BACK);
@@ -528,6 +546,7 @@ int main(int argc, char *argv[])
 	GLuint fboShader = initFramebufferShader();
 	GLuint instanceShader = initInstanceShader();
 	GLuint quadShader = initQuadShader();
+	GLuint planetShader = initPlanetShader();
 
 	GLuint earthTex = loadTexture("../assets/earth.jpg", 0);
 	GLuint moonTex = loadTexture("../assets/moon.jpg", 0);
@@ -552,8 +571,8 @@ int main(int argc, char *argv[])
 	GLuint quadCubeVAO = initQuadCube(30);
 
 	GLuint depthbuffer = initDepthbuffer();
-	GLuint framebuffer = initFramebuffer(&textureColorBuffer);
-	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture);
+	GLuint framebuffer = initFramebuffer(&textureColorBuffer, 1024, 1024);
+	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture, 512, 512);
 	GLuint quadVAO = initQuadVAO();
 
 	glEnable(GL_DEPTH_TEST);
@@ -583,12 +602,15 @@ int main(int argc, char *argv[])
 	GLuint quadtreeVBO;
 	glGenBuffers(1, &quadtreeVBO);
 
+	GLuint sizeVBO;
+	glGenBuffers(1, &sizeVBO);
+
 	mat4 model, atmo;
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
 	float deltaTime = 0.0;
 	float lastFrame = 0.0;
-	vec3 translation = {650.0, 0.0, 0.0};
+	vec3 translation = {165.0, 0.0, 0.0};
 	mat4 lightProjection = ortho(-400.0, 400.0, -400.0, 400.0, zNear, zFar);
 	//mat4 lightProjection = perspective(90.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 
@@ -612,15 +634,17 @@ int main(int argc, char *argv[])
 			fragTime = getFileLastChangeTime(fragCheck);
 		}
 
+		generateWaves(256, &dxWaveTex, &dyWaveTex, &dzWaveTex);
+
 		clock_t start,end;
 		float time_spent;
 		start=clock();
-		generateWaves(256, &dxWaveTex, &dyWaveTex, &dzWaveTex);
+		//for(int i = 0; i <100;i++) {
+		generateNoiseTexture(framebuffer, 0);
 		end=clock();
 		time_spent=(((float)end - (float)start) / 1000000.0F );
 		//printf("\nSystem time is at %f\n seconds", time_spent);
 
-		generateNoiseTexture(framebuffer, 0);
 		generateNoiseTexture(sunFramebuffer, 1);
 		theta += 0.5;
 
@@ -684,8 +708,8 @@ int main(int argc, char *argv[])
 		model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(lightPositionXYZ)), scale(250.0)),rotateX(90.0));
 		draw(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 		//FBO Visualizer
-		model = multiplymat4(translate(-75.0, 25.0, 0.0), scale(10.0));
-		draw(quadVAO, fboShader, 6, textureColorBuffer, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
+		//model = multiplymat4(translate(-75.0, 25.0, 0.0), scale(10.0));
+		//draw(quadVAO, fboShader, 6, textureColorBuffer, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
 		//Object
 		vec3 arcBallPos = getCamera();
 		float modelRotationAngle = 0.0;
@@ -693,24 +717,28 @@ int main(int argc, char *argv[])
 		//draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Quadtree
+		//matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
+		//model = multiplymat4(translatevec3(translation), scale(fScale));
+		//mat4 m = multiplymat4(model,matR);
+		model = multiplymat4(scale(30.0), matR);
 		int order[3];
 		float negate = 1.0;
 		order[0] = 0; order[1] = 1; order[2] = 2;
-		traverseQuad(order, sphereFrontXVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontXVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(order, sphereBackXVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap , negate);
+		traverseQuad(model, order, sphereBackXVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap , negate);
 
 		negate = 1.0;
 		order[0] = 0; order[1] = 2; order[2] = 1;
-		traverseQuad(order, sphereFrontYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontYVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(order, sphereBackYVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereBackYVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 
 		negate = 1.0;
 		order[0] = 2; order[1] = 0; order[2] = 1;
-		traverseQuad(order, sphereFrontZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(order, sphereBackZVAO, quadtreeVBO, quadShader, lightPositionXYZ, lightPosition, dyWaveTex, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 
 		//Ring
 		glUseProgram(instanceShader);
