@@ -215,7 +215,6 @@ unsigned int initSubQuadX(int divisions, int reverseOrder) {
 	vec3 vertNorms[index];
 	for(int i = 0; i < index; i++) {
 		vertNorms[i] = normalizevec3(vertices[i]);
-		printf("x: %f, y: %f, z: %f\n", vertices[i].x, vertices[i].y, vertices[i].z);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
     //vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
@@ -279,13 +278,9 @@ unsigned int initSubQuadY(int divisions, int reverseOrder) {
 	vec3 vertNorms[index];
 	for(int i = 0; i < index; i++) {
 		vertNorms[i] = normalizevec3(vertices[i]);
-		printf("x: %f, y: %f, z: %f\n", vertices[i].x, vertices[i].y, vertices[i].z);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
 	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
-	for(int i = 0; i < index; i++) {
-		//printf("x: %f, y: %f, z: %f\n", tangent[i].x, tangent[i].y, tangent[i].z);
-	}
 	return vao;
 }
 
@@ -346,7 +341,6 @@ unsigned int initSubQuadZ(int divisions, int reverseOrder) {
 	vec3 vertNorms[index];
 	for(int i = 0; i < index; i++) {
 		vertNorms[i] = normalizevec3(vertices[i]);
-		printf("x: %f, y: %f, z: %f\n", vertices[i].x, vertices[i].y, vertices[i].z);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
 	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));

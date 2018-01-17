@@ -56,8 +56,8 @@ static void drawTree(GLuint vao, GLuint vbo, GLuint svbo, GLuint shader, int ver
 	glBindTexture(GL_TEXTURE_2D, normal);
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
 	//glDrawArrays(GL_LINES, 0, vertices);
-	glPatchParameteri(GL_PATCH_VERTICES, vertices);
-	glDrawArraysInstanced(GL_PATCHES, 0, vertices, drawAmount);
+	//glPatchParameteri(GL_PATCH_VERTICES, vertices);
+	glDrawArraysInstanced(GL_LINES, 0, vertices, drawAmount);
 	glBindVertexArray(0);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
@@ -142,6 +142,9 @@ void traverseQuad(mat4 model, int *order, GLuint VAO, GLuint VBO, GLuint sVBO, G
 					vec3 cc = {values[0], values[1], values[2]};
 					cc = normalizevec3(cc);
 					//vec3 cc = qq[globalCount].center;
+					vec4 ccModel = {cc.x, cc.y, cc.z, 1.0};
+					ccModel = multiplymat4vec4(model, ccModel);
+					//centerVals[0] = ccModel.x; centerVals[1] = ccModel.y; centerVals[2] = -negate*ccModel.z;
 					centerVals[0] = cc.x*scaleSize; centerVals[1] = cc.y*scaleSize; centerVals[2] = -negate*scaleSize;
 					qq[globalCount].center.x = centerVals[order[0]]; qq[globalCount].center.y = centerVals[order[1]]; qq[globalCount].center.z = centerVals[order[2]];
 					//printf("nw.x: %f, y: %f, z: %f\n", qq[globalCount].nw.x, qq[globalCount].nw.y, qq[globalCount].nw.z);

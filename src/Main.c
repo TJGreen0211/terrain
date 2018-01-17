@@ -270,7 +270,7 @@ void drawInstanced(GLuint vao, GLuint vbo, GLuint shader, int vertexNumber, int 
 	translation.x = (65.0*1.5) * cos(theta/75.0);
 	translation.y = 0.0;
 	translation.z = (65.0*1.5) * sin(theta/75.0);*/
-	vec3 center = {65.0, 0.0, 0.0};
+	vec3 center = {0.0, 0.0, 0.0};
 
 	mat4 modelArr[vertexNumber];
 	for(int i = 0; i < vertexNumber; i++) {
@@ -557,7 +557,7 @@ int main(int argc, char *argv[])
 	GLuint ringTex = loadTexture("../assets/ring.png", 1);
 	GLuint sphereVAO = initSphere();
 	GLuint ringVAO = initRing();
-	//GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
+	GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
 	GLuint rockVAO = initObjectBuffer("../assets/rock.obj", &object);
 	GLuint rock2VAO = initObjectBuffer("../assets/rock2.obj", &object);
 	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
@@ -610,7 +610,7 @@ int main(int argc, char *argv[])
 
 	float deltaTime = 0.0;
 	float lastFrame = 0.0;
-	vec3 translation = {165.0, 0.0, 0.0};
+	vec3 translation = {0.0, 0.0, 0.0};
 	mat4 lightProjection = ortho(-400.0, 400.0, -400.0, 400.0, zNear, zFar);
 	//mat4 lightProjection = perspective(90.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 
@@ -654,7 +654,7 @@ int main(int argc, char *argv[])
 		doMovement(deltaTime);
 
 
-		float fScale = 63.710;
+		float fScale = 30.0;
 		float fScaleFactor = 1.25;//1.025;
 
 		//int terrainMaxLOD = (int)(log(fScale)/log(2));
@@ -699,7 +699,7 @@ int main(int argc, char *argv[])
 		mat4 matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
 		model = multiplymat4(translatevec3(translation), scale(fScale));
 		mat4 m = multiplymat4(model,matR);
-		drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, planetTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
+		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, planetTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
 		//Water
 		model = multiplymat4(translatevec3(translation), scale(fScale*1.01));
 		m = multiplymat4(model,matR);
@@ -714,7 +714,7 @@ int main(int argc, char *argv[])
 		vec3 arcBallPos = getCamera();
 		float modelRotationAngle = 0.0;
 		model = multiplymat4(multiplymat4(translate(-arcBallPos.x, -arcBallPos.y, -arcBallPos.z), rotateX(modelRotationAngle)), scale(0.5));
-		//draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
+		draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Quadtree
 		//matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
@@ -724,21 +724,21 @@ int main(int argc, char *argv[])
 		int order[3];
 		float negate = 1.0;
 		order[0] = 0; order[1] = 1; order[2] = 2;
-		traverseQuad(model, order, sphereFrontXVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontXVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(model, order, sphereBackXVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap , negate);
+		traverseQuad(model, order, sphereBackXVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap , negate);
 
 		negate = 1.0;
 		order[0] = 0; order[1] = 2; order[2] = 1;
-		traverseQuad(model, order, sphereFrontYVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontYVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(model, order, sphereBackYVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereBackYVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 
 		negate = 1.0;
 		order[0] = 2; order[1] = 0; order[2] = 1;
-		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
-		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, planetShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 
 		//Ring
 		glUseProgram(instanceShader);
@@ -749,7 +749,7 @@ int main(int argc, char *argv[])
 		//Atmosphere
 		atmo = multiplymat4(translatevec3(translation), scale(fScale*fScaleFactor));
 		//draw(quadCubeVAO, ringShader, qc.vertexNumber, earthTex, atmo, translation, lightPosition, lightSpaceMatrix);
-		//drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
+		drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);
