@@ -1,6 +1,6 @@
-#include "LinearAlg.h"
+#include "linearAlg.h"
 
-const float DegreesToRadians = M_PI / 180.0;
+#define DegreesToRadians (M_PI / 180.0)
 
 mat4 IDENTITY_MATRIX = {
 	{{1.0, 0.0, 0.0, 0.0},
@@ -49,7 +49,7 @@ quaternion quatNormalize(quaternion q) {
 	q.y /= len;
 	q.z /= len;
 	q.w /= len;
-	
+
 	return q;
 }
 
@@ -112,12 +112,12 @@ quaternion angleAxis(float angle, vec3 axis, vec3 point) {
 	r.x = axis.x * sin(angle/2.0);
 	r.y = axis.y * sin(angle/2.0);
 	r.z = axis.z * sin(angle/2.0);
-	
+
 	p.w = 0.0;
 	p.x = point.x;
 	p.y = point.y;
 	p.z = point.z;
-	
+
 	return quatMultiply(quatMultiply(r, p), quatConjugate(r));
 }
 
@@ -278,7 +278,7 @@ vec2 normalizevec2(vec2 v) {
 vec4 crossvec4(vec4 v, vec4 u) {
 	vec4 out = {v.y * u.z - v.z * u.y,
 				v.z * u.x - v.x * u.z,
-				v.x * u.y - v.y * u.x, 
+				v.x * u.y - v.y * u.x,
 				0.0};
 	return out;
 }
@@ -292,19 +292,19 @@ vec3 crossvec3(vec3 v, vec3 u) {
 
 vec4 multiplyvec4(vec4 v, vec4 u)
 {
-	vec4 out = { u.x*v.x, u.y*v.y, u.z*v.z, u.w*v.w }; 
+	vec4 out = { u.x*v.x, u.y*v.y, u.z*v.z, u.w*v.w };
 	return out;
 }
 
 vec3 multiplyvec3(vec3 v, vec3 u)
 {
-	vec3 out = { u.x*v.x, u.y*v.y, u.z*v.z }; 
+	vec3 out = { u.x*v.x, u.y*v.y, u.z*v.z };
 	return out;
 }
 
 vec2 multiplyvec2(vec2 v, vec2 u)
 {
-	vec2 out = { u.x*v.x, u.y*v.y }; 
+	vec2 out = { u.x*v.x, u.y*v.y };
 	return out;
 }
 
@@ -314,7 +314,7 @@ mat4 identityMatrix() {
 
 mat4 rotateX(float theta)
 {
-	float angle = DegreesToRadians * theta;
+	float angle = (M_PI / 180.0) * theta;
 	mat4 rotation = IDENTITY_MATRIX;
 	rotation.m[2][2] = rotation.m[1][1] = cos(angle);
 	rotation.m[2][1] = sin(angle);
@@ -324,7 +324,7 @@ mat4 rotateX(float theta)
 
 mat4 rotateY(float theta)
 {
-	float angle = DegreesToRadians * theta;
+	float angle = (M_PI / 180.0) * theta;
 	mat4 rotation = IDENTITY_MATRIX;
 	rotation.m[2][2] = rotation.m[0][0] = cos(angle);
 	rotation.m[0][2] = sin(angle);
@@ -334,7 +334,7 @@ mat4 rotateY(float theta)
 
 mat4 rotateZ(float theta)
 {
-	float angle = DegreesToRadians * theta;
+	float angle = (M_PI / 180.0) * theta;
 	mat4 rotation = IDENTITY_MATRIX;
 	rotation.m[0][0] = rotation.m[1][1] = cos(angle);
 	rotation.m[1][0] = sin(angle);
@@ -395,7 +395,7 @@ mat4 multiplymat4(mat4 c, mat4 d)
 		}
 	    }
 	}
-	
+
 	return out;
 }
 
@@ -500,9 +500,9 @@ mat2 transposemat2(mat2 a) {
 
 mat4 perspective(float fovy, float aspect, float zNear, float zFar)
 {
-	float top = tan(fovy*DegreesToRadians/2) * zNear;
+	float top = tan(fovy*(3.14159265358979323846 / 180.0)/2) * zNear;
 	float right = top * aspect;
-	
+
 	mat4 c = ZERO_MATRIX;
 	c.m[0][0] = zNear/right;
 	c.m[1][1] = zNear/top;
@@ -550,15 +550,15 @@ mat4 lookAt(vec3 eye, vec3 at, vec3 up)
 	c.m[0][0] = u.x;
 	c.m[1][0] = u.y;
 	c.m[2][0] = u.z;
-	
+
 	c.m[0][1] = v.x;
 	c.m[1][1] = v.y;
 	c.m[2][1] = v.z;
-	
+
 	c.m[0][2] = n.x;
 	c.m[1][2] = n.y;
 	c.m[2][2] = n.z;
-	
+
 	c.m[0][3] = 0.0f;
 	c.m[1][3] = 0.0f;
 	c.m[2][3] = 0.0f;
@@ -566,5 +566,5 @@ mat4 lookAt(vec3 eye, vec3 at, vec3 up)
 	vec3 negativeEye = {-eye.x, -eye.y, -eye.x};
 	mat4 d = translatevec3(negativeEye);
 	mat4 out = multiplymat4(c, d);
-	return out;	
+	return out;
 }

@@ -1,7 +1,6 @@
 #include "Geometry.h"
 
-const float PI = 3.14159265359;
-const float degToRad = PI / 180.0;
+#define degToRad (M_PI / 180.0)
 
 ring createRing(int numDivides, float innerRad, float outerRad) {
 	ring newRing;
@@ -170,8 +169,8 @@ unsigned int initSubQuadX(int divisions, int reverseOrder) {
 	}
 
 	unsigned int vao;
-	vec3 vertices[divisions*divisions*6];
-	vec2 texCoords[divisions*divisions*6];
+	vec3 *vertices = malloc(divisions*divisions*6*sizeof(vec3));
+	vec2 *texCoords = malloc(divisions*divisions*6*sizeof(vec2));
 
 	vec3 start = {1.0, 1.0, -1.0};
 	float offset = 2.0/(fdivisions);
@@ -208,17 +207,22 @@ unsigned int initSubQuadX(int divisions, int reverseOrder) {
 		}
 		start.y -= offset;
 	}
+	
 
     //*normArray = *generateNormals(normArray, vertices, numVertices);
-	vec3 tangent[index];
+	vec3 *tangent = malloc(index*sizeof(vec3));
 	//printf("sizeof(vertices): %lu\n\n", index);
-	vec3 vertNorms[index];
+	vec3 *vertNorms = malloc(index*sizeof(vec3));
 	for(int i = 0; i < index; i++) {
 		vertNorms[i] = normalizevec3(vertices[i]);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
     //vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
 	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	free(vertices);
+	free(texCoords);
+	free(tangent);
+	free(vertNorms);
     return vao;
 }
 
@@ -235,8 +239,8 @@ unsigned int initSubQuadY(int divisions, int reverseOrder) {
 	}
 
 	unsigned int vao;
-	vec3 vertices[divisions*divisions*6];
-	vec2 texCoords[divisions*divisions*6];
+	vec3 *vertices = malloc(divisions*divisions*6*sizeof(vec3));
+	vec2 *texCoords = malloc(divisions*divisions*6*sizeof(vec2));
 
 	vec3 start = {1.0, 1.0, 1.0};
 	float offset = 2.0/(fdivisions);
@@ -274,13 +278,17 @@ unsigned int initSubQuadY(int divisions, int reverseOrder) {
 		start.z -= offset;
 	}
 
-	vec3 tangent[index];
-	vec3 vertNorms[index];
+	vec3 *tangent = malloc(index*sizeof(vec3));
+	vec3 *vertNorms = malloc(index*sizeof(vec3));
 	for(int i = 0; i < index; i++) {
 		vertNorms[i] = normalizevec3(vertices[i]);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
 	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	free(vertices);
+	free(texCoords);
+	free(tangent);
+	free(vertNorms);
 	return vao;
 }
 
@@ -297,8 +305,8 @@ unsigned int initSubQuadZ(int divisions, int reverseOrder) {
 	}
 
 	unsigned int vao;
-	vec3 vertices[divisions*divisions*6];
-	vec2 texCoords[divisions*divisions*6];
+	vec3 *vertices = malloc(divisions*divisions*6*sizeof(vec3));
+	vec2 *texCoords = malloc(divisions*divisions*6*sizeof(vec2));
 
 	vec3 start = {1.0, 1.0, 1.0};
 	float offset = 2.0/(fdivisions);
@@ -337,13 +345,17 @@ unsigned int initSubQuadZ(int divisions, int reverseOrder) {
 		start.y -= offset;
 	}
 
-	vec3 tangent[index];
-	vec3 vertNorms[index];
+	vec3 *tangent = malloc(index*sizeof(vec3));
+	vec3 *vertNorms = malloc(index*sizeof(vec3));
 	for(int i = 0; i < index; i++) {
 		vertNorms[i] = normalizevec3(vertices[i]);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
 	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	free(vertices);
+	free(texCoords);
+	free(tangent);
+	free(vertNorms);
     return vao;
 }
 
@@ -373,9 +385,9 @@ unsigned int initQuadVAO() {
 	int vecSize = numVertices/3;
 	int texSize = numTexCoords/2;
 
-    vec3 vertArray[vecSize];
-    vec3 normArray[vecSize];
-    vec2 texArray[texSize];
+    vec3 *vertArray = malloc(vecSize*sizeof(vec3));
+    vec3 *normArray = malloc(vecSize*sizeof(vec3));
+    vec2 *texArray = malloc(texSize*sizeof(vec2));
     int c = 0;
     for(int i = 0; i < numVertices; i+=3) {
     	vertArray[c].x = vertices[i];
@@ -390,8 +402,12 @@ unsigned int initQuadVAO() {
     	c++;
     }
     *normArray = *generateNormals(normArray, vertices, numVertices);
-    vec3 vna[vecSize];
+    vec3 *vna = malloc(vecSize*sizeof(vec3));
 	*vna = *generateSmoothNormals(vna, vertArray, normArray, vecSize);
     vao = initBuffers(vertArray, sizeof(vertices), vna, sizeof(vertices), texArray, sizeof(texCoords));
+	free(vertArray);
+	free(normArray);
+	free(texArray);
+	free(vna);
     return vao;
 }

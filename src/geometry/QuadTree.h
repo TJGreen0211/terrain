@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include "LinearAlg.h"
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/gl3.h>
+#include <windows.h>
+#include <glad/glad.h>
 #include <Camera.h>
 #include <Window.h>
 

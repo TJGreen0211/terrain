@@ -52,8 +52,8 @@ obj ObjLoadModel(char *fname)
 	
 	rewind(fp);
 	
-	vec3 verts[vertCount];
-	vec3 faces[faceCount];
+	vec3 *verts = malloc(vertCount*sizeof(vec3));
+	vec3 *faces = malloc(faceCount*sizeof(vec3));
 	int breakCount= 0;
 	
 	while((ch = fgetc(fp)) != EOF)
@@ -90,14 +90,14 @@ obj ObjLoadModel(char *fname)
 	
 	fclose(fp);
 	
-	vec3 normals[vertCount*3];
-	vec3 points[vertCount*3];
+	//vec3 normals[vertCount*3];
+	//vec3 points[vertCount*3];
 	vec3 one, two;
 	int Index = 0;
 	int a, b, c;
 	
-	newObj.normals = malloc(faceCount*3*sizeof(normals[0]));
-	newObj.points = malloc(faceCount*3*sizeof(points[0]));
+	newObj.normals = malloc(faceCount*3*sizeof(vec3));
+	newObj.points = malloc(faceCount*3*sizeof(vec3));
 	
 	for(int i = 0; i < faceCount; i++)
 	{
@@ -120,8 +120,11 @@ obj ObjLoadModel(char *fname)
 		newObj.normals[Index] = normal; newObj.points[Index] = verts[c]; Index++;
 	}
 	
-	newObj.size = Index*sizeof(points[0]);
-	newObj.nsize = Index*sizeof(normals[0]);
+	free(verts);
+	free(faces);
+	
+	newObj.size = Index*sizeof(vec3);
+	newObj.nsize = Index*sizeof(vec3);
 	newObj.vertexNumber = Index;
 	return newObj;
 }

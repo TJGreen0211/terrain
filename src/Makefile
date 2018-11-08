@@ -1,31 +1,41 @@
-CC = gcc
-CFLAGS = -Wall
-PROG = cube
+CC = cl.exe
+CFLAGS = ""
+#Wall - W0 - W4
+PROG = cube.exe
 
-MAKE_DIR = ${PWD}
+MAKE_DIR = %cd%
 
-SRC_DIR := $(MAKE_DIR)
-SUB_DIR1 := $(SRC_DIR)/geometry
-SUB_DIR2 := $(SRC_DIR)/math
-
-SRCS = Main.c LoadShader.c math/LinearAlg.c camera/arcballCamera.c Window.c geometry/Sphere.c geometry/Geometry.c Obj.c geometry/QuadCube.c geometry/QuadTree.c Water.c SimplexNoise.c common/Common.c common/CommonGL.c common/Textures.c Buffers.c camera/Input.c
+SRCS = Main.c \
+	glad.c \
+	LoadShader.c \
+	math/LinearAlg.c \
+	camera/arcballCamera.c \
+	Window.c \
+	geometry/Sphere.c \
+	geometry/Geometry.c \
+	Obj.c \
+	geometry/QuadCube.c \
+	geometry/QuadTree.c \
+	Water.c \
+	SimplexNoise.c \
+	common/Common.c \
+	common/CommonGL.c \
+	common/Textures.c \
+	Buffers.c \
+	camera/Input.c
 
 #SRCS := $(shell echo dir1/*.c)
-INCLUDE_PATHS := -I/usr/local/include -I/opt/X11/include -I/opt/local/include
-INCLUDE_PATHS += -I/$(SRC_DIR)/math	-I$(SRC_DIR)/../Dependencies -I$(SRC_DIR) -I$(SRC_DIR)/geometry -I$(SRC_DIR)/common -I$(SRC_DIR)/camera
-LIBRARY_PATHS = -I/opt/X11/lib -L/Users/tjgreen/Documents/OpenGL/Dependencies/lib -lSOIL -lglfw.3.1
-ifeq ($(shell uname),Darwin)
-	LIBS = -framework OpenGL -framework GLUT
-else
-	LIBS = -lglut
-endif
+INCLUDE_PATHS = -I "..\dependencies\lib" -I "..\dependencies\include"
+INCLUDE_PATHS = $(INCLUDE_PATHS) -I $(MAKE_DIR) -I $(MAKE_DIR)\math -I $(MAKE_DIR)\geometry -I $(MAKE_DIR)\common -I $(MAKE_DIR)\camera
+#LIBRARY_PATHS = -I/opt/X11/lib -L/Users/tjgreen/Documents/OpenGL/Dependencies/lib -lSOIL -lglfw.3.1
+LIBS = C:\Users\TJ\Documents\programming\terrain\dependencies\lib\glfw3dll.lib C:\Users\TJ\Documents\programming\terrain\dependencies\lib\SOIL.lib opengl32.lib
 
 all: $(PROG)
 	@echo $(SRC_DIR)
-	@$(MAKE) -C geometry -f geometry.mk
 
-$(PROG):	$(SRCS)
-	$(CC) $(CFLAGS) -o $(PROG) $(SRCS) $(LIBS) $(INCLUDE_PATHS) $(LIBRARY_PATHS)
+#$(CC) $(CFLAGS) -o $(PROG) $(SRCS) $(LIBS) $(INCLUDE_PATHS) $(LIBRARY_PATHS)
+$(PROG):$(SRCS)
+	$(CC) /MDd $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(SRCS) /link $(LIBS) /NODEFAULTLIB:libcmt.lib
 
 clean:
-	rm -f $(PROG)
+	del main.obj

@@ -5,7 +5,8 @@
 # define GL_DO_NOT_WARN_IF_MULTI_GL_VERSION_HEADERS_INCLUDED
 #endif
 
-#include <OpenGL/gl3.h>
+#include <windows.h>
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
 GLFWwindow *setupGLFW();

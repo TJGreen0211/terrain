@@ -57,7 +57,7 @@ static void drawTree(GLuint vao, GLuint vbo, GLuint svbo, GLuint shader, int ver
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
 	//glDrawArrays(GL_LINES, 0, vertices);
 	//glPatchParameteri(GL_PATCH_VERTICES, vertices);
-	glDrawArraysInstanced(GL_LINES, 0, vertices, drawAmount);
+	glDrawArraysInstanced(GL_TRIANGLES, 0, vertices, drawAmount);
 	glBindVertexArray(0);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);

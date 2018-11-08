@@ -3,9 +3,9 @@
 
 #include <math.h>
 
-typedef struct complex {
+typedef struct complexType {
 	float real;
 	float im;
-} complex;
+} complexType;
 
 #endif

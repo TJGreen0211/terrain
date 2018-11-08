@@ -50,7 +50,7 @@ GLuint initNoise() {
 	};
 	int numVertices = (sizeof(vertices)/sizeof(vertices[0]));
 	int vecSize = numVertices/3;
-	vec3 vertArray[vecSize];
+	vec3 *vertArray = malloc(vecSize*sizeof(vec3));
 
 	int c = 0;
     for(int i = 0; i < numVertices; i+=3) {
