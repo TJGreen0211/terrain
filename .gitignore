@@ -1,0 +1,31 @@
+# --- Build output (Windows port) ---
+build/
+*.exe
+*.obj
+!assets/obj/*.obj
+*.o
+/glfw3.dll
+
+# --- Quarantine of dead/legacy files (see legacy/README.md) ---
+legacy/
+
+# Vendor docs not needed for the build
+third_party/glfw/glfw-3.4.bin.WIN64/docs/
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# --- IDE / tool state ---
+.vs/
+*.user
+*.aps
+*.opendb
+.kilo/
+
+# --- Misc ---
+*.log
+__pycache__/

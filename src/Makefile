@@ -1,9 +1,6 @@
 CC = cl.exe
-CFLAGS = ""
-#Wall - W0 - W4
+CFLAGS = /nologo /W3 /D_USE_MATH_DEFINES
 PROG = cube.exe
-
-MAKE_DIR = %cd%
 
 SRCS = Main.c \
 	glad.c \
@@ -24,18 +21,13 @@ SRCS = Main.c \
 	Buffers.c \
 	camera/Input.c
 
-#SRCS := $(shell echo dir1/*.c)
-INCLUDE_PATHS = -I "..\dependencies\lib" -I "..\dependencies\include"
-INCLUDE_PATHS = $(INCLUDE_PATHS) -I $(MAKE_DIR) -I $(MAKE_DIR)\math -I $(MAKE_DIR)\geometry -I $(MAKE_DIR)\common -I $(MAKE_DIR)\camera
-#LIBRARY_PATHS = -I/opt/X11/lib -L/Users/tjgreen/Documents/OpenGL/Dependencies/lib -lSOIL -lglfw.3.1
-LIBS = C:\Users\TJ\Documents\programming\terrain\dependencies\lib\glfw3dll.lib C:\Users\TJ\Documents\programming\terrain\dependencies\lib\SOIL.lib opengl32.lib
+INCLUDE_PATHS = -I "..\dependencies\include" -I "." -I math -I geometry -I common -I camera
+LIBS = ..\dependencies\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib
 
 all: $(PROG)
-	@echo $(SRC_DIR)
 
-#$(CC) $(CFLAGS) -o $(PROG) $(SRCS) $(LIBS) $(INCLUDE_PATHS) $(LIBRARY_PATHS)
-$(PROG):$(SRCS)
-	$(CC) /MDd $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(SRCS) /link $(LIBS) /NODEFAULTLIB:libcmt.lib
+$(PROG): $(SRCS)
+	$(CC) /MD $(CFLAGS) $(INCLUDE_PATHS) $(SRCS) /Fe$(PROG) /link $(LIBS)
 
 clean:
-	del main.obj
+	del /q *.obj $(PROG) Main.exe 2>nul

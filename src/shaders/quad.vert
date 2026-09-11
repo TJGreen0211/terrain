@@ -18,17 +18,22 @@ out vec3 fN;
 out vec3 fL;
 out vec2 fTexCoords;
 out vec3 vColor;
+out vec3 fSurfDir;
+out mat3 fNormalMat;
 
 void main()
 {
-	vec4 fPosition = vPosition;
+	vec4 fPosition = vec4(vPosition.xyz, 1.0);
 
-	fPosition.xyz = normalize((fPosition*vInstanceMatrix).xyz);
+	vec3 transformed = (fPosition*vInstanceMatrix).xyz;
+	fPosition.xyz = (length(transformed) > 0.0001) ? normalize(transformed) : vec3(0.0);
 	//fPosition.xyz = (fPosition*vInstanceMatrix).xyz;
 
 	vec3 n = fPosition.xyz;//normalize(vPosition).xyz;
+	fSurfDir = fPosition.xyz;
 
 	mat3 normalMatrix = transpose(inverse(mat3(model)));
+	fNormalMat = normalMatrix;
 	vec4 lightPos = vec4(lightPosition, 1.0);
 	vec3 lightDir = normalize(fPosition*model - lightPos).xyz;
 	fE = -normalize(fPosition*model).xyz;

@@ -522,7 +522,13 @@ int main(int argc, char *argv[])
 	mat4 lightView;
 	float theta = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
-	chdir("C:\\Users\\TJ\\Documents\\programming\\terrain\\src");
+	{
+		char exePath[MAX_PATH];
+		GetModuleFileNameA(NULL, exePath, MAX_PATH);
+		char *slash = strrchr(exePath, '\\');
+		if(slash) *slash = '\0';
+		chdir(exePath);
+	}
 	GLFWwindow *window = setupGLFW();
 	if (window == NULL)
     {
@@ -648,7 +654,7 @@ int main(int argc, char *argv[])
 		float time_spent;
 		start=clock();
 		//for(int i = 0; i <100;i++) {
-		//generateNoiseTexture(framebuffer, 0);
+		generateNoiseTexture(framebuffer, 0);
 		end=clock();
 		time_spent=(((float)end - (float)start) / 1000000.0F );
 		//printf("\nSystem time is at %f\n seconds", time_spent);
@@ -731,6 +737,7 @@ int main(int argc, char *argv[])
 		draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Quadtree
+		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
 		//matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
 		//model = multiplymat4(translatevec3(translation), scale(fScale));
 		//mat4 m = multiplymat4(model,matR);
@@ -753,6 +760,7 @@ int main(int argc, char *argv[])
 		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
 		negate = -1.0;
 		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 		//Ring
 		//glUseProgram(instanceShader);

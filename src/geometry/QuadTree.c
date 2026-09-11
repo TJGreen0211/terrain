@@ -34,7 +34,7 @@ static void drawTree(GLuint vao, GLuint vbo, GLuint svbo, GLuint shader, int ver
 	glVertexAttribDivisor(6, 1);
 	glVertexAttribDivisor(7, 1);
 
-	glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*10*10*6, &pos, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*512, &pos, GL_STATIC_DRAW);
 
 	/*glBindBuffer(GL_ARRAY_BUFFER, vbo);
 	glVertexAttribDivisor()
@@ -78,7 +78,6 @@ void traverseQuad(mat4 model, int *order, GLuint VAO, GLuint VBO, GLuint sVBO, G
 
 	float values[3];
 	float scaleVals[3];
-	float centerVals[3];
 	float offsetVals[3];
 
 	values[0] = quadrant; values[1] = quadrant; values[2] = 0.0;
@@ -139,14 +138,11 @@ void traverseQuad(mat4 model, int *order, GLuint VAO, GLuint VBO, GLuint sVBO, G
 					qq[globalCount].nw.x = values[order[0]]; qq[globalCount].nw.y = values[order[1]]; qq[globalCount].nw.z = values[order[2]];
 					qq[globalCount].width = width;
 					//qq[globalCount].center.x = (c.x+x0 - qScale); qq[globalCount].center.y = (c.y+y0 - qScale); qq[globalCount].center.z = 0.0;
-					vec3 cc = {values[0], values[1], values[2]};
-					cc = normalizevec3(cc);
-					//vec3 cc = qq[globalCount].center;
-					vec4 ccModel = {cc.x, cc.y, cc.z, 1.0};
-					ccModel = multiplymat4vec4(model, ccModel);
-					//centerVals[0] = ccModel.x; centerVals[1] = ccModel.y; centerVals[2] = -negate*ccModel.z;
-					centerVals[0] = cc.x*scaleSize; centerVals[1] = cc.y*scaleSize; centerVals[2] = -negate*scaleSize;
-					qq[globalCount].center.x = centerVals[order[0]]; qq[globalCount].center.y = centerVals[order[1]]; qq[globalCount].center.z = centerVals[order[2]];
+					vec3 plocal = {values[order[0]], values[order[1]], values[order[2]]};
+					vec3 pdir = normalizevec3(plocal);
+					qq[globalCount].center.x = model.m[0][0]*pdir.x + model.m[0][1]*pdir.y + model.m[0][2]*pdir.z + model.m[0][3];
+					qq[globalCount].center.y = model.m[1][0]*pdir.x + model.m[1][1]*pdir.y + model.m[1][2]*pdir.z + model.m[1][3];
+					qq[globalCount].center.z = model.m[2][0]*pdir.x + model.m[2][1]*pdir.y + model.m[2][2]*pdir.z + model.m[2][3];
 					//printf("nw.x: %f, y: %f, z: %f\n", qq[globalCount].nw.x, qq[globalCount].nw.y, qq[globalCount].nw.z);
 					//printf("center.x: %f, y: %f, z: %f\n", qq[globalCount].center.x, qq[globalCount].center.y, qq[globalCount].center.z);
 

@@ -13,7 +13,6 @@
 #include "LinearAlg.h"
 #include "arcballCamera.h"
 #include "Window.h"
-#include "SOIL/SOIL.h"
 #include "Sphere.h"
 #include "Geometry.h"
 #include "SimplexNoise.h"

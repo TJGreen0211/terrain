@@ -6,9 +6,7 @@
 #endif
 
 #include <windows.h>
-#include <glad/glad.h> 
-#include <glad/glad.h> 
-#include "SOIL/SOIL.h"
+#include <glad/glad.h>
 
 GLuint loadCubemap(char **faces);
 GLuint loadTexture(char const * path, int alphaFlag);

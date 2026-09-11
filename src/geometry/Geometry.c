@@ -218,7 +218,7 @@ unsigned int initSubQuadX(int divisions, int reverseOrder) {
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
     //vao = initBuffers(vertices, sizeof(vertices), vertices, sizeof(vertices), texCoords, sizeof(texCoords));
-	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	vao = initBufferTangents(vertices, index*sizeof(vec3), vertices, index*sizeof(vec3), tangent, index*sizeof(vec3), texCoords, index*sizeof(vec2));
 	free(vertices);
 	free(texCoords);
 	free(tangent);
@@ -284,7 +284,7 @@ unsigned int initSubQuadY(int divisions, int reverseOrder) {
 		vertNorms[i] = normalizevec3(vertices[i]);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
-	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	vao = initBufferTangents(vertices, index*sizeof(vec3), vertices, index*sizeof(vec3), tangent, index*sizeof(vec3), texCoords, index*sizeof(vec2));
 	free(vertices);
 	free(texCoords);
 	free(tangent);
@@ -351,7 +351,7 @@ unsigned int initSubQuadZ(int divisions, int reverseOrder) {
 		vertNorms[i] = normalizevec3(vertices[i]);
 	}
 	*tangent = *generateTangents(index, vertNorms, tangent);
-	vao = initBufferTangents(vertices, sizeof(vertices), vertices, sizeof(vertices), tangent, sizeof(vertices), texCoords, sizeof(texCoords));
+	vao = initBufferTangents(vertices, index*sizeof(vec3), vertices, index*sizeof(vec3), tangent, index*sizeof(vec3), texCoords, index*sizeof(vec2));
 	free(vertices);
 	free(texCoords);
 	free(tangent);

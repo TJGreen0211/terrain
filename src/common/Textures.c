@@ -1,6 +1,10 @@
 #include "Textures.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 GLuint generateDepthCubemap(int width, int height)
 {
@@ -30,12 +34,14 @@ GLuint loadCubemap(char **faces)
     glActiveTexture(GL_TEXTURE0);
 
     int width, height;
+    int channels;
     unsigned char* image;
 
     glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
     for (GLuint i = 0; i < 6; i++)
     {
-        image = SOIL_load_image(faces[i], &width, &height, 0, SOIL_LOAD_RGB);
+        image = stbi_load(faces[i], &width, &height, &channels, 3);
+        if(!image) { printf("Failed to load %s\n", faces[i]); exit(1); }
         glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
 
     }
@@ -82,20 +88,23 @@ GLuint loadTexture(char const * path, int alphaFlag)
     GLuint textureID;
     glGenTextures(1, &textureID);
     int width, height;
+    int channels;
     unsigned char* image;
 
     if(alphaFlag == 1) {
-    	image = SOIL_load_image(path, &width, &height, 0, SOIL_LOAD_RGBA);
-    	glBindTexture(GL_TEXTURE_2D, textureID);
+    	image = stbi_load(path, &width, &height, &channels, 4);
+    	if(!image) { printf("Failed to load %s\n", path); exit(1); }
+     	glBindTexture(GL_TEXTURE_2D, textureID);
     	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
     	glGenerateMipmap(GL_TEXTURE_2D);
     }
     else {
-    	image = SOIL_load_image(path, &width, &height, 0, SOIL_LOAD_RGB);
-    	// Assign texture to ID
-    	glBindTexture(GL_TEXTURE_2D, textureID);
-    	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
-    	glGenerateMipmap(GL_TEXTURE_2D);
+    	image = stbi_load(path, &width, &height, &channels, 3);
+    	if(!image) { printf("Failed to load %s\n", path); exit(1); }
+     	// Assign texture to ID
+     	glBindTexture(GL_TEXTURE_2D, textureID);
+     	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
+     	glGenerateMipmap(GL_TEXTURE_2D);
     }
 
     // Parameters
@@ -104,7 +113,7 @@ GLuint loadTexture(char const * path, int alphaFlag)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
-    SOIL_free_image_data(image);
+    stbi_image_free(image);
     return textureID;
 }
 
@@ -114,7 +123,9 @@ GLuint loadSpriteTexture(char const * path)
     GLuint textureID;
     glGenTextures(1, &textureID);
     int width, height;
-    unsigned char* image = SOIL_load_image(path, &width, &height, 0, SOIL_LOAD_RGBA);
+    int channels;
+    unsigned char* image = stbi_load(path, &width, &height, &channels, 4);
+    if(!image) { printf("Failed to load %s\n", path); exit(1); }
     // Assign texture to ID
     glBindTexture(GL_TEXTURE_2D, textureID);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
@@ -126,6 +137,6 @@ GLuint loadSpriteTexture(char const * path)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
-    SOIL_free_image_data(image);
+    stbi_image_free(image);
     return textureID;
 }

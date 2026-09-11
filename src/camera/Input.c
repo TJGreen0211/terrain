@@ -1,11 +1,14 @@
 #include "Input.h"
 
 static int actionPress, keys;
+static int wireframe = 0;
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GL_TRUE);
+    if (key == GLFW_KEY_T && action == GLFW_PRESS && mode == 0)
+        wireframe = !wireframe;
 	if(action == GLFW_PRESS)
     	actionPress = GLFW_PRESS;
     else if(action == GLFW_RELEASE)
@@ -55,4 +58,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 	else {
 		processMouseMovement(xpos, ypos, 1);
 	}
+}
+
+int getWireframeState(void) {
+	return wireframe;
 }

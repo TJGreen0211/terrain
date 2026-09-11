@@ -13,5 +13,6 @@
 #include "Window.h"
 
 void doMovement(float deltaTime);
+int getWireframeState(void);
 
 #endif
