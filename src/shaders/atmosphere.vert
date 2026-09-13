@@ -1,10 +1,10 @@
 #version 410
 
-layout (location = 0) in vec4 vPosition;
-layout (location = 1) in vec3 vNormal;
-layout (location = 2) in vec2 vTexCoords;
+in vec4 vPosition;
+in vec3 vNormal;
 
 out vec4 fPosition;
+out vec3 fLocalPos;
 out mat4 m;
 out mat4 v;
 out vec3 fNormal;
@@ -19,5 +19,6 @@ void main()
 	fNormal = vNormal;
 	m = model;
 	v = view;
+	fLocalPos = vec3(vPosition * model) - vec3(model[3][0], model[3][1], model[3][2]);
 	gl_Position = vPosition*model*view*projection;
 }

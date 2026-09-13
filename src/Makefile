@@ -3,6 +3,9 @@ CFLAGS = /nologo /W3 /D_USE_MATH_DEFINES
 PROG = cube.exe
 
 SRCS = Main.c \
+	Sun.c \
+	Skybox.c \
+	Atmosphere.c \
 	glad.c \
 	LoadShader.c \
 	math/LinearAlg.c \

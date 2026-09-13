@@ -1,4 +1,7 @@
 #include "Main.h"
+#include "Sun.h"
+#include "Skybox.h"
+#include "Atmosphere.h"
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -42,13 +45,6 @@ GLuint initInstanceShader() {
 	GLuint shader;
 	createShader(&shader, "shaders/instance.vert",
 		"shaders/instance.frag");
-	return shader;
-}
-
-GLuint initSkyShader() {
-	GLuint shader;
-	createShader(&shader, "shaders/sky.vert",
-		"shaders/sky.frag");
 	return shader;
 }
 
@@ -208,44 +204,6 @@ void initMVP(int shader, mat4 m, mat4 v) {
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &p.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, &v.m[0][0]);
-}
-
-void drawAtmosphere(GLuint VAO, GLuint shader, GLuint sky, int vertices, mat4 m, vec3 position, float scale, float scaleFactor, vec4 lightPosition) {
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE);
-	mat4 positionMatrix = translatevec3(position);
-	vec4 camPosition = getCameraPosition(positionMatrix);
-
-	if(pow(camPosition.x, 2.0) + pow(camPosition.y, 2.0) + pow(camPosition.z, 2.0) < pow(m.m[0][0], 2.0)) {
-		glUseProgram(sky);
-		glCullFace(GL_FRONT);
-	}
-	else
-		glUseProgram(shader);
-
-	initMVP(shader, m, getViewMatrix());
-
-	float fOuter = scale*scaleFactor;
-	float fInner = scale;
-	vec3 C_R = {0.3, 0.7, 1.0};
-	float E = 14.3;
-
-	glUniform1f(glGetUniformLocation(shader, "fInnerRadius"), fInner);
-	glUniform1f(glGetUniformLocation(shader, "fOuterRadius"), fOuter);
-	glUniform3f(glGetUniformLocation(shader, "camPosition"), camPosition.x, camPosition.y, camPosition.z);
-	glUniform3f(glGetUniformLocation(shader, "C_R"), C_R.x, C_R.y, C_R.z);
-	glUniform1f(glGetUniformLocation(shader, "E"), E);
-	glUniform1f(glGetUniformLocation(shader, "time"), glfwGetTime());
-
-	glUniform3f(glGetUniformLocation(shader, "camPosition"), camPosition.x, camPosition.y, camPosition.z);
-	glUniform3f(glGetUniformLocation(shader, "lightPosition"), lightPosition.x, lightPosition.y, lightPosition.z);
-
-	glBindVertexArray(VAO);
-	glDrawArrays(GL_TRIANGLES, 0, vertices);
-	glBindVertexArray(0);
-
-	glDisable(GL_BLEND);
-	glCullFace(GL_BACK);
 }
 
 void drawInstanced(GLuint vao, GLuint vbo, GLuint shader, int vertexNumber, int drawAmount, vec3 *positions, mat4 *rotations, mat4 model, float *scaleArray, float theta, vec4 lightPosition) {
@@ -549,7 +507,6 @@ int main(int argc, char *argv[])
 	initializeNoise();
 
 	GLuint tessShader = initTessShader();
-	GLuint skyShader = initSkyShader();
 	GLuint atmosphereShader = initAtmosphereShader();
 	GLuint ringShader = initLightingShader();
 	GLuint waterShader = initWaterShader();
@@ -559,6 +516,11 @@ int main(int argc, char *argv[])
 	GLuint quadShader = initQuadShader();
 	GLuint planetShader = initPlanetShader();
 
+	initSun();
+
+	initSkybox();
+	GLuint skyboxTexture = loadSkyboxCube();
+
 	GLuint earthTex = loadTexture("../assets/earth.jpg", 0);
 	GLuint moonTex = loadTexture("../assets/moon.jpg", 0);
 	GLuint planetTex = loadTexture("../assets/europa.jpg", 0);
@@ -567,6 +529,7 @@ int main(int argc, char *argv[])
 
 	GLuint ringTex = loadTexture("../assets/ring.png", 1);
 	GLuint sphereVAO = initSphere();
+	initAtmosphere(atmosphereShader, planet);
 	GLuint ringVAO = initRing();
 	GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
 	GLuint rockVAO = initObjectBuffer("../assets/rock.obj", &object);
@@ -616,7 +579,7 @@ int main(int argc, char *argv[])
 	GLuint sizeVBO;
 	glGenBuffers(1, &sizeVBO);
 
-	mat4 model, atmo;
+	mat4 model;
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
 	float deltaTime = 0.0;
@@ -680,7 +643,7 @@ int main(int argc, char *argv[])
 		//int terrainMaxLOD = (int)(log(fScale)/log(2));
 
 		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-		glClearColor(0.0, 1.0, 1.0, 1.0);
+		glClearColor(0.0, 0.0, 0.0, 1.0);
 
 		//Light calculations per frame
 		vec4 lightPosition = rotateLight(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, theta, translation);
@@ -711,6 +674,10 @@ int main(int argc, char *argv[])
 		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 		glClearColor(0.1, 0.0, 0.2, 1.0);
 
+		//Skybox: full-screen background, drawn first (far plane, no depth write)
+		mat4 skyboxProj = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
+		drawSkybox(skyboxTexture, skyboxProj, getViewRotation());
+
 		drawOrbit(quadCubeVAO, ringShader, qc.vertexNumber, moonTex, theta, model, translation);
 		//Planet ring
 		model = multiplymat4(multiplymat4(translatevec3(translation), rotateX(80.0)), scale(fScale*1.5));
@@ -724,9 +691,10 @@ int main(int argc, char *argv[])
 		model = multiplymat4(translatevec3(translation), scale(fScale*1.01));
 		m = multiplymat4(model,matR);
 		//draw(quadCubeVAO, waterShader, qc.vertexNumber, dyWaveTex, dxWaveTex, m, translation, lightPosition, lightSpaceMatrix);
-		//Sun
-		model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(lightPositionXYZ)), scale(250.0)),rotateX(90.0));
-		draw(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
+		//Sun (billboard): opaque disc drawn with the scene; glow drawn last (below)
+		mat4 sunProj = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
+		mat4 sunView = getViewMatrix();
+		drawSunDisc(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
 		//FBO Visualizer
 		//model = multiplymat4(translate(-75.0, 25.0, 0.0), scale(10.0));
 		//draw(quadVAO, fboShader, 6, textureColorBuffer, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
@@ -768,10 +736,16 @@ int main(int argc, char *argv[])
 		//drawInstanced(rock2VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos2, rotations, model, scaleArray, theta, lightPosition);
 		//drawInstanced(rock3VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos3, rotations, model, scaleArray, theta, lightPosition);
 
-		//Atmosphere
-		atmo = multiplymat4(translatevec3(translation), scale(fScale*fScaleFactor));
-		//draw(quadCubeVAO, ringShader, qc.vertexNumber, earthTex, atmo, translation, lightPosition, lightSpaceMatrix);
-		//drawAtmosphere(sphereVAO, atmosphereShader, skyShader, planet.vertexNumber, atmo, translation, fScale, fScaleFactor, lightPosition);
+		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
+		//scaled planet shell; Earth params: C_R (0.3, 0.7, 1.0), E 14.3, 2.12% shell)
+		{
+			vec3 C_R = { 0.3f, 0.7f, 1.0f };
+			drawAtmosphereDome(atmosphereShader, sunProj, sunView, identityMatrix(),
+			                   30.0f, 30.0f * 1.0212f, C_R, 14.3f, lightPositionXYZ);
+		}
+
+		//Sun corona halo — must be drawn LAST (additive, does not write depth)
+		drawSunGlow(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);

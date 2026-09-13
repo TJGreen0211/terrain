@@ -151,12 +151,8 @@ float shadowCalculation(vec4 fLight) {
 void main()
 {
 	vec4 ambientProduct = vec4(0.20, 0.25, 0.34, 1.0);
-	vec4 diffuseProduct = vec4(1.0, 1.0, 1.0, 1.0)*vec4(0.8, 0.8, 0.8, 1.0);
-	vec4 specularProduct = vec4(1.0, 1.0, 1.0, 1.0)*vec4(0.5, 0.5, 0.5, 1.0);
-	float shininess = 25.0;
-
-	vec3 ray = normalize(fragPos - cameraPos);
-	vec3 fH = -normalize((fragPos - lightPosition) + ray).xyz;
+	const float PI = 3.14159265359;
+	vec3 sunRadiance = vec3(1.0, 0.97, 0.90) * 2.2;
 
 	// 3D noise height field in the planet-local frame (stuck to the surface,
 	// rotates with the planet). Every face samples this one continuous field,
@@ -173,17 +169,46 @@ void main()
 	vec3 Nobj = normalize(dObj - NORMAL_STRENGTH * grad);
 	vec3 N = normalize(fNormalMat * Nobj);
 
-	vec4 color = vec4(heightRamp(clamp(h * 0.5 + 0.5, 0.0, 1.0)), 1.0);
+	float e = clamp(h * 0.5 + 0.5, 0.0, 1.0);
+	vec4 color = vec4(heightRamp(e), 1.0);
+	vec3 albedo = color.rgb;
 
-	float Kd = max(dot(fL, N), 0.0);
-	float Ks = pow(max(dot(N, fH), 0.0), shininess);
-	vec3 ambient = ambientProduct.xyz * color.rgb;
-	vec3 diffuse = Kd * diffuseProduct.xyz * color.rgb;
-	vec3 specular = Ks * specularProduct.xyz;
-	if(dot(fL, N) < 0.0) {
-		specular = vec3(0.0, 0.0, 0.0);
+	// Height-driven microfacet material: ocean = smooth/low-F0, land = rough,
+	// snow = in between (same bands as heightRamp: sea 0.50, beach 0.56, peak 0.85)
+	float oceanMask = 1.0 - smoothstep(0.50, 0.56, e);
+	float snowMask  = smoothstep(0.85, 0.95, e);
+	float rough = mix(0.78, 0.05, oceanMask);
+	rough = mix(rough, 0.45, snowMask);
+	float a2 = max(rough * rough, 0.0004);
+	vec3 F0 = mix(vec3(0.04), vec3(0.02), oceanMask);
+	F0 = mix(F0, vec3(0.03), snowMask);
+
+	vec3 V = normalize(cameraPos - fragPos);
+	vec3 L = fL;
+	vec3 H = normalize(L + V);
+	float NdotL = dot(N, L);
+	float NdotV = max(dot(N, V), 1e-4);
+	float NdotH = max(dot(N, H), 0.0);
+	float VdotH = max(dot(V, H), 0.0);
+
+	// GGX (Trowbridge-Reitz) normal distribution
+	float g = NdotH * NdotH * (a2 - 1.0) + 1.0;
+	float D = a2 / (PI * g * g + 1e-7);
+	// Smith joint visibility (GGX-correlated, Charlie's approximation)
+	float VG = 0.25 / max(NdotL * VdotH + NdotV * dot(H, L), 1e-4);
+	// Schlick fresnel
+	vec3 F = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
+
+	vec3 lit = ambientProduct.xyz * albedo;   // indirect sky/airlight term
+	float wrap = 0.35;                        // wrap diffuse: soft day/night terminator
+	if (NdotL > -wrap) {
+		float wl = (NdotL + wrap) / (1.0 + wrap);
+		vec3 kd = 1.0 - F;                    // energy conservation (dielectric)
+		vec3 diff = albedo / PI * kd * wl;
+		vec3 spec = (NdotL > 0.0) ? D * VG * F / (4.0 * NdotL * NdotV + 1e-4) : vec3(0.0);
+		lit += (diff + spec) * sunRadiance;
 	}
 
 	float gamma = 2.2;
-	FragColor = vec4(pow(ambient+diffuse+specular, vec3(1.0/gamma)), color.a);
+	FragColor = vec4(pow(lit, vec3(1.0 / gamma)), color.a);
 }

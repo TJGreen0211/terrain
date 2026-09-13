@@ -19,6 +19,12 @@ enum Camera_Movement {
 	RIGHT
 };
 
+extern float CameraDistance;
+extern const float CameraDistanceMax;
+extern GLfloat MovementSpeed;
+extern GLfloat CameraScrollSpeed;
+
+void setCameraPivot(vec3 pivot);
 vec3 getCamera();
 vec4 getCameraPosition(mat4 position);
 mat4 getViewMatrix();
@@ -26,6 +32,8 @@ mat4 getViewPosition();
 mat4 getViewRotation();
 
 void updateCameraVectors();
+void toggleSurfaceCamera(void);   // G: lock to a surface/tangent view
+int isSurfaceCamera(void);
 void processKeyboard(enum Camera_Movement direction, GLfloat deltaTime , GLfloat deltaSpeed);
 void processMouseMovement(float xpos, float ypos, int resetFlag);
 float processMouseScroll(float yoffset);

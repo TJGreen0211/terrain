@@ -402,25 +402,21 @@ mat4 multiplymat4(mat4 c, mat4 d)
 vec4 multiplymat4vec4(mat4 a, vec4 v)
 {
 	vec4 vout;
-	float temp = 0;
-	float u[4] = {0};
-	u[0] = v.x;
-	u[1] = v.y;
-	u[2] = v.z;
-	u[3] = v.w;
+	/* Write into a separate output: assigning u[i] in a loop while reading
+	   u[j] corrupts rows that still need the original components. */
+	float u[4] = {v.x, v.y, v.z, v.w};
+	float o[4] = {0, 0, 0, 0};
 	for(int i = 0; i < 4; i++)
 	{
 		for(int j = 0; j < 4; j++)
 		{
-			temp += a.m[i][j]*u[j];
+			o[i] += a.m[i][j]*u[j];
 		}
-		u[i] = temp;
-		temp = 0;
 	}
-	vout.x = u[0];
-	vout.y = u[1];
-	vout.z = u[2];
-	vout.w = u[3];
+	vout.x = o[0];
+	vout.y = o[1];
+	vout.z = o[2];
+	vout.w = o[3];
 	return vout;
 }
 

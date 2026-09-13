@@ -9,6 +9,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         glfwSetWindowShouldClose(window, GL_TRUE);
     if (key == GLFW_KEY_T && action == GLFW_PRESS && mode == 0)
         wireframe = !wireframe;
+    if (key == GLFW_KEY_G && action == GLFW_PRESS && mode == 0)
+        toggleSurfaceCamera();
 	if(action == GLFW_PRESS)
     	actionPress = GLFW_PRESS;
     else if(action == GLFW_RELEASE)
