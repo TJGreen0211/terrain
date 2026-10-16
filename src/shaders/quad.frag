@@ -150,9 +150,9 @@ float shadowCalculation(vec4 fLight) {
 
 void main()
 {
-	vec4 ambientProduct = vec4(0.20, 0.25, 0.34, 1.0);
+	vec3 ambientSky = vec3(0.10, 0.12, 0.16);   // cool skylight: keeps the night side off black
 	const float PI = 3.14159265359;
-	vec3 sunRadiance = vec3(1.0, 0.97, 0.90) * 2.2;
+	vec3 sunRadiance = vec3(1.0, 0.97, 0.90) * 1.15;
 
 	// 3D noise height field in the planet-local frame (stuck to the surface,
 	// rotates with the planet). Every face samples this one continuous field,
@@ -165,27 +165,31 @@ void main()
 	float h  = fbm3(dObj);
 	float hT = fbm3(normalize(dObj + T * SURF_EPS));
 	float hB = fbm3(normalize(dObj + B * SURF_EPS));
-	vec3 grad = T * ((hT - h) / SURF_EPS) + B * ((hB - h) / SURF_EPS);
-	vec3 Nobj = normalize(dObj - NORMAL_STRENGTH * grad);
-	vec3 N = normalize(fNormalMat * Nobj);
 
 	float e = clamp(h * 0.5 + 0.5, 0.0, 1.0);
 	vec4 color = vec4(heightRamp(e), 1.0);
 	vec3 albedo = color.rgb;
 
-	// Height-driven microfacet material: ocean = smooth/low-F0, land = rough,
+	// Height-driven microfacet material: ocean = smooth-ish/low-F0, land = rough,
 	// snow = in between (same bands as heightRamp: sea 0.50, beach 0.56, peak 0.85)
 	float oceanMask = 1.0 - smoothstep(0.50, 0.56, e);
 	float snowMask  = smoothstep(0.85, 0.95, e);
-	float rough = mix(0.78, 0.05, oceanMask);
+	float rough = mix(0.72, 0.15, oceanMask);   // ocean is no longer a perfect mirror
 	rough = mix(rough, 0.45, snowMask);
 	float a2 = max(rough * rough, 0.0004);
 	vec3 F0 = mix(vec3(0.04), vec3(0.02), oceanMask);
 	F0 = mix(F0, vec3(0.03), snowMask);
 
+	// Bump relief scaled by material: a smooth ocean keeps a coherent sun glint
+	// instead of scattering it into per-texel glitter; rough land keeps full relief.
+	float bump = mix(NORMAL_STRENGTH, NORMAL_STRENGTH * 0.25, oceanMask);
+	vec3 grad = T * ((hT - h) / SURF_EPS) + B * ((hB - h) / SURF_EPS);
+	vec3 Nobj = normalize(dObj - bump * grad);
+	vec3 N = normalize(fNormalMat * Nobj);
+
 	vec3 V = normalize(cameraPos - fragPos);
-	vec3 L = fL;
-	vec3 H = normalize(L + V);
+	vec3 L = normalize(fL);
+	vec3 H = normalize(L + V + vec3(1e-5));     // guard the L == -V (backscatter) case
 	float NdotL = dot(N, L);
 	float NdotV = max(dot(N, V), 1e-4);
 	float NdotH = max(dot(N, H), 0.0);
@@ -194,21 +198,35 @@ void main()
 	// GGX (Trowbridge-Reitz) normal distribution
 	float g = NdotH * NdotH * (a2 - 1.0) + 1.0;
 	float D = a2 / (PI * g * g + 1e-7);
-	// Smith joint visibility (GGX-correlated, Charlie's approximation)
-	float VG = 0.25 / max(NdotL * VdotH + NdotV * dot(H, L), 1e-4);
 	// Schlick fresnel
 	vec3 F = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
 
-	vec3 lit = ambientProduct.xyz * albedo;   // indirect sky/airlight term
-	float wrap = 0.35;                        // wrap diffuse: soft day/night terminator
+	vec3 lit = ambientSky * albedo;             // indirect sky/airlight term
+	float wrap = 0.25;                           // wrap diffuse: soft terminator
 	if (NdotL > -wrap) {
-		float wl = (NdotL + wrap) / (1.0 + wrap);
-		vec3 kd = 1.0 - F;                    // energy conservation (dielectric)
+		float wl = clamp((NdotL + wrap) / (1.0 + wrap), 0.0, 1.0);
+		vec3 kd = 1.0 - F;                       // energy conservation (dielectric)
 		vec3 diff = albedo / PI * kd * wl;
-		vec3 spec = (NdotL > 0.0) ? D * VG * F / (4.0 * NdotL * NdotV + 1e-4) : vec3(0.0);
+		vec3 spec = vec3(0.0);
+		if (NdotL > 0.0) {
+			// Smith-Schlick geometry term. Unlike the Charlie visibility
+			// approximation, G -> 0 as NdotL -> 0, so the specular cleanly vanishes
+			// at grazing incidence instead of diverging to white. The NdotL
+			// foreshortening is folded into the denominator (f·NdotL = D·G·F/(4·NdotV)),
+			// so the lobe also fades correctly toward the terminator.
+			float k = a2 * 0.5;
+			float G1L = NdotL / (NdotL * (1.0 - k) + k);
+			float G1V = NdotV / (NdotV * (1.0 - k) + k);
+			spec = (D * G1L * G1V * F) / (4.0 * NdotV + 1e-4);
+		}
 		lit += (diff + spec) * sunRadiance;
 	}
 
+	// Filmic (ACES) tone map: compresses hot specular while preserving albedo
+	// saturation, unlike Reinhard which trends everything toward white.
+	float exposure = 1.05;
+	vec3 x = lit * exposure;
+	lit = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 	float gamma = 2.2;
 	FragColor = vec4(pow(lit, vec3(1.0 / gamma)), color.a);
 }

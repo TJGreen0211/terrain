@@ -6,6 +6,7 @@ SRCS = Main.c \
 	Sun.c \
 	Skybox.c \
 	Atmosphere.c \
+	PbrGen.c \
 	glad.c \
 	LoadShader.c \
 	math/LinearAlg.c \

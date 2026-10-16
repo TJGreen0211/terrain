@@ -32,7 +32,13 @@ void main()
 	vec3 n = fPosition.xyz;//normalize(vPosition).xyz;
 	fSurfDir = fPosition.xyz;
 
-	mat3 normalMatrix = transpose(inverse(mat3(model)));
+	// Normal matrix: this pipeline transforms as row vectors (p * model * view
+	// * projection) from row-major uploads, so the GLSL matrix is the
+	// transposed model. Applying the standard transpose(inverse(M)) here would
+	// rotate normals by the planet's INVERSE rotation (day/night terminator
+	// drifting off the surface); inverse(M) alone yields the correct world
+	// normal under this convention.
+	mat3 normalMatrix = inverse(mat3(model));
 	fNormalMat = normalMatrix;
 	vec4 lightPos = vec4(lightPosition, 1.0);
 	vec3 lightDir = normalize(fPosition*model - lightPos).xyz;

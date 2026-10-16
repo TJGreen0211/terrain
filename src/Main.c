@@ -2,6 +2,7 @@
 #include "Sun.h"
 #include "Skybox.h"
 #include "Atmosphere.h"
+#include "PbrGen.h"
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -548,6 +549,11 @@ int main(int argc, char *argv[])
 	GLuint framebuffer = initFramebuffer(&textureColorBuffer, 1024, 1024);
 	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture, 512, 512);
 	//GLuint quadVAO = initQuadVAO();
+
+	// Generate the planet's per-face PBR maps (albedo, height, normal,
+	// roughness, metallic, AO) from the planet's noise field and write
+	// them out under ../assets/planet/pbr/ for inspection
+	generatePlanetPbrTextures();
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
