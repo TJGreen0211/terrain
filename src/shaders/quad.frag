@@ -25,12 +25,20 @@ uniform sampler2D depthMap;
 uniform sampler2D heightMap;
 uniform vec3 lodCameraPos;
 uniform float lodK;
+// Sea level from the baked + eroded height field (TerrainGen.c); the height
+// ramp and the material bands all key off this single value, and water.frag
+// gets the identical value so the discard edge sits on the coastline.
+uniform float seaLevel;
 
 const float PI = 3.14159265359;
 
 // Terrain height field + lighting controls (tweak here)
 #define SURF_EPS        0.030   // angular step for the surface gradient
 #define NORMAL_STRENGTH 0.62    // bump relief amount
+#define BEACH_OFF       0.06    // shoreline width above seaLevel
+#define TREE_OFF        0.20    // grass starts here above seaLevel
+#define PEAK_OFF        0.35    // rock/snow transition above seaLevel
+#define SNOW_BAND       0.10    // rock -> snow blend width
 
 float heightAt(vec3 d, float lodBase) {
 	float z = clamp(d.z, -1.0, 1.0);
@@ -48,10 +56,10 @@ vec3 heightRamp(float e) {
 	vec3 grass  = vec3(0.16, 0.38, 0.15);
 	vec3 ridge  = vec3(0.42, 0.38, 0.34);
 	vec3 snow   = vec3(0.92, 0.93, 0.95);
-	float sea   = 0.50;
-	float beach = 0.56;
-	float tree  = 0.70;
-	float peak  = 0.85;
+	float sea   = seaLevel;
+	float beach = seaLevel + BEACH_OFF;
+	float tree  = seaLevel + TREE_OFF;
+	float peak  = seaLevel + PEAK_OFF;
 	if (e < sea)   return mix(deep,  shall, smoothstep(0.0,   sea,   e));
 	if (e < beach) return mix(shall, sand,  smoothstep(sea,   beach, e));
 	if (e < tree)  return mix(sand,  grass, smoothstep(beach, tree,  e));
@@ -132,9 +140,9 @@ void main()
 	vec3 albedo = color.rgb;
 
 	// Height-driven microfacet material: ocean = smooth-ish/low-F0, land = rough,
-	// snow = in between (same bands as heightRamp: sea 0.50, beach 0.56, peak 0.85)
-	float oceanMask = 1.0 - smoothstep(0.50, 0.56, e);
-	float snowMask  = smoothstep(0.85, 0.95, e);
+	// snow = in between (same seaLevel-relative bands as heightRamp)
+	float oceanMask = 1.0 - smoothstep(seaLevel, seaLevel + BEACH_OFF, e);
+	float snowMask  = smoothstep(seaLevel + PEAK_OFF, seaLevel + PEAK_OFF + SNOW_BAND, e);
 	float rough = mix(0.72, 0.15, oceanMask);   // ocean is no longer a perfect mirror
 	rough = mix(rough, 0.45, snowMask);
 	float a2 = max(rough * rough, 0.0004);

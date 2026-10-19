@@ -6,7 +6,7 @@ SRCS = Main.c \
 	Sun.c \
 	Skybox.c \
 	Atmosphere.c \
-	PbrGen.c \
+	TerrainGen.c \
 	glad.c \
 	LoadShader.c \
 	math/LinearAlg.c \
@@ -18,7 +18,6 @@ SRCS = Main.c \
 	geometry/QuadCube.c \
 	geometry/QuadTree.c \
 	Water.c \
-	SimplexNoise.c \
 	common/Common.c \
 	common/CommonGL.c \
 	common/Textures.c \

@@ -25,6 +25,12 @@ uniform float time;
 // the drawn coastline.
 uniform sampler2D heightMap;
 uniform float lodK;
+// Sea level + ocean depth from the baked, eroded height field (TerrainGen.c).
+// The identical seaLevel quad.frag ramps with, so the discard edge lands on
+// the drawn coastline; oceanDepth normalizes the depth tint (it replaces the
+// old hardcoded 0.22 constant).
+uniform float seaLevel;
+uniform float oceanDepth;
 // 1 when the camera is outside the water shell; gates the back-face early-out.
 uniform float outsideShell;
 
@@ -82,14 +88,13 @@ void main()
 	float lod = log2(max(length(Vv)*lodK, 1e-4)) - log2(graz) + log2(1.0/cosLat);
 	float h = textureLod(heightMap, huv, clamp(lod, 0.0, 11.0)).r;
 	float e = clamp(h, 0.0, 1.0);
-	if (e > 0.5)
+	if (e > seaLevel)
 		discard;
 
-	// Water depth below sea level in height units. The planet fbm keeps its
-	// ocean mostly in a narrow band just under e = 0.5, so normalize the
-	// effective range (~0.22) rather than the theoretical half-open 0.5.
-	float depth = 0.5 - e;
-	float depthT = clamp(depth / 0.22, 0.0, 1.0);
+	// Water depth below sea level in height units, normalized by the 95th
+	// percentile depth of the eroded field so the tint spans its real range.
+	float depth = seaLevel - e;
+	float depthT = clamp(depth / max(oceanDepth, 1e-4), 0.0, 1.0);
 
 	vec2 duv = huv;
 	vec2 uv = duv * waveTiling;

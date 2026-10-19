@@ -2,7 +2,7 @@
 #include "Sun.h"
 #include "Skybox.h"
 #include "Atmosphere.h"
-#include "PbrGen.h"
+#include "TerrainGen.h"
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -27,6 +27,10 @@ float g_waveParams[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, norma
    pole/grazing corrections in the shaders. */
 GLuint planetHeightTex;
 #define LOD_K_NUMER (0.7853982f*1024.0f/3.1415926f)
+/* Geometric land relief as a fraction of the planet radius (quad.vert /
+   depth.vert displace the unit sphere by it; the ocean floor stays at 1.0
+   so the water shell covers it). */
+#define LAND_RELIEF 0.025f
 struct sphere planet;
 struct ring planetRing;
 struct quadCube qc, qc2;
@@ -280,6 +284,12 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec3 position, vec4
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
 	vec4 worldCam = getCameraPosition(identityMatrix());
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), worldCam.x, worldCam.y, worldCam.z);
+	/* Sea level + ocean depth from the last bake. planet and water go through
+	   this one function so they can never disagree — a different seaLevel in
+	   water.frag would drift the discard edge off the drawn coastline. */
+	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
+	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
+	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
 	glActiveTexture(GL_TEXTURE0);
 }
 
@@ -519,8 +529,20 @@ void drawOrbit(GLuint shader, GLuint texture, float theta, vec3 position, vec4 l
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
-void drawDepth(GLuint vao, GLuint shader, int vertices, vec4 lightPosition, mat4 m, mat4 l) {
+/* Shadow casters. displace=1 only for the planet grid: the same baked height
+   field displaces its shadow silhouette (quad.vert applies the identical
+   relief); moon/ring geometry must stay undisplaced. */
+void drawDepth(GLuint vao, GLuint shader, int vertices, vec4 lightPosition, mat4 m, mat4 l, int displace) {
 	glUseProgram(shader);
+	glUniform1f(glGetUniformLocation(shader, "displace"), displace ? 1.0f : 0.0f);
+	if (displace) {
+		glActiveTexture(GL_TEXTURE7);
+		glBindTexture(GL_TEXTURE_2D, planetHeightTex);
+		glUniform1i(glGetUniformLocation(shader, "heightMap"), 7);
+		glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
+		glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
+		glActiveTexture(GL_TEXTURE0);
+	}
 	glBindVertexArray(vao);
 	initMVP(shader, m, l);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &l.m[0][0]);
@@ -636,11 +658,10 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-	GLuint textureColorBuffer, sunNoiseTexture;
+	GLuint sunNoiseTexture;
 
 	struct waves ocean;
 	initializeWaves(&ocean, 256);
-	initializeNoise();
 
 	GLuint tessShader = initTessShader();
 	GLuint atmosphereShader = initAtmosphereShader();
@@ -681,18 +702,13 @@ int main(int argc, char *argv[])
 	GLuint quadCubeVAO = initQuadCube(30);
 
 	GLuint depthbuffer = initDepthbuffer();
-	GLuint framebuffer = initFramebuffer(&textureColorBuffer, 1024, 1024);
 	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture, 512, 512);
 	//GLuint quadVAO = initQuadVAO();
 
-	// Generate the planet's per-face PBR maps (albedo, height, normal,
-	// roughness, metallic, AO) from the planet's noise field and write
-	// them out under ../assets/planet/pbr/ for inspection
-	generatePlanetPbrTextures();
-
-	/* Bake the planet height field (quad.frag's noise) into a mip'd texture
-	   so the body shaders sample it instead of evaluating noise per pixel. */
-	planetHeightTex = bakePlanetHeightmap();
+	/* Bake the planet height field: GPU shaping + CPU erosion + sea level
+	   stats (TerrainGen.c). The seed advances on every H-key re-bake. */
+	unsigned int planetSeed = 1337u;
+	planetHeightTex = generatePlanetHeightmap(planetSeed, &g_planetGen);
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
@@ -751,18 +767,14 @@ int main(int argc, char *argv[])
 		}*/
 		fpsFrames++;
 
+		/* H: re-roll the seed and re-bake the height field (1-3 s hitch). */
+		if (consumeRegenRequest()) {
+			glDeleteTextures(1, &planetHeightTex);
+			planetHeightTex = generatePlanetHeightmap(++planetSeed, &g_planetGen);
+		}
+
 		generateWaves(&ocean);
 
-		clock_t start,end;
-		float time_spent;
-		start=clock();
-		//for(int i = 0; i <100;i++) {
-		generateNoiseTexture(framebuffer, 0);
-		end=clock();
-		time_spent=(((float)end - (float)start) / 1000000.0F );
-		//printf("\nSystem time is at %f\n seconds", time_spent);
-
-		//generateNoiseTexture(sunFramebuffer, 1);
 		if (!getRotationPaused())
 			theta += 0.5;
 
@@ -805,13 +817,13 @@ int main(int argc, char *argv[])
 			position.z = (2000.0) * sin(theta/100.0);
 			mat4 positionMatrix = translatevec3(translation);
 			model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(position)), scale(100.0)),rotateX(90.0));
-			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix);
+			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix, 0);
 			model = multiplymat4(multiplymat4(translatevec3(translation), rotateX(80.0)), scale(fScale*1.5));
 			glDisable(GL_CULL_FACE);
-			drawDepth(ringVAO, depthShader, planetRing.vertexNumber, lightPosition, model, lightSpaceMatrix);
+			drawDepth(ringVAO, depthShader, planetRing.vertexNumber, lightPosition, model, lightSpaceMatrix, 0);
 			glEnable(GL_CULL_FACE);
 			model = multiplymat4(translatevec3(translation), scale(fScale));
-			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix);
+			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix, 1);
 			//model = multiplymat4(translate(25.0, 0.0, -90.0), scale(10.0));
 			//drawDepth(quadVAO, depthShader, 6, lightPosition, model, lightSpaceMatrix);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -855,7 +867,7 @@ int main(int argc, char *argv[])
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
 		model = multiplymat4(scale(fScale), matR);
 		setBodyUniforms(quadShader, fScale, model, lightPositionXYZ, lightPosition,
-		                textureColorBuffer, dxWaveTex, 0, 0, 0);
+		                0, dxWaveTex, 0, 0, 0);
 		QuadTree_DrawSphere(model, fScale);
 
 		//Water: same quadtree LOD as the planet, FFT-displaced sea-level

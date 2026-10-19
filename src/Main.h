@@ -15,7 +15,6 @@
 #include "Window.h"
 #include "Sphere.h"
 #include "Geometry.h"
-#include "SimplexNoise.h"
 #include "Obj.h"
 #include "QuadCube.h"
 #include "Quadtree.h"

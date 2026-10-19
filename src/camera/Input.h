@@ -15,5 +15,6 @@
 void doMovement(float deltaTime);
 int getWireframeState(void);
 int getRotationPaused(void);
+int consumeRegenRequest(void);
 
 #endif

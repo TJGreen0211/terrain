@@ -3,6 +3,7 @@
 static int actionPress, keys;
 static int wireframe = 0;
 static int rotationPaused = 0;
+static int regenRequested = 0;
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
@@ -14,6 +15,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         toggleSurfaceCamera();
     if (key == GLFW_KEY_R && action == GLFW_PRESS && mode == 0)
         rotationPaused = !rotationPaused;
+    if (key == GLFW_KEY_H && action == GLFW_PRESS && mode == 0)
+        regenRequested = 1;
 	if(action == GLFW_PRESS)
     	actionPress = GLFW_PRESS;
     else if(action == GLFW_RELEASE)
@@ -71,4 +74,10 @@ int getWireframeState(void) {
 
 int getRotationPaused(void) {
 	return rotationPaused;
+}
+
+int consumeRegenRequest(void) {
+	int r = regenRequested;
+	regenRequested = 0;
+	return r;
 }
