@@ -14,5 +14,6 @@
 
 void doMovement(float deltaTime);
 int getWireframeState(void);
+int getRotationPaused(void);
 
 #endif

@@ -164,3 +164,63 @@ void generatePlanetPbrTextures()
 	fprintf(stderr, "[PBR] wrote %d/%d textures to ../assets/planet/pbr\n",
 	        written, PBR_NUM_FACES * PBR_NUM_PASSES);
 }
+
+/* Bakes the planet height field into a 2048x1024 equirectangular GL_R16F
+   texture with a full mipmap chain; log2(2048) = 11 is the max lod both
+   quad.frag and water.frag clamp their textureLod to. The half-float channel
+   keeps the surface-gradient samples (hT - h) free of 8-bit banding. */
+#define HEIGHTMAP_W 2048
+#define HEIGHTMAP_H 1024
+
+unsigned int bakePlanetHeightmap(void)
+{
+	GLuint program, quadVAO, quadVBO, tex, fbo;
+
+	createShader(&program, "shaders/heightbake.vert", "shaders/heightbake.frag");
+
+	static const float quadCoords[8] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
+	glGenVertexArrays(1, &quadVAO);
+	glBindVertexArray(quadVAO);
+	glGenBuffers(1, &quadVBO);
+	glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(quadCoords), quadCoords, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(0));
+	glEnableVertexAttribArray(0);
+	glBindVertexArray(0);
+
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, HEIGHTMAP_W, HEIGHTMAP_H, 0,
+	             GL_RED, GL_HALF_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	/* Longitude is periodic; the latitude clamp keeps the poles from
+	   wrapping into each other. */
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		fprintf(stderr, "[height] framebuffer incomplete: 0x%x\n",
+		        (unsigned)glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+	glViewport(0, 0, HEIGHTMAP_W, HEIGHTMAP_H);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glUseProgram(program);
+	glBindVertexArray(quadVAO);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glGenerateMipmap(GL_TEXTURE_2D);
+
+	glBindVertexArray(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glViewport(0, 0, getWindowWidth(), getWindowHeight());
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_CULL_FACE);
+
+	return tex;
+}

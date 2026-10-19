@@ -7,4 +7,10 @@
 // under ../assets/planet/pbr/<face>/.
 void generatePlanetPbrTextures(void);
 
+// Bakes the planet height field (quad.frag's fbm3) into a 2048x1024
+// equirectangular GL_R16F texture with a full mipmap chain and returns its
+// texture id. quad.frag/water.frag sample this instead of evaluating simplex
+// noise per pixel (heightMap uniform, lodK = lod scale, lodCameraPos).
+unsigned int bakePlanetHeightmap(void);
+
 #endif

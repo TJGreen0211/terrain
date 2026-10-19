@@ -29,6 +29,12 @@ void main()
 	fPosition.xyz = (length(transformed) > 0.0001) ? normalize(transformed) : vec3(0.0);
 	//fPosition.xyz = (fPosition*vInstanceMatrix).xyz;
 
+	// Boundary skirt: wall vertices (w = 1) sit just under the undisplaced
+	// planet surface (the planet has no vertex displacement) so they hide
+	// T-junction seams along LOD patch edges without z-fighting it.
+	if(vPosition.w > 0.5)
+		fPosition.xyz *= 0.995;
+
 	vec3 n = fPosition.xyz;//normalize(vPosition).xyz;
 	fSurfDir = fPosition.xyz;
 
