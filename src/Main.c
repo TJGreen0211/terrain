@@ -783,6 +783,10 @@ int main(int argc, char *argv[])
 		//model = multiplymat4(translatevec3(translation), scale(fScale));
 		//mat4 m = multiplymat4(model,matR);
 		model = multiplymat4(scale(fScale), matR);
+		vec3 atmosphereC_R = { 0.3f, 0.7f, 1.0f };
+		float atmosphereOuter = fScale * 1.0212f;
+		setAtmosphereSurfaceUniforms(quadShader, fScale, atmosphereOuter, atmosphereC_R);
+		setAtmosphereSurfaceUniforms(waterShader, fScale, atmosphereOuter, atmosphereC_R);
 		int order[3];
 		float negate = 1.0;
 		order[0] = 0; order[1] = 1; order[2] = 2;
@@ -834,9 +838,8 @@ int main(int argc, char *argv[])
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//scaled planet shell; Earth params: C_R (0.3, 0.7, 1.0), E 14.3, 2.12% shell)
 		{
-			vec3 C_R = { 0.3f, 0.7f, 1.0f };
 			drawAtmosphereDome(atmosphereShader, sunProj, sunView, identityMatrix(),
-			                   fScale, fScale * 1.0212f, C_R, 14.3f, lightPositionXYZ);
+			                   fScale, atmosphereOuter, atmosphereC_R, 14.3f, lightPositionXYZ);
 		}
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)

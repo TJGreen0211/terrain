@@ -17,6 +17,66 @@ uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
 uniform sampler2D depthMap;
+uniform float fInnerRadius;
+uniform float fOuterRadius;
+uniform vec3 C_R;
+
+const float ATMO_PI = 3.14159265359;
+const float ATMO_MAX = 1e30;
+const float ATMO_K_R = 0.166;
+const float ATMO_K_M = 0.0025;
+const int ATMO_STEPS = 3;
+
+vec2 atmosphereIntersection(vec3 p, vec3 dir, float radius)
+{
+	float b = dot(p, dir);
+	float c = dot(p, p) - radius * radius;
+	float d = b * b - c;
+	if (d < 0.0)
+		return vec2(ATMO_MAX, -ATMO_MAX);
+	d = sqrt(d);
+	return vec2(-b - d, -b + d);
+}
+
+float atmosphereOptic(vec3 p, vec3 q, float scaleH, float scaleL)
+{
+	vec3 step = (q - p) / float(ATMO_STEPS);
+	vec3 v = p + step * 0.5;
+	float sum = 0.0;
+	for (int i = 0; i < ATMO_STEPS; i++) {
+		sum += exp(-(length(v) - fInnerRadius) * scaleH);
+		v += step;
+	}
+	return sum * length(step) * scaleL;
+}
+
+vec3 applyAtmosphereExtinction(vec3 radiance)
+{
+	if (fOuterRadius <= fInnerRadius)
+		return radiance;
+
+	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+	vec3 eye = cameraPos;
+	vec3 ray = fragPos - eye;
+	float fragmentDistance = length(ray);
+	vec3 dir = ray / max(fragmentDistance, 1e-6);
+
+	vec2 e = atmosphereIntersection(eye, dir, fOuterRadius);
+	if (e.x > e.y)
+		return radiance;
+	vec2 f = atmosphereIntersection(eye, dir, fInnerRadius);
+	e.x = max(e.x, 0.0);
+	e.y = min(e.y, fragmentDistance);
+	if (f.x > e.x)
+		e.y = min(e.y, f.x);
+	if (e.y <= e.x)
+		return radiance;
+
+	float tau = atmosphereOptic(eye + dir * e.x, eye + dir * e.y,
+	                            scaleH, scaleL) * (4.0 * ATMO_PI);
+	return radiance * exp(-(ATMO_K_R * C_R + ATMO_K_M) * tau);
+}
 
 // 3D simplex noise (Ashima Arts / I. McEwan, texture-free)
 vec3 mod289v(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
@@ -221,6 +281,8 @@ void main()
 		}
 		lit += (diff + spec) * sunRadiance;
 	}
+
+	lit = applyAtmosphereExtinction(lit);
 
 	// Filmic (ACES) tone map: compresses hot specular while preserving albedo
 	// saturation, unlike Reinhard which trends everything toward white.
