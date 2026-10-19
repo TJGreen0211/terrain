@@ -46,7 +46,9 @@ void main()
 	fN = normalize(n*normalMatrix);
 	fL = -normalize(lightDir);
 
-	fLightSpace = fPosition*model*vInstanceMatrix;
+	// fPosition already carries the instance transform (normalized above), so
+	// applying vInstanceMatrix again would double-transform the shadow lookup.
+	fLightSpace = fPosition*model;
 	fragPos = vec3(fPosition*model).xyz;
 	fTexCoords = (fPosition.xy+1.0)/2.0;//vTexCoords*mat2(vInstanceMatrix);
 

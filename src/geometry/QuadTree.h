@@ -24,6 +24,9 @@ typedef struct qTree {
 	unsigned int length;
 } qTree;
 
-void traverseQuad(mat4 model, int *order, GLuint VAO, GLuint VBO, GLuint sVBO, GLuint shader, vec3 position, vec4 lightPosition, GLuint texture1, GLuint texture2, GLuint depthMap, float negate);
+void traverseQuad(mat4 model, int *order, GLuint VAO, GLuint VBO, GLuint sVBO, GLuint shader, vec3 position, vec4 lightPosition, GLuint texture1, GLuint texture2, GLuint depthMap, GLuint dxTex, GLuint dzTex, GLuint skyTex, float negate);
+
+extern mat4 g_lightSpaceMatrix;
+extern float g_waveParams[4];
 
 #endif

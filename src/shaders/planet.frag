@@ -29,7 +29,7 @@ uniform sampler2D displacementTex;
 float shadowCalculation(vec4 fLight) {
 	vec3 fragToLight = teShadow - lightPosition;
 	float closestDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5)).r;
-	float currentDepth = length(fragToLight)/700.0;
+	float currentDepth = length(fragToLight)/7000.0;
 	//closestDepth *= 700.0;
 
 	float shadow = 0.0;

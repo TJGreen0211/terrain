@@ -6,9 +6,9 @@ const float toRadians = (float)(M_PI / 180.0f);
 #define ARCBALL_RADIUS 1.0f
 
 /* Orbit radius: how far the camera sits from the pivot the scene rotates
-   around. Tuned for the terrain scene (planet r~30 at the origin, sun at
-   ~566). Scroll dollies this between 0 (camera at the pivot) and the max. */
-float CameraDistance = 250.0f;
+   around. Tuned for the terrain scene (planet r~300 at the origin, sun at
+   ~5657). Scroll dollies this between 0 (camera at the pivot) and the max. */
+float CameraDistance = 900.0f;
 const float CameraDistanceMax = 6000.0f;
 GLfloat MovementSpeed = 200.0f;
 GLfloat CameraScrollSpeed = 10.0f;   // fine: lets you dolly all the way through the atmosphere shell
@@ -61,13 +61,13 @@ static vec3 Pivot = { 0.0f, 0.0f, 0.0f };
 static int dragging = 0;
 
 /* Sub-solar surface preset. When active the camera stands just above the
-   planet surface (radius 30) at the sub-solar point — the spot where the fixed
-   sun (dir normalize(-400,0,-400)) is directly overhead — looking across a
+   planet surface (radius 300) at the sub-solar point — the spot where the fixed
+   sun (dir normalize(-4000,0,-4000)) is directly overhead — looking across a
    local tangent tilted SURFACE_TILT below the horizon, up = the radial
    direction. That gives a lit daytime interior: blue sky dome up top, bright
    horizon, sunlit fog-ground below. Press G to toggle (see Input.c). */
 static int surfaceView = 0;
-#define SURFACE_RAD 33.0f
+#define SURFACE_RAD 330.0f
 #define SURFACE_TILT 24.0f
 static float surfAlt = SURFACE_RAD;
 
@@ -375,14 +375,14 @@ void processMouseMovement(float xpos, float ypos, int resetFlag)
 
 /* Scroll in (yoffset < 0) shrinks the orbit radius to 0, out grows it to max.
    In surface mode the same scroll dollies the camera altitude through the
-   atmosphere shell (30 -> 45) instead of the orbit radius. */
+   atmosphere shell (300 -> 445) instead of the orbit radius. */
 float processMouseScroll(float yoffset)
 {
     if (surfaceViewActive())
     {
         surfAlt += yoffset * CameraScrollSpeed;
         if (surfAlt < SURFACE_RAD) surfAlt = SURFACE_RAD;
-        if (surfAlt > 44.5f) surfAlt = 44.5f;
+        if (surfAlt > 445.0f) surfAlt = 445.0f;
         return 1.0f;
     }
     CameraDistance += yoffset * CameraScrollSpeed;

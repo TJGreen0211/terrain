@@ -6,7 +6,7 @@
 // NDC half-size is the projected NDC radius of a sphere this big at the sun's
 // depth, so the sun shrinks/grows with the camera the same way a real sphere
 // would. Tune larger for a bigger sun, smaller for a smaller one.
-const float SUN_GLOW_RADIUS = 250.0f;
+const float SUN_GLOW_RADIUS = 2500.0f;
 
 static GLuint sunTexture;
 static GLuint sunNormal;

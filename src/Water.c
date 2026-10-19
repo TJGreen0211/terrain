@@ -6,6 +6,7 @@
 
 #include "Water.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 
 complexType complexMult(complexType c0, complexType c1) {
@@ -30,10 +31,10 @@ complexType complexConj(complexType c) {
 }
 
 vec4 gaussRand() {
-	float noise00 = (float)rand()/(float)(RAND_MAX);
-	float noise01 = (float)rand()/(float)(RAND_MAX);
-	float noise02 = (float)rand()/(float)(RAND_MAX);
-	float noise03 = (float)rand()/(float)(RAND_MAX);
+	float noise00 = ((float)rand() + 1.0f)/((float)RAND_MAX + 1.0f);
+	float noise01 = ((float)rand() + 1.0f)/((float)RAND_MAX + 1.0f);
+	float noise02 = ((float)rand() + 1.0f)/((float)RAND_MAX + 1.0f);
+	float noise03 = ((float)rand() + 1.0f)/((float)RAND_MAX + 1.0f);
 
 	float u0 = 2.0*M_PI*noise00;
 	float v0 = sqrt(-2.0 * logf(noise01));
@@ -49,7 +50,7 @@ float phillips(vec2 k) {
 	vec2 waveDir = {30.0, 0.0};
 
 	float k2 = k.x * k.x + k.y * k.y;
-	if(k2 < 0.0001) k2 = 0.0001;
+	if(k2 < 0.0001) return 0.0;
 	float wV = lengthvec2(waveDir);
 	float L = (wV*wV)/g;
 	float dampingVal = 0.0001;
@@ -63,38 +64,49 @@ float phillips(vec2 k) {
 	return A * (exp(-1.0/ (k2 * L * L))/(k2*k2)) * (omegaK*omegaK*omegaK*omegaK) * exp(-k2*L*L*dampingVal*dampingVal);
 }
 
+static float waveNumber(float n, int dim, float L) {
+	float idx = (n < (dim / 2.0f)) ? n : n - dim;
+	return 2.0f*M_PI*idx/L;
+}
+
 void initH0(waves *water) {
 	float L = 1000.0;
-	int offset = 0;
-	for(float N = 0.0; N < water->dimension; N +=1.0) {
-		for(float M = 0.0; M < water->dimension; M +=1.0) {
-			vec2 k = {2.0*M_PI*N/L, 2.0*M_PI*M/L};
+	int dim = water->dimension;
+	for(int N = 0; N < dim; N++) {
+		for(int M = 0; M < dim; M++) {
+			vec2 k = {waveNumber((float)N, dim, L), waveNumber((float)M, dim, L)};
 
 			vec4 grnd = gaussRand();
 			float h0 = 1/sqrt(2.0) * sqrt(phillips(k));
-			vec2 kNegative = {-k.x, -k.y};
-			float h0Conj = 1/sqrt(2.0) * sqrt(phillips(kNegative));
+			int offset = N*dim + M;
 			water->tildeh0k[offset].real = grnd.x*h0; water->tildeh0k[offset].im = grnd.y*h0;
-			water->conjTildeh0MK[offset].real = grnd.z*h0Conj; water->conjTildeh0MK[offset].im = grnd.w*h0Conj;
-			water->conjTildeh0MK[offset] = complexConj(water->conjTildeh0MK[offset]);
-			offset++;
+		}
+	}
+
+	for(int N = 0; N < dim; N++) {
+		for(int M = 0; M < dim; M++) {
+			int offset = N*dim + M;
+			int mirror = ((dim - N) % dim)*dim + ((dim - M) % dim);
+			water->conjTildeh0MK[offset] = complexConj(water->tildeh0k[mirror]);
 		}
 	}
 }
 
-void calcH0(waves *water) {//(int dim, complexType *dx, complexType *dy, complexType *dz, complexType *tildeh0kTemp, complexType *conjTildeh0MKTemp) {
+void calcH0(waves *water) {
 	float L = 1000.0;
+	float t = glfwGetTime();
+	int dim = water->dimension;
 	int offset = 0;
-	for(float N = 0.0; N < water->dimension; N +=1.0) {
-		for(float M = 0.0; M < water->dimension; M +=1.0) {
-			vec2 k = {2.0*M_PI*N/L, 2.0*M_PI*M/L};
+	for(int N = 0; N < dim; N++) {
+		for(int M = 0; M < dim; M++) {
+			vec2 k = {waveNumber((float)N, dim, L), waveNumber((float)M, dim, L)};
 
 			float magnitude = lengthvec2(k);
 			if(magnitude < 0.0001) magnitude = 0.0001;
 			float w = sqrt(9.81* magnitude);
 
-			float cosinus = cos(w+glfwGetTime());
-			float sinus = sin(w+glfwGetTime());
+			float cosinus = cos(w*t);
+			float sinus = sin(w*t);
 
 			//float cosinus = cos(w);
 			//float sinus = sin(w);
@@ -133,6 +145,7 @@ void complexBitReverse(complexType *c, int dim) {
 	}
 }
 
+// Unnormalized inverse FFT; caller divides by dim*dim for the 2d case.
 void fft(int dim, complexType *c) {
 	complexBitReverse(c, dim);
 	int log2n = log(dim)/log(2);
@@ -160,7 +173,6 @@ void fft(int dim, complexType *c) {
 			u1 = z;
 		}
 		c2 = sqrt((1.0 - c1) / 2.0);
-		c2 = -c2;
 		c1 = sqrt((1.0 + c1) / 2.0);
 	}
 }
@@ -207,7 +219,82 @@ void fft2d(int dim, complexType *c) {
 	free(row);
 }
 
-void initializeWaves(waves *water, int dim) {	
+static float hash2(int x, int y) {
+	unsigned n = x*374761393u + y*668265263u;
+	n = (n ^ (n >> 13)) * 1274126177u;
+	n = n ^ (n >> 16);
+	return (float)(n & 0xFFFFFF) / 16777215.0f;
+}
+
+static float vnoise(float x, float y, int period) {
+	int xi = (int)floorf(x), yi = (int)floorf(y);
+	float xf = x - (float)xi, yf = y - (float)yi;
+	float u = xf*xf*(3.0f-2.0f*xf), v = yf*yf*(3.0f-2.0f*yf);
+	int x0 = ((xi % period) + period) % period, y0 = ((yi % period) + period) % period;
+	int x1 = (x0 + 1) % period, y1 = (y0 + 1) % period;
+	float a = hash2(x0, y0), b = hash2(x1, y0), c = hash2(x0, y1), d = hash2(x1, y1);
+	return a + (b-a)*u + (c-a)*v + (a-b-c+d)*u*v;
+}
+
+static float detailFbm(float x, float y, int size) {
+	float v = 0.0f, amp = 0.5f;
+	for(int o = 0; o < 4; o++) {
+		int period = 8 << o;
+		v += amp * vnoise(x/(float)size*(float)period, y/(float)size*(float)period, period);
+		amp *= 0.5f;
+	}
+	return v;
+}
+
+static GLuint createDetailNormalTexture(int size) {
+	float *h = malloc(size*size*sizeof(float));
+	unsigned char *data = malloc(size*size*4);
+	for(int y = 0; y < size; y++)
+		for(int x = 0; x < size; x++)
+			h[y*size+x] = detailFbm((float)x, (float)y, size);
+	for(int y = 0; y < size; y++) {
+		for(int x = 0; x < size; x++) {
+			float hl = h[y*size + (x-1+size)%size];
+			float hr = h[y*size + (x+1)%size];
+			float hdn = h[((y-1+size)%size)*size + x];
+			float hup = h[((y+1)%size)*size + x];
+			float nx = (hl-hr)*8.0f, ny = (hdn-hup)*8.0f;
+			float inv = 1.0f/sqrtf(nx*nx+ny*ny+1.0f);
+			unsigned char *px = &data[(y*size+x)*4];
+			px[0] = (unsigned char)((nx*inv*0.5f+0.5f)*255.0f);
+			px[1] = (unsigned char)((ny*inv*0.5f+0.5f)*255.0f);
+			px[2] = (unsigned char)((inv*0.5f+0.5f)*255.0f);
+			px[3] = 255;
+		}
+	}
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	free(h);
+	free(data);
+	return tex;
+}
+
+static GLuint createWaveTexture(int dim) {
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, dim, dim, 0, GL_RED, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	return tex;
+}
+
+void initializeWaves(waves *water, int dim) {
 	water->dimension = dim;
 	
 	water->dx = malloc(dim*dim*sizeof(complexType));
@@ -215,51 +302,58 @@ void initializeWaves(waves *water, int dim) {
 	water->dz = malloc(dim*dim*sizeof(complexType));
 	water->tildeh0k = malloc(dim*dim*sizeof(complexType));
 	water->conjTildeh0MK = malloc(dim*dim*sizeof(complexType));
-	
+
+	water->dxData = malloc(dim*dim*sizeof(float));
+	water->dyData = malloc(dim*dim*sizeof(float));
+	water->dzData = malloc(dim*dim*sizeof(float));
+
+	water->dxTexture = createWaveTexture(dim);
+	water->dyTexture = createWaveTexture(dim);
+	water->dzTexture = createWaveTexture(dim);
+	water->detailTexture = createDetailNormalTexture(128);
+
 	initH0(water);
+
+	// Calibrate displacement once so wave height is a fixed fraction of the
+	// unit sphere radius no matter the spectrum tuning (planet is drawn on the
+	// unit sphere; sea level = radius 1).
+	{
+		int dim2 = dim*dim;
+		calcH0(water);
+		fft2d(dim, water->dy);
+		float sum = 0.0;
+		for(int i = 0; i < dim2; i++) {
+			float h = water->dy[i].real;
+			sum += h*h;
+		}
+		float rms = sqrtf(sum/(float)dim2);
+		float targetRms = 0.0025f;
+		// Absorbs the 1/dim^2 unnormalized-IFFT factor: data = raw * heightScale.
+		water->heightScale = (rms > 0.0f) ? targetRms/rms : 1.0f;
+	}
 }
 
 void generateWaves(waves *water) {
-	int dim2 = water->dimension*water->dimension;
+	int dim = water->dimension;
+	int dim2 = dim*dim;
 
-	float *displacementdx = malloc(dim2*4*sizeof(float));
-	float *displacementdy = malloc(dim2*4*sizeof(float));
-	float *displacementdz = malloc(dim2*4*sizeof(float));
+	calcH0(water);
+	fft2d(dim, water->dy);
+	fft2d(dim, water->dx);
+	fft2d(dim, water->dz);
 
-	calcH0(water);//dimension, dx, dy, dz, water.tildeh0k, water.conjTildeh0MK);
-	fft2d(water->dimension, water->dy);
-	fft2d(water->dimension, water->dx);
-	fft2d(water->dimension, water->dz);
-	int index = 0;
+	float scale = water->heightScale;
 	for(int i = 0; i < dim2; i++) {
-		float dxh = fabsf(water->dx[i].real/(dim2));
-		float dyh = fabsf(water->dy[i].real/(dim2));
-		float dzh = fabsf(water->dz[i].real/(dim2));
-		//float h = dy[i].real/(dimension*dimension);
-
-		displacementdx[index] = dxh;
-		displacementdx[index+1] = dxh;
-		displacementdx[index+2] = dxh;
-		displacementdx[index+3] = 1.0;
-
-		displacementdy[index] = dyh;
-		displacementdy[index+1] = dyh;
-		displacementdy[index+2] = dyh;
-		displacementdy[index+3] = 1.0;
-
-		displacementdz[index] = dzh;
-		displacementdz[index+1] = dzh;
-		displacementdz[index+2] = dzh;
-		displacementdz[index+3] = 1.0;
-
-		index+=4;
+		water->dxData[i] = water->dx[i].real*scale;
+		water->dyData[i] = water->dy[i].real*scale;
+		water->dzData[i] = water->dz[i].real*scale;
 	}
-	
-	//water->dx = displacementdx;
-	//water->dy = displacementdy;
-	//water->dz = displacementdz;
 
-	free(displacementdx);
-	free(displacementdy);
-	free(displacementdz);
+	glBindTexture(GL_TEXTURE_2D, water->dxTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RED, GL_FLOAT, water->dxData);
+	glBindTexture(GL_TEXTURE_2D, water->dyTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RED, GL_FLOAT, water->dyData);
+	glBindTexture(GL_TEXTURE_2D, water->dzTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RED, GL_FLOAT, water->dzData);
+	glBindTexture(GL_TEXTURE_2D, 0);
 }

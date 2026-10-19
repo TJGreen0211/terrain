@@ -39,7 +39,7 @@ float shadowCalculation(vec4 fLight) {
 	//fragToLight = fLight.xyz * 0.5 + 0.5;
 	//fragToLight = fragToLight/700.0;
 	float closestDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5)).r;
-	float currentDepth = length(fragToLight)/700.0;
+	float currentDepth = length(fragToLight)/7000.0;
 	//closestDepth *= 700.0;
 	
 	float shadow = 0.0;

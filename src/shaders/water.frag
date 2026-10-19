@@ -1,140 +1,213 @@
 #version 410
 
-in vec4 fLightSpace;
-in vec3 fTangent;
+in vec3 fSurfDir;
 in vec3 fragPos;
-in vec3 fPosition;
-in vec3 fN;
-in vec3 vColor;
-in vec2 fTexCoords;
+in mat3 fNormalMat;
+in float fWave;
 
 out vec4 FragColor;
 
-uniform mat4 model;
+uniform mat4 lightSpace;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
-uniform sampler2D texture1;
+uniform sampler2D waveDx;
+uniform sampler2D waveDz;
+uniform sampler2D detailNormal;
+uniform samplerCube skybox;
 uniform sampler2D depthMap;
-uniform sampler2D noiseTexture;
-uniform mat4 lightSpace;
+uniform float waveNormalStrength;
+uniform float waveTiling;
+uniform float time;
 
-const vec3 seaColor = vec3(0.1,0.19,0.22);
-const vec3 seaBase = vec3(0.1,0.19,0.22);
+// Planet height field: must match quad.frag exactly (same noise, frequency,
+// octaves, and the sea band at e = 0.50) so the water mask lines up with the
+// coastline drawn by the planet shader.
+#define NOISE_FREQ      2.6
+#define NOISE_OCTAVES   4
+
+const float PI = 3.14159265359;
+
+vec3 mod289v(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+vec4 mod289v(vec4 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289v(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise(vec3 v) {
+	const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+	const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+	vec3 i  = floor(v + dot(v, C.yyy));
+	vec3 x0 = v - i + dot(i, C.xxx);
+	vec3 g = step(x0.yzx, x0.xyz);
+	vec3 l = 1.0 - g;
+	vec3 i1 = min(g.xyz, l.zxy);
+	vec3 i2 = max(g.xyz, l.zxy);
+	vec3 x1 = x0 - i1 + C.xxx;
+	vec3 x2 = x0 - i2 + C.yyy;
+	vec3 x3 = x0 - D.yyy;
+	i = mod289v(i);
+	vec4 p = permute(permute(permute(
+			i.z + vec4(0.0, i1.z, i2.z, 1.0))
+			+ i.y + vec4(0.0, i1.y, i2.y, 1.0))
+			+ i.x + vec4(0.0, i1.x, i2.x, 1.0));
+	float n_ = 0.142857142857;
+	vec3 ns = n_ * D.wyz - D.xzx;
+	vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+	vec4 x_ = floor(j * ns.z);
+	vec4 y_ = floor(j - 7.0 * x_);
+	vec4 x = x_ * ns.x + ns.yyyy;
+	vec4 y = y_ * ns.x + ns.yyyy;
+	vec4 h = 1.0 - abs(x) - abs(y);
+	vec4 b0 = vec4(x.xy, y.xy);
+	vec4 b1 = vec4(x.zw, y.zw);
+	vec4 s0 = floor(b0)*2.0 + 1.0;
+	vec4 s1 = floor(b1)*2.0 + 1.0;
+	vec4 sh = -step(h, vec4(0.0));
+	vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+	vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+	vec3 p0 = vec3(a0.xy, h.x);
+	vec3 p1 = vec3(a0.zw, h.y);
+	vec3 p2 = vec3(a1.xy, h.z);
+	vec3 p3 = vec3(a1.zw, h.w);
+	vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+	p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+	vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+	m = m*m;
+	return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+}
+
+float fbm3(vec3 p) {
+	float v = 0.0;
+	float amp = 0.5;
+	float frq = NOISE_FREQ;
+	for (int i = 0; i < NOISE_OCTAVES; i++) {
+		v += amp * snoise(p * frq);
+		frq *= 2.0;
+		amp *= 0.5;
+	}
+	return v;
+}
 
 float shadowCalculation(vec4 fLight) {
 	vec3 fragToLight = fragPos - lightPosition;
-	//fragToLight = fLight.xyz * 0.5 + 0.5;
-	//fragToLight = fragToLight/700.0;
-	float closestDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5)).r;
-	float currentDepth = length(fragToLight)/700.0;
-	//closestDepth *= 700.0;
-
 	float shadow = 0.0;
 	vec2 texelSize = 1.0 / textureSize(depthMap, 0);
 	for(int x = -1; x <= 1; ++x) {
 		for(int y = -1; y <= 1; ++y) {
 			float pcfDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5) + vec2(x, y) * texelSize).r;
+			float currentDepth = length(fragToLight)/7000.0;
 			shadow += currentDepth - 0.02 > pcfDepth ? 1.0 : 0.0;
 		}
 	}
-
-	return shadow /= 9.0;
+	shadow /= 9.0;
+	return shadow;
 }
 
-float getDiffuse(vec3 n, vec3 l, float p) {
-    //return pow(dot(n,l) * 0.4 + 0.6, p);
-	return max(dot(l, n), 0.0);
+// Seascape (Alexander Alekseev aka TDM) sea palette and lighting terms.
+const vec3 SEA_BASE = vec3(0.0, 0.09, 0.18);
+const vec3 SEA_WATER_COLOR = vec3(0.8, 0.9, 0.6) * 0.6;
+
+float diffuse(vec3 n, vec3 l, float p) {
+	return pow(dot(n, l) * 0.4 + 0.6, p);
 }
 
-float getSpecular(vec3 n, vec3 h, float s) {
-    //float nrm = (s + 8.0) / (3.1415 * 8.0);
-    //return pow(max(dot(reflect(e,n),l),0.0),s) * nrm;
-
-	return pow(max(dot(n, h), 0.0), s);
-}
-
-vec3 getSkyColor(vec3 e) {
-    e.y = max(e.y,0.0);
-    vec3 ret;
-    ret.x = pow(1.0-e.y,2.0);
-    ret.y = 1.0-e.y;
-    ret.z = 0.6+(1.0-e.y)*0.4;
-    return ret;
-}
-
-vec3 getSeaColor(vec3 point, vec3 normal, vec3 light, vec3 cam, vec3 dist, vec3 hf) {
-	float fresnel = 1.0 - max(dot(normal, -cam), 0.0);
-	fresnel = pow(fresnel, 3.0) * 0.65;
-
-	vec3 reflected = getSkyColor(reflect(cam,normal));
-	vec3 refracted = getDiffuse(normal, light, 80.0) * seaBase;
-	float specular = getSpecular(normal, hf, 100.0);
-
-	vec3 color = refracted;
-
-	//float atten = max(1.0 - dot(dist,dist) * 0.001, 0.0);
-    color += seaColor * (normal.x - 0.06) * 0.18;
-
-	color += vec3(specular);
-	return color;
-}
-
-vec3 getNormal(vec2 uv) {
-	vec2 size = vec2(1.0,0.0);
-	vec2 texelSize = 1.0 / textureSize(texture1, 0);
-
-	float p0 = texture(texture1, vec2(uv.x, uv.y+texelSize.y)).x;
-	float p1 = texture(texture1, vec2(uv.x, uv.y-texelSize.y)).x;
-	float p2 = texture(texture1, vec2(uv.x+texelSize.x, uv.y)).x;
-	float p3 = texture(texture1, vec2(uv.x-texelSize.x, uv.y)).x;
-
-	return cross(normalize(vec3(size.xy, p1-p0)), normalize(vec3(size.yx, p3-p2)));
+float specular(vec3 n, vec3 l, vec3 e, float s) {
+	float nrm = (s + 8.0) / (PI * 8.0);
+	return pow(max(dot(reflect(e, n), l), 0.0), s) * nrm;
 }
 
 void main()
 {
-	vec2 longlat = vec2((atan(fN.x, fN.y) / 3.1415926 + 1.0) * 0.5,
-                        (asin(fN.z) / 3.1415926 + 0.5));
-	vec2 tc = longlat*3.0;
-	vec3 dyTex = vec3(texture(texture1, tc));
-	vec3 dxTex = vec3(texture(noiseTexture, tc));
-	//vec3 color = vec3(mix(dyTex, dxTex, 1.0));
-	vec3 waveNormal = getNormal(tc);
-	vec4 ray = normalize(model*vec4(fPosition,1.0) - vec4(cameraPos, 1.0));
-	mat3 normalMatrix = transpose(inverse(mat3(model)));
+	// Land mask: the planet renders its height field only in the fragment
+	// (pure unit-sphere geometry), so the water shell discards where the
+	// planet shows land, letting continents stand through the ocean.
+	vec3 dObj = normalize(fSurfDir);
+	float h = fbm3(dObj);
+	float e = clamp(h * 0.5 + 0.5, 0.0, 1.0);
+	if (e > 0.5)
+		discard;
 
-	vec3 T = normalize(vec3(vec4(fTangent, 0.0) * model));
-	vec3 N = normalize(vec3(vec4(fN, 0.0)) * normalMatrix);
-	T = normalize(T - dot(T, N) * N);
-	vec3 B = cross(N, T);
+	// Water depth below sea level in height units. The planet fbm keeps its
+	// ocean mostly in a narrow band just under e = 0.5, so normalize the
+	// effective range (~0.22) rather than the theoretical half-open 0.5.
+	float depth = 0.5 - e;
+	float depthT = clamp(depth / 0.22, 0.0, 1.0);
 
-	vec3 v;
-	vec3 fragPos = vec3(vec4(fPosition,1.0)*model).xyz;
-	vec4 lightPos = vec4(lightPosition, 1.0);
-	vec3 lightDir = normalize(vec4(fPosition,1.0)*model - lightPos).xyz;
+	vec2 duv = vec2((atan(dObj.y, dObj.x) / 3.1415926 + 1.0) * 0.5,
+	                (asin(dObj.z) / 3.1415926 + 0.5));
+	vec2 uv = duv * waveTiling;
+	float gx = texture(waveDx, uv).r;
+	float gz = texture(waveDz, uv).r;
 
-	v.x = dot(lightDir, T);
-	v.y = dot(lightDir, B);
-	v.z = dot(lightDir, N);
-	vec3 fL = -normalize(v);
+	// FFT swell slope + two scrolling tiled detail-normal layers for
+	// high-frequency sparkle (the two-scale method).
+	vec2 d1 = (texture(detailNormal, duv*(waveTiling*2.0) + vec2(0.30, 0.17)*time).rg - 0.5) * 2.0;
+	vec2 d2 = (texture(detailNormal, duv*(waveTiling*5.0) - vec2(0.19, 0.31)*time).rg - 0.5) * 2.0;
+	vec2 slope = waveNormalStrength * vec2(gx, gz) + d1 * 0.35 + d2 * 0.2;
 
-	vec3 halfVector = vec3((vec4(fPosition, 1.0)*model - lightPos) + ray).xyz;
-	v.x = dot(halfVector, T);
-	v.y = dot(halfVector, B);
-	v.z = dot(halfVector, N);
-	vec3 fH = -normalize(v);
+	// Tangent basis of the equirectangular (long/lat) wave map on the sphere.
+	vec3 T = normalize(vec3(-dObj.y, dObj.x, 1e-4));
+	vec3 B = normalize(cross(dObj, T));
+	vec3 Nobj = normalize(dObj - (slope.x * T + slope.y * B));
+	vec3 N = normalize(fNormalMat * Nobj);
 
-	vec3 dist = vec3(model*vec4(fPosition,1.0) - vec4(cameraPos, 1.0));
-	vec3 color = getSeaColor(fragPos, waveNormal, fL, cameraPos, dist, fH);
+	vec3 V = normalize(cameraPos - fragPos);
+	vec3 eye = -V;
+	vec3 L = normalize(lightPosition - fragPos);
+	vec3 dist = fragPos - cameraPos;
 
-	vec4 ambientProduct = vec4(0.2, 0.2, 0.2, 1.0)*vec4(0.2, 0.2, 1.0, 1.0);
-	float shininess = 250.0;
+	float shadow = shadowCalculation(vec4(fragPos, 1.0) * lightSpace);
+	float sun = 1.0 - shadow * 0.85;
 
-	vec3 ambient = ambientProduct.xyz * seaColor.rgb;
+	// Fresnel sky reflection (Schlick, water F0 = 0.02). The reflectance is
+	// gated by sky visibility: where the reflection ray misses the sky, the
+	// water body must stay visible or grazing angles turn black.
+	vec3 up = normalize(fragPos);
+	vec3 R = reflect(eye, N);
+	float skyVis = smoothstep(-0.1, 0.4, dot(R, up));
+	float nDotV = clamp(dot(N, V), 0.0, 1.0);
+	float fresnel = min((0.02 + 0.98 * pow(1.0 - nDotV, 5.0)) * skyVis, 0.6);
+	vec3 reflected = texture(skybox, R).rgb * skyVis * 1.3;
 
-	vec4 fLightSpace = vec4(fPosition, 1.0)*model*lightSpace;
-	float shadow = shadowCalculation(fLightSpace);
-	//FragColor = vec4(color, 1.0);
-	//FragColor = vec4(ambient+diffuse+specular, 1.0);
-	FragColor = vec4(ambient+(1.0-shadow)*(color), 1.0);
+	// Beer's-law style depth tinting: teal shallows to deep navy.
+	vec3 deepCol = vec3(0.008, 0.05, 0.13);
+	vec3 shallowCol = vec3(0.04, 0.26, 0.36);
+	vec3 waterCol = mix(shallowCol, deepCol, depthT);
+
+	// Hemispheric sky irradiance: the night side of an ocean is lit by the
+	// whole sky dome, not just the sun. Weighted toward shadow so the lit
+	// side keeps its sun-driven contrast.
+	float upDotN = clamp(dot(N, up), 0.0, 1.0);
+	vec3 skyAmbient = mix(vec3(0.010, 0.024, 0.048), vec3(0.030, 0.058, 0.095), upDotN)
+	                * (0.25 + 0.75 * (1.0 - sun));
+	vec3 baseCol = waterCol + skyAmbient;
+
+	vec3 refracted = baseCol + diffuse(N, L, 80.0) * SEA_WATER_COLOR * 0.12 * sun;
+	vec3 color = mix(refracted, reflected, fresnel);
+
+	// Seascape crest brightening.
+	float atten = 1.0 / (1.0 + dot(dist, dist) * 0.0000002);
+	color += SEA_WATER_COLOR * (fWave * 30.0) * 0.18 * atten * sun;
+
+	// Fast subsurface scattering: sun light through wave crests toward
+	// the viewer (Jensen/Uncharted approximation).
+	float crest = clamp(fWave / 0.008, 0.0, 1.0) * (0.4 + 0.6 * depthT);
+	vec3 sssDir = normalize(L + N * 0.3);
+	float sssSun = pow(clamp(dot(V, sssDir), 0.0, 1.0), 3.0) * sun;
+	float sssSky = pow(clamp(dot(V, up), 0.0, 1.0), 2.0) * (1.0 - sun);
+	color += SEA_WATER_COLOR * crest * 1.5 * (sssSun + 0.15 * sssSky);
+
+	// Sun glint (Seascape specular, softened with distance).
+	color += specular(N, L, eye, 6000.0 * inversesqrt(dot(dist, dist))) * sun;
+
+	// Foam: a thin shore band where water is shallow + whitecaps on the
+	// steepest wave faces.
+	float shore = 1.0 - smoothstep(0.0, 0.02, depth);
+	float steep = (abs(gx) + abs(gz)) * 60.0;
+	float whitecaps = smoothstep(1.2, 2.4, steep) * (0.25 + 0.75 * depthT);
+	float foam = clamp(shore * 0.9 + whitecaps, 0.0, 1.0);
+	vec3 foamCol = vec3(0.82, 0.87, 0.90) * (0.30 + 0.85 * max(dot(N, L), 0.0)) * mix(0.25, 1.0, sun);
+	color = mix(color, foamCol, foam);
+
+	// Seascape post (fragColor = pow(color, 0.65))
+	FragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(0.65)), 1.0);
 }

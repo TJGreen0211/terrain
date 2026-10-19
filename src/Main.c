@@ -70,6 +70,13 @@ GLuint initWaterShader() {
 	return shader;
 }
 
+GLuint initWTestShader() {
+	GLuint shader;
+	createShader(&shader, "shaders/wtest.vert",
+		"shaders/wtest.frag");
+	return shader;
+}
+
 GLuint initDepthShader() {
 	GLuint shader;
 	createShader(&shader, "shaders/depth.vert",
@@ -334,6 +341,59 @@ void draw(GLuint vao, GLuint shader, int vertices, GLuint texture, GLuint normal
 	//glDisable(GL_BLEND);
 }
 
+void drawWater(GLuint vao, GLuint shader, int vertices, waves *ocean, mat4 m, vec3 position, vec4 lightPosition, mat4 lightSpaceMatrix) {
+	(void)vao; (void)shader; (void)vertices; (void)ocean; (void)m; (void)position; (void)lightPosition; (void)lightSpaceMatrix;
+	// Removed: the water now renders through traverseQuad() with waterShader
+	// so it inherits the planet's quadtree LOD (geometric waves near the
+	// camera). This stub is kept only to fail fast if it is ever called.
+	printf("drawWater: deprecated, use traverseQuad with waterShader\n");
+}
+
+// TEST: flat grid to verify the FFT wave textures independently of the planet shell
+static int testGridVerts = 0;
+
+GLuint initTestGrid(float size, int n) {
+	int count = n*n*6;
+	vec3 *points = malloc(count*sizeof(vec3));
+	vec3 *normals = malloc(count*sizeof(vec3));
+	vec2 *texCoords = malloc(count*sizeof(vec2));
+	int idx = 0;
+	for(int i = 0; i < n; i++) {
+		for(int j = 0; j < n; j++) {
+			float u0 = (float)i/n, u1 = (float)(i+1)/n;
+			float v0 = (float)j/n, v1 = (float)(j+1)/n;
+			float x0 = (u0 - 0.5f)*size, x1 = (u1 - 0.5f)*size;
+			float y0 = (v0 - 0.5f)*size, y1 = (v1 - 0.5f)*size;
+			vec3 c00 = {x0, y0, 0}, c10 = {x1, y0, 0}, c01 = {x0, y1, 0}, c11 = {x1, y1, 0};
+			vec2 t00 = {u0, v0}, t10 = {u1, v0}, t01 = {u0, v1}, t11 = {u1, v1};
+			vec3 nrm = {0, 0, 1};
+			points[idx] = c00; texCoords[idx] = t00; normals[idx] = nrm; idx++;
+			points[idx] = c10; texCoords[idx] = t10; normals[idx] = nrm; idx++;
+			points[idx] = c01; texCoords[idx] = t01; normals[idx] = nrm; idx++;
+			points[idx] = c10; texCoords[idx] = t10; normals[idx] = nrm; idx++;
+			points[idx] = c11; texCoords[idx] = t11; normals[idx] = nrm; idx++;
+			points[idx] = c01; texCoords[idx] = t01; normals[idx] = nrm; idx++;
+		}
+	}
+	testGridVerts = count;
+	GLuint vao = initBuffers(points, count*sizeof(vec3), normals, count*sizeof(vec3), texCoords, count*sizeof(vec2));
+	free(points); free(normals); free(texCoords);
+	return vao;
+}
+
+void drawWTest(GLuint vao, GLuint shader, waves *ocean, mat4 m, float amp) {
+	glUseProgram(shader);
+	initMVP(shader, m, getViewMatrix());
+	glBindVertexArray(vao);
+	glUniform1f(glGetUniformLocation(shader, "testAmp"), amp);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, ocean->dyTexture);
+	glUniform1i(glGetUniformLocation(shader, "waveHeight"), 0);
+	glDrawArrays(GL_TRIANGLES, 0, testGridVerts);
+	glBindVertexArray(0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 vec4 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float theta, vec3 position)
 {
 	glUseProgram(shader);
@@ -342,9 +402,9 @@ vec4 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float 
 	vec4 camPosition = getCameraPosition(positionMatrix);
 
 	vec3 translation;
-	translation.x = (-400.0);// * cos(theta/75.0);
+	translation.x = (-4000.0);// * cos(theta/75.0);
 	translation.y = 0.0;
-	translation.z = (-400.0);// * sin(theta/75.0);
+	translation.z = (-4000.0);// * sin(theta/75.0);
 
 	mat4 model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(translation)), scale(15.0)),rotateX(90.0));
 	initMVP(shader, model, getViewMatrix());
@@ -369,11 +429,11 @@ void drawOrbit(GLuint vao, GLuint shader, int vertices, GLuint texture, float th
 	vec4 camPosition = getCameraPosition(positionMatrix);
 
 	vec3 translation;
-	translation.x = (200.0) * cos(theta/100.0);
+	translation.x = (2000.0) * cos(theta/100.0);
 	translation.y = 0.0;
-	translation.z = (200.0) * sin(theta/100.0);
+	translation.z = (2000.0) * sin(theta/100.0);
 
-	mat4 model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(translation)), scale(10.0)),rotateX(90.0));
+	mat4 model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(translation)), scale(100.0)),rotateX(90.0));
 	initMVP(shader, model, getViewMatrix());
 
 	glUniform3f(glGetUniformLocation(shader, "cameraPos"), camPosition.x, camPosition.y, camPosition.z);
@@ -511,6 +571,8 @@ int main(int argc, char *argv[])
 	GLuint atmosphereShader = initAtmosphereShader();
 	GLuint ringShader = initLightingShader();
 	GLuint waterShader = initWaterShader();
+	GLuint wTestShader = initWTestShader();
+	GLuint testQuadVAO = initTestGrid(40.0, 96);
 	GLuint depthShader = initDepthShader();
 	GLuint fboShader = initFramebufferShader();
 	GLuint instanceShader = initInstanceShader();
@@ -591,7 +653,11 @@ int main(int argc, char *argv[])
 	float deltaTime = 0.0;
 	float lastFrame = 0.0;
 	vec3 translation = {0.0, 0.0, 0.0};
-	mat4 lightProjection = ortho(-400.0, 400.0, -400.0, 400.0, zNear, zFar);
+	mat4 lightProjection = ortho(-4000.0, 4000.0, -4000.0, 4000.0, zNear, zFar);
+	g_waveParams[0] = 1.01f;
+	g_waveParams[1] = 0.8f;
+	g_waveParams[2] = 60.0f;
+	g_waveParams[3] = 8.0f;
 	//mat4 lightProjection = perspective(90.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 
 	/*char *vertCheck = "shaders/water.vert";
@@ -643,7 +709,10 @@ int main(int argc, char *argv[])
 			lastTime += 1.0;
 		}
 
-		float fScale = 30.0;
+		/* Planet radius in world units. Everything planet-coupled (sun
+		   distance, shadow ortho/depth divisor, sun billboard, moon orbit,
+		   camera distance, surface presets) is scaled with this. */
+		float fScale = 300.0;
 		float fScaleFactor = 1.25;//1.025;
 
 		//int terrainMaxLOD = (int)(log(fScale)/log(2));
@@ -657,15 +726,16 @@ int main(int argc, char *argv[])
 		//vec4 negativeLight = {lightPosition.x, lightPosition.y, lightPosition.z, lightPosition.w};
 		lightView = getLookAtMatrix(lightPosition, translation);//multiplymat4(rxry, translatevec4(negativeLight));
 		mat4 lightSpaceMatrix = multiplymat4(lightProjection, lightView);
+		g_lightSpaceMatrix = lightSpaceMatrix;
 
 		glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
 			glClear(GL_DEPTH_BUFFER_BIT);
 			vec3 position;
-			position.x = (200.0) * cos(theta/100.0);
+			position.x = (2000.0) * cos(theta/100.0);
 			position.y = 0.0;
-			position.z = (200.0) * sin(theta/100.0);
+			position.z = (2000.0) * sin(theta/100.0);
 			mat4 positionMatrix = translatevec3(translation);
-			model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(position)), scale(10.0)),rotateX(90.0));
+			model = multiplymat4(multiplymat4(multiplymat4(positionMatrix, translatevec3(position)), scale(100.0)),rotateX(90.0));
 			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix);
 			model = multiplymat4(multiplymat4(translatevec3(translation), rotateX(80.0)), scale(fScale*1.5));
 			glDisable(GL_CULL_FACE);
@@ -693,10 +763,7 @@ int main(int argc, char *argv[])
 		model = multiplymat4(translatevec3(translation), scale(fScale));
 		mat4 m = multiplymat4(model,matR);
 		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, dxWaveTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
-		//Water
-		model = multiplymat4(translatevec3(translation), scale(fScale*1.01));
-		m = multiplymat4(model,matR);
-		//draw(quadCubeVAO, waterShader, qc.vertexNumber, dyWaveTex, dxWaveTex, m, translation, lightPosition, lightSpaceMatrix);
+		//Water: drawn after the planet, shell at sea level (see drawWater)
 		//Sun (billboard): opaque disc drawn with the scene; glow drawn last (below)
 		mat4 sunProj = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 		mat4 sunView = getViewMatrix();
@@ -715,26 +782,48 @@ int main(int argc, char *argv[])
 		//matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
 		//model = multiplymat4(translatevec3(translation), scale(fScale));
 		//mat4 m = multiplymat4(model,matR);
-		model = multiplymat4(scale(30.0), matR);
+		model = multiplymat4(scale(fScale), matR);
 		int order[3];
 		float negate = 1.0;
 		order[0] = 0; order[1] = 1; order[2] = 2;
-		traverseQuad(model, order, sphereFrontXVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontXVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, 0, 0, 0, negate);
 		negate = -1.0;
-		traverseQuad(model, order, sphereBackXVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap , negate);
+		traverseQuad(model, order, sphereBackXVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, 0, 0, 0, negate);
 
 		negate = 1.0;
 		order[0] = 0; order[1] = 2; order[2] = 1;
-		traverseQuad(model, order, sphereFrontYVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontYVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, 0, 0, 0, negate);
 		negate = -1.0;
-		traverseQuad(model, order, sphereBackYVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereBackYVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, 0, 0, 0, negate);
 
 		negate = 1.0;
 		order[0] = 2; order[1] = 0; order[2] = 1;
-		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, 0, 0, 0, negate);
 		negate = -1.0;
-		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, negate);
+		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, quadShader, lightPositionXYZ, lightPosition, textureColorBuffer, dxWaveTex, depthMap, 0, 0, 0, negate);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+		//Water: same quadtree LOD as the planet, FFT-displaced sea-level
+		//shell that discards over land in-shader (waveHeight/Dx/Dz + tiled
+		//detail normals + skybox reflection in water.frag)
+		order[0] = 0; order[1] = 1; order[2] = 2;
+		traverseQuad(model, order, sphereFrontXVAO, quadtreeVBO, sizeVBO, waterShader, translation, lightPosition, ocean.dyTexture, ocean.detailTexture, depthMap, ocean.dxTexture, ocean.dzTexture, skyboxTexture, 1.0);
+		traverseQuad(model, order, sphereBackXVAO, quadtreeVBO, sizeVBO, waterShader, translation, lightPosition, ocean.dyTexture, ocean.detailTexture, depthMap, ocean.dxTexture, ocean.dzTexture, skyboxTexture, -1.0);
+
+		order[0] = 0; order[1] = 2; order[2] = 1;
+		traverseQuad(model, order, sphereFrontYVAO, quadtreeVBO, sizeVBO, waterShader, translation, lightPosition, ocean.dyTexture, ocean.detailTexture, depthMap, ocean.dxTexture, ocean.dzTexture, skyboxTexture, 1.0);
+		traverseQuad(model, order, sphereBackYVAO, quadtreeVBO, sizeVBO, waterShader, translation, lightPosition, ocean.dyTexture, ocean.detailTexture, depthMap, ocean.dxTexture, ocean.dzTexture, skyboxTexture, -1.0);
+
+		order[0] = 2; order[1] = 0; order[2] = 1;
+		traverseQuad(model, order, sphereFrontZVAO, quadtreeVBO, sizeVBO, waterShader, translation, lightPosition, ocean.dyTexture, ocean.detailTexture, depthMap, ocean.dxTexture, ocean.dzTexture, skyboxTexture, 1.0);
+		traverseQuad(model, order, sphereBackZVAO, quadtreeVBO, sizeVBO, waterShader, translation, lightPosition, ocean.dyTexture, ocean.detailTexture, depthMap, ocean.dxTexture, ocean.dzTexture, skyboxTexture, -1.0);
+
+		//TEST: flat animated wave grid above the planet (debug for FFT water)
+		/*{
+			vec3 testPos = {0.0, 0.0, 60.0};
+			mat4 testModel = translatevec3(testPos);
+			drawWTest(testQuadVAO, wTestShader, &ocean, testModel, 300.0);
+		}*/
 
 		//Ring
 		//glUseProgram(instanceShader);
@@ -747,7 +836,7 @@ int main(int argc, char *argv[])
 		{
 			vec3 C_R = { 0.3f, 0.7f, 1.0f };
 			drawAtmosphereDome(atmosphereShader, sunProj, sunView, identityMatrix(),
-			                   30.0f, 30.0f * 1.0212f, C_R, 14.3f, lightPositionXYZ);
+			                   fScale, fScale * 1.0212f, C_R, 14.3f, lightPositionXYZ);
 		}
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)

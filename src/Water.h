@@ -19,9 +19,14 @@ typedef struct waves {
 	complexType *tildeh0k;
 	complexType *conjTildeh0MK;
 	int dimension;
+	float heightScale;
+	float *dxData;
+	float *dyData;
+	float *dzData;
 	unsigned int dxTexture;
 	unsigned int dyTexture;
 	unsigned int dzTexture;
+	unsigned int detailTexture;
 } waves;
 
 void generateWaves(waves *water);

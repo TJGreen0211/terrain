@@ -1,81 +1,50 @@
 #version 410
 
-layout (location = 0) in vec4 vPosition;
+layout (location = 0) in vec3 vPosition;
 layout (location = 1) in vec3 vNormal;
 layout (location = 2) in vec2 vTexCoords;
 layout (location = 3) in vec3 vTangent;
+layout (location = 4) in mat4 vInstanceMatrix;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 lightSpace;
-uniform vec3 lightPosition;
-uniform float time;
-uniform sampler2D texture1;
-uniform sampler2D depthMap;
-uniform sampler2D noiseTexture;
+uniform sampler2D waveHeight;
+uniform float oceanOffset;
+uniform float waveAmp;
+uniform float waveTiling;
 
-out vec4 fLightSpace;
-out vec3 fPosition;
+out vec3 fSurfDir;
 out vec3 fragPos;
-out vec3 fTangent;
-out vec3 fN;
-out vec3 vColor;
-
-out vec2 fTexCoords;
-
-const float PI	 	= 3.141592;
-
-/*
-float hash( vec2 p ) {
-    float h = dot(p,vec2(127.1,311.7));
-    return fract(sin(h)*43758.5453123);
-}
-
-float noise( in vec2 p ) {
-    vec2 i = floor( p );
-    vec2 f = fract( p );
-    vec2 u = f*f*(3.0-2.0*f);
-    return -1.0+2.0*mix(
-                mix( hash( i + vec2(0.0,0.0) ), hash( i + vec2(1.0,0.0) ), u.x),
-                mix( hash( i + vec2(0.0,1.0) ), hash( i + vec2(1.0,1.0) ), u.x),
-                u.y);
-}
-
-float gerstnerWaves(vec2 uv, float A, float L, vec2 K) {
-	vec2 wave = vec2(0.0);
-	uv += noise(uv);
-	float k = 2.0*PI/L;
-	float omega = sqrt(9.81/k);
-	//wave.x = (uv - (K/k)*A*sin(dot(K, uv) - omega*time*10.0)).y;
-	wave.x = ((K/k)*A*sin(dot(K, uv) - omega*time*50.0)).y;
-	wave.y = A*cos(dot(K, uv) - omega*time*50.0);
-
-	float wv = (wave.x * (1 - 0.5) + wave.y * 0.2);
-	return wv;//pow(pow(wv,1.5),0.9);
-}*/
+out mat3 fNormalMat;
+out float fWave;
 
 void main()
 {
-	fTangent = vTangent;
-	fPosition = vPosition.xyz;
-	vec4 vWavePosition = vPosition;
+	// Match quad.vert: instance-transform the face grid, normalize to the unit
+	// sphere, then the model (scale * planet rotation) maps to the world.
+	vec4 fPosition = vec4(vPosition, 1.0);
+	vec3 transformed = (fPosition*vInstanceMatrix).xyz;
+	vec3 p = (length(transformed) > 0.0001) ? normalize(transformed) : vec3(0.0);
 
-	vec2 longlat = vec2((atan(vWavePosition.x, vWavePosition.y) / 3.1415926 + 1.0) * 0.5,
-                        (asin(vWavePosition.z) / 3.1415926 + 0.5));
-	vec2 tc = longlat*3.0;
-	vec3 dyTex = vec3(texture(texture1, tc));
-	vec3 dxTex = vec3(texture(noiseTexture, tc));
-	vec3 wavePosition = mix(dyTex, dxTex, 1.0);
-	vec3 heightVec = (vWavePosition.xyz * wavePosition)/50.0;
-	vWavePosition.xyz = vec3(vWavePosition.x+heightVec.x, vWavePosition.y+heightVec.y, vWavePosition.z+heightVec.z);
-	vec4 color = vec4(wavePosition, 1.0);
+	// Long/lat UV computed from the direction; the DFT wave texture is
+	// periodic, so the u = 0/1 seam is continuous.
+	vec2 uv = vec2((atan(p.y, p.x) / 3.1415926 + 1.0) * 0.5,
+	               (asin(p.z) / 3.1415926 + 0.5));
+	float h = texture(waveHeight, uv*waveTiling).r;
+	float wave = h * waveAmp;
+	// Floor the trough so the shell can never dip under the planet surface.
+	float d = max(wave, 1.005 - oceanOffset);
+	vec3 disp = p * (oceanOffset + d);
 
-	fN = vPosition.xyz;
-	fLightSpace = vWavePosition*model*lightSpace;
-	fragPos = vec3(vWavePosition*model).xyz;
-	fTexCoords = longlat;
-	vColor = vec3(color.xyz);
+	// Row-vector pipeline convention (p * model), matching quad.vert:
+	// the normal matrix is inverse(mat3(model)).
+	mat3 normalMatrix = inverse(mat3(model));
 
-	gl_Position = vWavePosition*model*view*projection;
+	fSurfDir = p;
+	fWave = wave;
+	fNormalMat = normalMatrix;
+	vec4 wp = vec4(disp, 1.0) * model;
+	fragPos = wp.xyz;
+	gl_Position = wp * view * projection;
 }
