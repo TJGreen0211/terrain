@@ -1,17 +1,23 @@
 #version 410
 
+uniform float time;
 uniform float E;
 uniform vec3 camPosition;
+uniform vec3 translation;
 uniform vec3 C_R;
 
 
+in vec4 fPosition;
 in vec3 fLocalPos;
+in vec3 fNormal;
+in mat4 m;
+in mat4 v;
 
 out vec4 FragColor;
 
 const float PI = 3.14159265359;
 const float degToRad = PI / 180.0;
-const float MAX = 1e30;
+const float MAX = 10000.0;
 
 const float DEG_TO_RAD = PI / 180.0;
 float K_R = 0.166;//Rayleigh constant > thicker
@@ -23,7 +29,6 @@ const float G_M = -0.85;
 uniform float fInnerRadius;
 uniform float fOuterRadius;
 uniform vec3 lightPosition;
-uniform vec3 shellCenter;
 
 // Per-fragment scale factors. Computed from the uniforms at each use instead of
 // as global initializers: initialising a global from a uniform is undefined and
@@ -32,15 +37,19 @@ uniform vec3 shellCenter;
 float scaleH() { return 4.0 / (fOuterRadius - fInnerRadius); }
 float scaleL() { return 1.0 / (fOuterRadius - fInnerRadius); }
 
-const int numOutScatter = 3;
-const float fNumOutScatter = 3.0;
+const int numOutScatter = 5;
+const float fNumOutScatter = 5.0;
 const int numInScatter = 5;
 const float fNumInScatter = 5.0;
 
 vec3 rayDirection(vec3 camPosition) {
-	// Both positions are planet-local, matching the origin-centred spheres
-	// used by rayIntersection.
-	return normalize(fLocalPos - camPosition);
+	// fLocalPos and camPosition are both in planet-local space
+	// (the spheres in rayIntersection are centered on the planet);
+	// m*fPosition would be a world-space vertex and the ray origin
+	// would be off by the planet's orbital position
+	// vec4 ray = vec4(fLocalPos, 1.0) - vec4(camPosition, 1.0);
+	vec4 ray = m*fPosition - vec4(camPosition, 1.0);
+	return normalize(vec3(ray));
 }
 
 vec2 rayIntersection(vec3 p, vec3 dir, float radius ) {
@@ -126,26 +135,22 @@ void main (void)
 	vec3 dir = rayDirection(camPosition);
 	vec3 eye = camPosition;
 
+	// Light direction: OpenGLSolar's sun lives at the origin, so its
+	// (0,0,1) is "toward the sun". This scene keeps its sun at
+	// lightPosition, so use that instead of the hardcoded point.
+	vec3 l = -normalize(vec3(fPosition*m) - lightPosition);
 	vec2 e = rayIntersection(eye, dir, fOuterRadius);
 	if ( e.x > e.y ) {
 		discard;
 	}
 	vec2 f = rayIntersection(eye, dir, fInnerRadius);
+	e.y = min(e.y, f.x);
 	// camera inside the atmosphere: the ray starts at the camera (A = camera)
 	e.x = max(e.x, 0.0);
-	// Only clip at the planet when its near intersection is ahead of the eye.
-	// Otherwise an outward-facing ray can be incorrectly discarded.
-	if (f.x > e.x) {
-		e.y = min(e.y, f.x);
-	}
 	if ( e.y <= e.x ) {
 		discard;
 	}
 
-	// Evaluate the light direction at the middle of the scattering path,
-	// rather than at the outer-shell vertex.
-	vec3 pathMidpoint = eye + dir * ((e.x + e.y) * 0.5);
-	vec3 l = normalize(lightPosition - shellCenter - pathMidpoint);
 	vec3 I = inScatter(eye, dir, e, l);
 
 	FragColor = vec4(I, 1.0);
