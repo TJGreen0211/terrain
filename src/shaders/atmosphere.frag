@@ -1,41 +1,30 @@
 #version 410
 
-uniform float time;
-uniform float E;
 uniform vec3 camPosition;
-uniform vec3 translation;
 uniform vec3 C_R;
+uniform float E;
+uniform vec4 lightPos;
+uniform vec3 shellCenter;   // world-space body centre (shell sphere origin)
 
+uniform float fInnerRadius;
+uniform float fOuterRadius;
 
-in vec4 fPosition;
 in vec3 fLocalPos;
-in vec3 fNormal;
-in mat4 m;
-in mat4 v;
 
 out vec4 FragColor;
 
 const float PI = 3.14159265359;
-const float degToRad = PI / 180.0;
-const float MAX = 10000.0;
+// Intersection miss sentinel must exceed the whole scaled scene. The
+// atmosphere shells can be millions of world units across.
+const float MAX = 1e30;
 
-const float DEG_TO_RAD = PI / 180.0;
-float K_R = 0.166;//Rayleigh constant > thicker
-float K_M = 0.0025;//Mie constant > thicker
-//const float E = 14.3;//Sun brightness
-//const vec3 C_R = vec3(0.3, 0.7, 1.0);
+const float K_R = 0.166;//Rayleigh constant > thicker
+const float K_M = 0.0025;//Mie constant > thicker
 const float G_M = -0.85;
 
-uniform float fInnerRadius;
-uniform float fOuterRadius;
-uniform vec3 lightPosition;
-
-// Per-fragment scale factors. Computed from the uniforms at each use instead of
-// as global initializers: initialising a global from a uniform is undefined and
-// several drivers evaluate it once (while the uniforms are still 0), which made
-// the whole shell scatter to zero.
-float scaleH() { return 4.0 / (fOuterRadius - fInnerRadius); }
-float scaleL() { return 1.0 / (fOuterRadius - fInnerRadius); }
+// SCALE_H / SCALE_L are computed per invocation in main() and passed down:
+// non-constant global initializers reading uniforms are not valid core GLSL
+// at #version 410 (they were only legalised in 4.20 / 420pack).
 
 const int numOutScatter = 5;
 const float fNumOutScatter = 5.0;
@@ -43,13 +32,11 @@ const int numInScatter = 5;
 const float fNumInScatter = 5.0;
 
 vec3 rayDirection(vec3 camPosition) {
-	// fLocalPos and camPosition are both in planet-local space
-	// (the spheres in rayIntersection are centered on the planet);
-	// m*fPosition would be a world-space vertex and the ray origin
-	// would be off by the planet's orbital position
-	// vec4 ray = vec4(fLocalPos, 1.0) - vec4(camPosition, 1.0);
-	vec4 ray = m*fPosition - vec4(camPosition, 1.0);
-	return normalize(vec3(ray));
+	// fLocalPos (dome vertex minus planet centre) and camPosition (camera
+	// minus planet centre) are both planet-local, matching the origin-centred
+	// rayIntersection spheres. Identical to the old m*fPosition form for the
+	// T*S dome matrix, but robust if the model ever gains rotation.
+	return normalize(fLocalPos - camPosition);
 }
 
 vec2 rayIntersection(vec3 p, vec3 dir, float radius ) {
@@ -93,24 +80,24 @@ float rayleighPhase( float cc ) {
 }
 
 //exp(fScaleOverScaleDepth * (fInnerRadius - fHeight));
-float density(vec3 p) {
-	return exp(-(length(p) - fInnerRadius) * scaleH());
+float density(vec3 p, float scaleH) {
+	return exp(-(length(p) - fInnerRadius) * scaleH);
 }
 
-float optic(vec3 p, vec3 q) {
+float optic(vec3 p, vec3 q, float scaleH, float scaleL) {
 	vec3 step = (q - p) / fNumOutScatter;
 	vec3 v = p + step * 0.5;
 
 	float sum = 0.0;
 	for(int i = 0; i < numOutScatter; i++) {
-		sum += density(v);
+		sum += density(v, scaleH);
 		v += step;
 	}
-	sum *= length(step)*scaleL();
+	sum *= length(step)*scaleL;
 	return sum;
 }
 
-vec3 inScatter(vec3 o, vec3 dir, vec2 e, vec3 l) {
+vec3 inScatter(vec3 o, vec3 dir, vec2 e, vec3 l, float scaleH, float scaleL) {
 	float len = (e.y - e.x) / fNumInScatter;
 	vec3 step = dir * len;
 	vec3 p = o + dir * e.x;
@@ -120,11 +107,11 @@ vec3 inScatter(vec3 o, vec3 dir, vec2 e, vec3 l) {
 	for(int i = 0; i < numInScatter; i++) {
 		vec2 f = rayIntersection(v, l, fOuterRadius);
 		vec3 u = v + l * f.y;
-		float n = (optic(p, v) + optic(v, u))*(PI * 4.0);
-		sum += density(v)* exp(-n * ( K_R * C_R + K_M ));
+		float n = (optic(p, v, scaleH, scaleL) + optic(v, u, scaleH, scaleL))*(PI * 4.0);
+		sum += density(v, scaleH)* exp(-n * ( K_R * C_R + K_M ));
 		v += step;
 	}
-	sum *= len * scaleL();
+	sum *= len * scaleL;
 	float c = dot(dir, -l);
 	float cc = c * c;
 	return sum * ( K_R * C_R * rayleighPhase( cc ) + K_M * miePhase( G_M, c, cc ) ) * E;
@@ -135,23 +122,37 @@ void main (void)
 	vec3 dir = rayDirection(camPosition);
 	vec3 eye = camPosition;
 
-	// Light direction: OpenGLSolar's sun lives at the origin, so its
-	// (0,0,1) is "toward the sun". This scene keeps its sun at
-	// lightPosition, so use that instead of the hardcoded point.
-	vec3 l = -normalize(vec3(fPosition*m) - lightPosition);
+	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+
 	vec2 e = rayIntersection(eye, dir, fOuterRadius);
 	if ( e.x > e.y ) {
 		discard;
 	}
 	vec2 f = rayIntersection(eye, dir, fInnerRadius);
-	e.y = min(e.y, f.x);
 	// camera inside the atmosphere: the ray starts at the camera (A = camera)
 	e.x = max(e.x, 0.0);
+	// Only stop at the planet when its near-side intersection is ahead of the
+	// camera. For rays pointing away from the planet, f.x is behind the eye;
+	// clipping to it would discard the outward-facing part of the dome.
+	if (f.x > e.x) {
+		e.y = min(e.y, f.x);
+	}
 	if ( e.y <= e.x ) {
 		discard;
 	}
 
-	vec3 I = inScatter(eye, dir, e, l);
+	// direction from the scattering path towards the light, evaluated at the
+	// path midpoint rather than at the dome fragment: the dome vertex sits on
+	// the outer shell, so using its world position parallaxes the sun
+	// direction by up to the shell thickness against the surface shading that
+	// quad.frag computes at the surface. Same light position both passes
+	// use (rotateLight() in Main.c) so the terminators agree.
+	vec3 l = (lightPos.w != 0.0)
+		? normalize(lightPos.xyz - shellCenter - (eye + dir * (e.x + e.y) * 0.5))
+		: normalize(lightPos.xyz);
+
+	vec3 I = inScatter(eye, dir, e, l, scaleH, scaleL);
 
 	FragColor = vec4(I, 1.0);
 }

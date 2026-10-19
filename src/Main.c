@@ -2,6 +2,7 @@
 #include "Sun.h"
 #include "Skybox.h"
 #include "Atmosphere.h"
+#include "LoadingScreen.h"
 #include "TerrainGen.h"
 #include <stdio.h>
 //#include <unistd.h>
@@ -658,10 +659,18 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+	// Show the loading screen before the first blocking load, so the window
+	// never sits blank/unresponsive while shaders compile, textures and models
+	// decode, and the heightmap bakes. glfwPollEvents inside each frame keeps
+	// the window responsive (Esc works) during loading.
+	LoadingScreen_Init(window);
+	LoadingScreen_Render(0.0f);
+
 	GLuint sunNoiseTexture;
 
 	struct waves ocean;
 	initializeWaves(&ocean, 256);
+	LoadingScreen_Step();
 
 	GLuint tessShader = initTessShader();
 	GLuint atmosphereShader = initAtmosphereShader();
@@ -674,41 +683,59 @@ int main(int argc, char *argv[])
 	GLuint instanceShader = initInstanceShader();
 	GLuint quadShader = initQuadShader();
 	GLuint planetShader = initPlanetShader();
+	LoadingScreen_Step(); // all shader programs
 	/* The quadtree body LOD: six face grids + shared instance VBO, attribute
 	   layout wired once (all three body programs declare vPosition at 0 and
 	   the instance matrix at 4-7). */
 	QuadTree_InitGL(quadShader);
+	LoadingScreen_Step();
 
 	initSun();
+	LoadingScreen_Step();
 
 	initSkybox();
+	LoadingScreen_Step();
 	GLuint skyboxTexture = loadSkyboxCube();
+	LoadingScreen_Step();
 
 	GLuint earthTex = loadTexture("../assets/earth.jpg", 0);
+	LoadingScreen_Step();
 	GLuint moonTex = loadTexture("../assets/moon.jpg", 0);
+	LoadingScreen_Step();
 	GLuint planetTex = loadTexture("../assets/europa.jpg", 0);
+	LoadingScreen_Step();
 	GLuint planetNorm = loadTexture("../assets/NormalMap.png", 0);
+	LoadingScreen_Step();
 	GLuint planetDisp = loadTexture("../assets/DisplacementMap.png", 0);
+	LoadingScreen_Step();
 
 	GLuint ringTex = loadTexture("../assets/ring.png", 1);
+	LoadingScreen_Step();
 	GLuint sphereVAO = initSphere();
 	initAtmosphere(atmosphereShader, planet);
 	GLuint ringVAO = initRing();
+	LoadingScreen_Step();
 	GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
+	LoadingScreen_Step();
 	GLuint rockVAO = initObjectBuffer("../assets/rock.obj", &object);
+	LoadingScreen_Step();
 	GLuint rock2VAO = initObjectBuffer("../assets/rock2.obj", &object);
+	LoadingScreen_Step();
 	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
+	LoadingScreen_Step();
 
 	GLuint quadCubeVAO = initQuadCube(30);
+	LoadingScreen_Step();
 
 	GLuint depthbuffer = initDepthbuffer();
 	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture, 512, 512);
+	LoadingScreen_Step();
 	//GLuint quadVAO = initQuadVAO();
 
 	/* Bake the planet height field: GPU shaping + CPU erosion + sea level
 	   stats (TerrainGen.c). The seed advances on every H-key re-bake. */
 	unsigned int planetSeed = 1337u;
-	planetHeightTex = generatePlanetHeightmap(planetSeed, &g_planetGen);
+	planetHeightTex = generatePlanetHeightmap(planetSeed, &g_planetGen, LoadingScreen_Step);
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
@@ -758,6 +785,10 @@ int main(int argc, char *argv[])
 	float fpsFrames= 0.0;
 	float lastTime = 0.0;
 
+	// Force one final full-bar frame before handing over to the scene.
+	LoadingScreen_Finish();
+	glViewport(0, 0, getWindowWidth(), getWindowHeight());
+
 	while(!glfwWindowShouldClose(window))
 	{
 		/*if(checkShaderChange(tessShader, vertCheck, fragCheck, vertTime, fragTime)) {
@@ -770,7 +801,7 @@ int main(int argc, char *argv[])
 		/* H: re-roll the seed and re-bake the height field (1-3 s hitch). */
 		if (consumeRegenRequest()) {
 			glDeleteTextures(1, &planetHeightTex);
-			planetHeightTex = generatePlanetHeightmap(++planetSeed, &g_planetGen);
+			planetHeightTex = generatePlanetHeightmap(++planetSeed, &g_planetGen, NULL);
 		}
 
 		generateWaves(&ocean);
@@ -795,6 +826,14 @@ int main(int argc, char *argv[])
 		   camera distance, surface presets) is scaled with this. */
 		float fScale = 300.0;
 		float fScaleFactor = 1.25;//1.025;
+
+		/* Atmosphere (OpenGLSolar Earth params): shell 2.12% above the
+		   surface, Rayleigh tint C_R, solar brightness E. Shared by the dome
+		   (in-scatter) and the planet/water passes (extinction). */
+		float atmoInner = fScale;
+		float atmoOuter = fScale * 1.0212f;
+		vec3 atmoC_R = { 0.3f, 0.7f, 1.0f };
+		float atmoE = 14.3f;
 
 		//int terrainMaxLOD = (int)(log(fScale)/log(2));
 
@@ -868,6 +907,7 @@ int main(int argc, char *argv[])
 		model = multiplymat4(scale(fScale), matR);
 		setBodyUniforms(quadShader, fScale, model, lightPositionXYZ, lightPosition,
 		                0, dxWaveTex, 0, 0, 0);
+		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
 		QuadTree_DrawSphere(model, fScale);
 
 		//Water: same quadtree LOD as the planet, FFT-displaced sea-level
@@ -876,6 +916,7 @@ int main(int argc, char *argv[])
 		setBodyUniforms(waterShader, fScale, model, translation, lightPosition,
 		                ocean.dyTexture, ocean.detailTexture,
 		                ocean.dxTexture, ocean.dzTexture, skyboxTexture);
+		setAtmosphereExtinction(waterShader, atmoInner, atmoOuter, atmoC_R);
 		/* Water.frag's back-face early-out is only safe from outside the
 		   shell; the surface view (camera inside) must still see it. */
 		vec4 shellCam = getCameraPosition(identityMatrix());
@@ -899,12 +940,9 @@ int main(int argc, char *argv[])
 		//drawInstanced(rock3VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos3, rotations, model, scaleArray, theta, lightPosition);
 
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
-		//scaled planet shell; Earth params: C_R (0.3, 0.7, 1.0), E 14.3, 2.12% shell)
-		{
-			vec3 C_R = { 0.3f, 0.7f, 1.0f };
-			drawAtmosphereDome(atmosphereShader, sunProj, sunView, identityMatrix(),
-			                   fScale, fScale * 1.0212f, C_R, 14.3f, lightPositionXYZ);
-		}
+		//scaled planet shell; params above with the planet extinction)
+		drawAtmosphereDome(atmosphereShader, sunProj, sunView, identityMatrix(),
+		                   atmoInner, atmoOuter, atmoC_R, atmoE, lightPosition);
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
 		drawSunGlow(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);

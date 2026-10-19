@@ -36,6 +36,81 @@ uniform float outsideShell;
 
 const float PI = 3.14159265359;
 
+// True world camera (cameraPos carries the shifted legacy position).
+uniform vec3 lodCameraPos;
+
+// Atmospheric extinction (OpenGLSolar planet.frag port): dims the surface by
+// the transmittance along the surface-to-camera path through the dome's shell.
+// The atmosphere dome pass adds the in-scattered light over both the limb and
+// the planet disc; adding it here as well would count that radiance twice.
+// fragPos/lodCameraPos are planet-local: the planet sits at the world origin.
+uniform float hasAtmosphere;
+uniform float fInnerRadius;
+uniform float fOuterRadius;
+uniform vec3 C_R;
+
+// Keep the miss sentinel beyond the largest supported shell radius.
+const float ATMO_MAX = 1e30;
+const float K_R = 0.166;
+const float K_M = 0.0025;
+const int NUM_ATMO_STEPS = 5;
+
+vec2 shellIntersection(vec3 p, vec3 dir, float radius)
+{
+	float b = dot(p, dir);
+	float c = dot(p, p) - radius * radius;
+	float d = b * b - c;
+	if (d < 0.0) {
+		return vec2(ATMO_MAX, -ATMO_MAX);
+	}
+	d = sqrt(d);
+	return vec2(-b - d, -b + d);
+}
+
+float atmoOptic(vec3 p, vec3 q, float scaleH, float scaleL)
+{
+	vec3 step = (q - p) / float(NUM_ATMO_STEPS);
+	vec3 v = p + step * 0.5;
+	float sum = 0.0;
+	for (int i = 0; i < NUM_ATMO_STEPS; i++) {
+		sum += exp(-(length(v) - fInnerRadius) * scaleH);
+		v += step;
+	}
+	return sum * length(step) * scaleL;
+}
+
+vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
+{
+	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+
+	// Ray in the shell-centred frame: eye = camera, fragment at distance tFrag.
+	vec3 ray = frag - eye;
+	float tFrag = length(ray);
+	vec3 dir = ray / max(tFrag, 1e-6);
+
+	vec2 e = shellIntersection(eye, dir, fOuterRadius);
+	if (e.x > e.y) {
+		return color; // view ray misses the shell entirely
+	}
+	vec2 f = shellIntersection(eye, dir, fInnerRadius);
+	// Clip the path at the shell exit, the inner sphere, and the actual
+	// fragment hit: the tFrag term handles displaced surfaces, where f.x
+	// would overshoot or fall short of the visible surface.
+	// camera inside the shell: the path starts at the camera
+	e.x = max(e.x, 0.0);
+	e.y = min(e.y, tFrag);
+	if (f.x > e.x) {
+		e.y = min(e.y, f.x);
+	}
+	if (e.y <= e.x) {
+		return color;
+	}
+
+	float tau = atmoOptic(eye + dir * e.x, eye + dir * e.y, scaleH, scaleL) * (4.0 * PI);
+	return color * exp(-(K_R * C_R + K_M) * tau);
+}
+
 float shadowCalculation(vec4 fLight) {
 	vec3 fragToLight = fragPos - lightPosition;
 	float shadow = 0.0;
@@ -170,6 +245,11 @@ void main()
 	float foam = clamp(shore * 0.9 + whitecaps, 0.0, 1.0);
 	vec3 foamCol = vec3(0.82, 0.87, 0.90) * (0.30 + 0.85 * max(dot(N, L), 0.0)) * mix(0.25, 1.0, sun);
 	color = mix(color, foamCol, foam);
+
+	// Surface extinction, matching quad.frag so the coastline stays seamless.
+	if (hasAtmosphere > 0.5) {
+		color = applyAtmosphere(color, lodCameraPos, fragPos);
+	}
 
 	// Seascape post (fragColor = pow(color, 0.65))
 	FragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(0.65)), 1.0);

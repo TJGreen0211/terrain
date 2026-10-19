@@ -151,9 +151,17 @@ static inline float hAt(const float *h, int W, int H, float x, float y)
    removes 2x its excess, overshooting the talus and amplifying ~1.5x per
    pass — the field explodes exponentially. Immediate transfers always damp.
    S wraps, T clamps. */
-static void thermalErode(float *h, int W, int H, int passes, float talus)
+static void thermalErode(float *h, int W, int H, int passes, float talus,
+                         void (*step)(void))
 {
+	int stepEvery = passes / TERRAIN_THERMAL_STEPS;
+	if (stepEvery < 1) stepEvery = 1;
+	int stepsTaken = 0;
 	for (int p = 0; p < passes; p++) {
+		if (step && stepsTaken < TERRAIN_THERMAL_STEPS && p % stepEvery == 0) {
+			step();
+			stepsTaken++;
+		}
 		for (int y = 0; y < H; y++) {
 			size_t row = (size_t)y * W;
 			for (int x = 0; x < W; x++) {
@@ -196,13 +204,21 @@ static inline float xsRand(void)
    deposition is bilinear, so the whole pass conserves sediment mass. The
    hot loop tracks the droplet's bilinear 2x2 cell across steps so each step
    is a handful of cached loads instead of four clamped resamples. */
-static void hydraulicErode(float *h, const float *pre, int W, int H, float seaLevel0)
+static void hydraulicErode(float *h, const float *pre, int W, int H, float seaLevel0,
+                           void (*step)(void))
 {
 	size_t n = (size_t)W * H;
 	double dropsD = (double)DROPLETS_PER_PX * (double)n;
 	long drops = (long)(dropsD > 9.0e18 ? 9.0e18 : dropsD);
 	const float evapKeep = 1.0f - DROPLET_EVAP_RATE;
+	long stepEvery = drops / TERRAIN_HYDRO_STEPS;
+	if (stepEvery < 1) stepEvery = 1;
+	int stepsTaken = 0;
 	for (long d = 0; d < drops; d++) {
+		if (step && stepsTaken < TERRAIN_HYDRO_STEPS && d % stepEvery == 0) {
+			step();
+			stepsTaken++;
+		}
 		size_t i = 0;
 		int found = 0;
 		for (int tries = 0; tries < 24; tries++) {
@@ -332,7 +348,8 @@ static void ensureBakeResources(void)
 
 /* ---------------- Full bake ---------------- */
 
-unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out)
+unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
+                                     void (*step)(void))
 {
 	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
 	const size_t n = (size_t)W * H;
@@ -373,7 +390,7 @@ unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out)
 	clock_t t2 = clock();
 
 	/* 3. Thermal erosion (weathering), then 4. hydraulic droplet erosion. */
-	thermalErode(h, W, H, THERMAL_PASSES, THERMAL_TALUS);
+	thermalErode(h, W, H, THERMAL_PASSES, THERMAL_TALUS, step);
 	clock_t t3 = clock();
 
 	/* Coarse pre-erosion sea level: spawn droplets only on land, never in
@@ -381,7 +398,7 @@ unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out)
 	float seaLevel0 = histPercentile(h, n, WATER_COVERAGE);
 	float *pre = malloc(n * sizeof(float));
 	memcpy(pre, h, n * sizeof(float));
-	hydraulicErode(h, pre, W, H, seaLevel0);
+	hydraulicErode(h, pre, W, H, seaLevel0, step);
 	free(pre);
 	clock_t t4 = clock();
 

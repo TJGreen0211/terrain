@@ -22,7 +22,13 @@ extern PlanetGenParams g_planetGen;
    CPU thermal + hydraulic droplet erosion, percentile normalization, sea
    level statistics, and the 2048x1024 R16F + mip-chain upload. Reentrant:
    call again with a new seed to re-bake (the shader program and working FBO
-   are cached; only the returned texture is new and owned by the caller). */
-unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out);
+   are cached; only the returned texture is new and owned by the caller).
+   step (may be NULL) is invoked TERRAIN_BAKE_STEPS times through the CPU
+   erosion so a loading screen can advance and keep the window responsive. */
+#define TERRAIN_THERMAL_STEPS 3    /* evenly spaced through the thermal passes */
+#define TERRAIN_HYDRO_STEPS   8    /* evenly spaced through the droplets */
+#define TERRAIN_BAKE_STEPS    (TERRAIN_THERMAL_STEPS + TERRAIN_HYDRO_STEPS)
+unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
+                                     void (*step)(void));
 
 #endif
