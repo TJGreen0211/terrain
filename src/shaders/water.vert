@@ -23,9 +23,21 @@ uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 
+// Sea state (TerrainGen.c bakeOcean): R wind speed / windMax, A fetch.
+uniform sampler2D oceanMap;
+uniform float windMax;
+// Planet temperature response (g_planetStyle), for the sea-ice mask.
+uniform float tempOffset;
+uniform float snowTemp;
+
 const float PI = 3.14159265359;
 // Normalized depth over which waves ramp from flat (coast) to full height.
 const float SHORE_CALM = 0.25;
+// Wind speed (m/s) of the sea the FFT amplitude was tuned for. Wave height
+// goes as U^2 in a developed sea, cut back where the fetch is short.
+const float SEA_STATE_REF_WIND = 7.0;
+// Must match water.frag: sea ice sets in this far below the land snowline.
+const float SEA_ICE_OFFSET = -0.04;
 
 out vec3 fSurfDir;
 out vec3 fragPos;
@@ -62,6 +74,15 @@ void main()
 		// Waves die out toward the shore: at the coastline the shell sits
 		// exactly at sea level, where the planet's land relief starts.
 		float calm = smoothstep(0.0, SHORE_CALM, depthT);
+		// Sea state from the baked wind and fetch: calm doldrums and lee
+		// coasts, heavy seas under the westerlies.
+		vec4 sea = textureLod(oceanMap, uv, clamp(max(lodCell, lodPix), 0.0, 11.0));
+		float U = sea.r * windMax;
+		calm *= clamp(pow(U / SEA_STATE_REF_WIND, 2.0) * mix(0.3, 1.0, sea.a), 0.15, 2.0);
+		// Sea ice holds the surface flat (same temperature as quad.frag's
+		// land snow, at sea level, without the noise).
+		float seaTemp = sqrt(max(1.0 - p.z*p.z, 0.0)) * 1.2 - 0.2 + tempOffset;
+		calm *= smoothstep(snowTemp + SEA_ICE_OFFSET - 0.06, snowTemp + SEA_ICE_OFFSET + 0.02, seaTemp);
 		float h = texture(waveHeight, uv*waveTiling).r;
 		wave = h * waveAmp * calm;
 		// Troughs may dip under radius 1: the planet draws no sea pixels.

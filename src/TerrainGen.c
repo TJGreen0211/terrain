@@ -766,6 +766,120 @@ static GLuint bakeClimate(const float *h, const float *anom, float *dep, float s
 	return tex;
 }
 
+/* ---------------- Ocean map ---------------- */
+
+/* Sea state for water.vert/.frag, from the same prevailing-wind bands that
+   carry computeMoisture's rain, so the waves and the climate agree. */
+#define OCEAN_FETCH_KM     400.0f   /* fetch at which the sea is ~63% developed */
+#define PLANET_RADIUS_KM   6371.0f  /* matches water.frag's PLANET_RADIUS_M */
+#define WIND_MAX_MS        20.0f    /* wind speed stored as R = 1 */
+#define WIND_EDGE_DEG      5.0      /* half-width of the calm band between cells */
+#define WIND_ANOMALY_AMT   0.6f     /* storm/calm regions from the climate anomaly */
+
+static float smoothstepD(double e0, double e1, double x)
+{
+	double t = (x - e0) / (e1 - e0);
+	t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+	return (float)(t * t * (3.0 - 2.0 * t));
+}
+
+static double gaussBand(double x, double c, double w)
+{
+	return exp(-((x - c) / w) * ((x - c) / w));
+}
+
+/* Prevailing wind at |latitude| absLat: zonal sign -1 = from the east
+   (trades, polar easterlies), +1 = from the west (westerlies), going
+   through zero across the cell boundaries; equatorward / poleward drift
+   (positive = poleward); and speed (m/s): calm doldrums and horse
+   latitudes, steady trades, strong mid-latitude westerlies. */
+static void prevailingWind(double absLat, float *zonal, float *pole, float *speed)
+{
+	float s1 = smoothstepD(WIND_TRADE_LAT - WIND_EDGE_DEG, WIND_TRADE_LAT + WIND_EDGE_DEG, absLat);
+	float s2 = smoothstepD(WIND_POLAR_LAT - WIND_EDGE_DEG, WIND_POLAR_LAT + WIND_EDGE_DEG, absLat);
+	*zonal = -1.0f + 2.0f * s1 - 2.0f * s2;
+	*pole = -0.45f * (1.0f - s1) + 0.3f * (s1 - s2) - 0.3f * s2;
+	*speed = (float)(3.0 + 4.5 * gaussBand(absLat, 17.0, 8.0)
+	                     + 8.0 * gaussBand(absLat, 48.0, 10.0)
+	                     + 3.0 * gaussBand(absLat, 70.0, 8.0));
+}
+
+/* RGBA8 ocean map (layout in TerrainGen.h). Fetch streams along each
+   latitude row with the zonal wind, like the moisture: open water adds its
+   length, land resets it, two laps converge the wrap. Lee coasts and the
+   water behind islands stay calm; windward coasts face a developed sea. */
+static GLuint bakeOcean(const float *h, const float *anom, float sea, int W, int H)
+{
+	size_t n = (size_t)W * H;
+	float *fetch = malloc(n * sizeof(float));
+	double texelKm = 2.0 * M_PI * PLANET_RADIUS_KM / (double)W;
+	for (int y = 0; y < H; y++) {
+		const float *row = h + (size_t)y * W;
+		float *out = fetch + (size_t)y * W;
+		double latDeg = fabs((((double)y + 0.5) / (double)H - 0.5) * 180.0);
+		float zonal, pole, speed;
+		prevailingWind(latDeg, &zonal, &pole, &speed);
+		int dir = zonal >= 0.0f ? 1 : -1;   /* downwind along the row */
+		float step = (float)(texelKm * rowCos[y]);
+		float f = 0.0f;
+		for (int lap = 0; lap < 2; lap++) {
+			for (int k = 0; k < W; k++) {
+				int x = dir > 0 ? k : W - 1 - k;
+				f = row[x] < sea ? f + step : 0.0f;
+				if (lap) out[x] = 1.0f - expf(-f / OCEAN_FETCH_KM);
+			}
+		}
+	}
+	/* Soften the row-by-row streaks into lee shadows. */
+	blurField(fetch, W, H, 2);
+
+	unsigned char *px = malloc(n * 4);
+	for (int y = 0; y < H; y++) {
+		double lat = (((double)y + 0.5) / (double)H - 0.5) * 180.0;
+		float zonal, pole, speed;
+		prevailingWind(fabs(lat), &zonal, &pole, &speed);
+		float north = lat >= 0.0 ? pole : -pole;
+		float len = sqrtf(zonal * zonal + north * north);
+		float de = len > 1e-4f ? zonal / len : 1.0f;
+		float dn = len > 1e-4f ? north / len : 0.0f;
+		for (int x = 0; x < W; x++) {
+			size_t i = (size_t)y * W + x;
+			float u = speed * (1.0f + WIND_ANOMALY_AMT * anom[i]);
+			px[i * 4 + 0] = toByte(u / WIND_MAX_MS);
+			px[i * 4 + 1] = toByte(de * 0.5f + 0.5f);
+			px[i * 4 + 2] = toByte(dn * 0.5f + 0.5f);
+			px[i * 4 + 3] = toByte(fetch[i]);
+		}
+	}
+	free(fetch);
+
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	free(px);
+	return tex;
+}
+
+void setOceanUniforms(unsigned int shader, int unit)
+{
+	glActiveTexture(GL_TEXTURE0 + unit);
+	glBindTexture(GL_TEXTURE_2D, g_planetGen.oceanTex);
+	glUniform1i(glGetUniformLocation(shader, "oceanMap"), unit);
+	glUniform1f(glGetUniformLocation(shader, "windMax"), WIND_MAX_MS);
+	glActiveTexture(GL_TEXTURE0);
+}
+
 /* ---------------- Surface style ---------------- */
 
 /* Earth-like defaults. Colours are sRGB (as a colour picker shows them);
@@ -1042,6 +1156,8 @@ unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
 	/* 7. Climate map: moisture, rivers, alluvium, lakes. */
 	if (g_planetGen.climateTex) glDeleteTextures(1, &g_planetGen.climateTex);
 	out->climateTex = bakeClimate(h, anom, dep, seaLevel, W, H);
+	if (g_planetGen.oceanTex) glDeleteTextures(1, &g_planetGen.oceanTex);
+	out->oceanTex = bakeOcean(h, anom, seaLevel, W, H);
 	free(anom);
 	free(dep);
 	out->seaLevel = seaLevel;

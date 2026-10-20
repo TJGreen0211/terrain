@@ -336,7 +336,7 @@ static mat4 getLightViewMatrix(dvec3 lightWorld, dvec3 targetWorld) {
 }
 
 /* Shadow map binding shared by every receiver program (planet, water, moon,
-   ship): sampler unit, light-space matrix and texel size. */
+   sun marker): sampler unit, light-space matrix and texel size. */
 static void bindShadowMap(GLuint shader, int unit) {
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_2D, depthMap);
@@ -637,7 +637,7 @@ dvec3 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float
    planet): the light.vert instance path computes the equirectangular UVs
    that initQuadCube used to bake, so moon.jpg frames it unchanged. Only the
    uniforms drawOrbit always set are touched; `instanced` is reset afterwards
-   because ringShader is shared with the sun billboard and the ship draw. */
+   because ringShader is shared with the sun marker. */
 /* World position of the moon's centre (orbiting the planet at `position`). */
 static dvec3 moonWorldPosition(float theta, dvec3 position)
 {
@@ -789,7 +789,7 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 
 int main(int argc, char *argv[])
 {
-	struct obj rockObj[3], ship;
+	struct obj rockObj[3];
 	float theta = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	{
@@ -854,24 +854,11 @@ int main(int argc, char *argv[])
 	GLuint skyboxTexture = loadSkyboxCube();
 	LoadingScreen_Step();
 
-	GLuint earthTex = loadTexture("../assets/earth.jpg", 0);
-	LoadingScreen_Step();
 	GLuint moonTex = loadTexture("../assets/moon.jpg", 0);
-	LoadingScreen_Step();
-	GLuint planetTex = loadTexture("../assets/europa.jpg", 0);
-	LoadingScreen_Step();
-	GLuint planetNorm = loadTexture("../assets/NormalMap.png", 0);
-	LoadingScreen_Step();
-	GLuint planetDisp = loadTexture("../assets/DisplacementMap.png", 0);
-	LoadingScreen_Step();
-
-	GLuint ringTex = loadTexture("../assets/ring.png", 1);
 	LoadingScreen_Step();
 	GLuint sphereVAO = initSphere();
 	initAtmosphere(atmosphereShader, planet);
 	GLuint ringVAO = initRing();
-	LoadingScreen_Step();
-	GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
 	LoadingScreen_Step();
 	/* Ring rocks (Rings.c). Each mesh keeps its own obj: the vertex counts
 	   differ. */
@@ -1086,15 +1073,6 @@ int main(int argc, char *argv[])
 		mat4 sunProj = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 		mat4 sunView = getViewMatrix();
 		drawSunDisc(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
-		//FBO Visualizer
-		//model = multiplymat4(translate(-75.0, 25.0, 0.0), scale(10.0));
-		//draw(quadVAO, fboShader, 6, textureColorBuffer, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
-		//Object
-		//The ship sits at the camera mirrored through the origin (world -cam),
-		//as before.
-		float modelRotationAngle = 0.0;
-		model = multiplymat4(multiplymat4(camRelTranslate(dscalarvec3(g_cam, -1.0)), rotateX(modelRotationAngle)), scale(0.5));
-		draw(objectVAO, ringShader, ship.vertexNumber, earthTex, planetNorm, model, lightPositionXYZ, lightPosition, lightSpaceMatrix);
 
 		//Quadtree planet: LOD sphere built from six instanced face grids,
 		//centred camera-relative (the walk runs with the camera at the origin).
@@ -1121,6 +1099,10 @@ int main(int argc, char *argv[])
 		setAtmosphereExtinction(waterShader, atmoInner, atmoOuter, atmoC_R);
 		/* Solar brightness for the sky water.frag reflects (same as the dome). */
 		glUniform1f(glGetUniformLocation(waterShader, "E"), atmoE);
+		/* Detail layers' slope variance (BRDF roughness, water.frag). */
+		glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
+		/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
+		setOceanUniforms(waterShader, 10);
 		Rings_BindReceiver(waterShader);
 		/* Water.frag's back-face early-out is only safe from outside the
 		   shell; the surface view (camera inside) must still see it. */

@@ -1,4 +1,12 @@
 #version 410
+#extension GL_ARB_conservative_depth : enable
+
+// The seafloor branch only ever pushes gl_FragDepth farther away, so declare
+// it depth_greater: the GPU can keep early/hierarchical-Z rejection for this
+// (expensive) shader instead of running it for every overlapping fragment.
+#ifdef GL_ARB_conservative_depth
+layout(depth_greater) out float gl_FragDepth;
+#endif
 
 in vec2 fTexCoords;
 in vec3 fragPos;
@@ -59,6 +67,12 @@ const float ATMO_MAX = 1e30;
 const float K_R = 0.166;
 const float K_M = 0.0025;
 const int NUM_ATMO_STEPS = 5;
+// atmoOptic straight up from fInnerRadius to fOuterRadius. The shell
+// thickness cancels (scaleH = 4/thickness, scaleL = 1/thickness), so it is
+// (1/N) * sum_i exp(-4 (i + 0.5) / N) for any radii: a constant, folded at
+// compile time instead of a 5-step march per pixel. Keep in step with
+// NUM_ATMO_STEPS and the 4.0 in scaleH.
+const float TAU_ZENITH = 0.2 * (exp(-0.4) + exp(-1.2) + exp(-2.0) + exp(-2.8) + exp(-3.6));
 
 vec2 shellIntersection(vec3 p, vec3 dir, float radius)
 {
@@ -138,8 +152,7 @@ vec3 sunTransmittance(vec3 p, vec3 l, float sunAngle)
 	p = up * max(length(p), fInnerRadius);
 	float tSun = shellIntersection(p, l, fOuterRadius).y;
 	float tau = atmoOptic(p, p + l * max(tSun, 0.0), scaleH, scaleL);
-	float tauZenith = atmoOptic(up * fInnerRadius, up * fOuterRadius, scaleH, scaleL);
-	float excess = max(tau - tauZenith, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
+	float excess = max(tau - TAU_ZENITH, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
 	return exp(-(K_R * C_R + K_M) * excess) * horizon;
 }
 

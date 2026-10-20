@@ -9,14 +9,12 @@
 const float SUN_GLOW_RADIUS = 2500.0f;
 
 static GLuint sunTexture;
-static GLuint sunNormal;
 static GLuint sunShader;
 static GLuint sunQuadVAO, sunQuadVBO;
 
 void initSun(void)
 {
 	sunTexture = loadTexture("../assets/textures/planets/sun2.jpg", 0);
-	sunNormal  = loadTexture("../assets/textures/planets/sunNormal.png", 0);
 
 	createShader(&sunShader, "shaders/sun.vert", "shaders/sun.frag");
 
@@ -58,10 +56,6 @@ static void setupSunUniforms(mat4 proj, mat4 view, vec3 center, float radius, GL
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, sunTexture);
 	glUniform1i(glGetUniformLocation(sunShader, "tex"), 0);
-
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, sunNormal);
-	glUniform1i(glGetUniformLocation(sunShader, "normalTex"), 1);
 
 	glUniform1f(glGetUniformLocation(sunShader, "uDisc"), uDisc);
 }

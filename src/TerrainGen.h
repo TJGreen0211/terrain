@@ -21,6 +21,13 @@ typedef struct {
 	   A = lake depth (depression filling above sea level).
 	   Owned by TerrainGen: each bake deletes the previous one. */
 	unsigned int climateTex;
+	/* RGBA8 ocean map, same layout and mips, from the prevailing winds:
+	   R = wind speed / WIND_MAX_MS (latitude cells + storm/calm regions),
+	   G, B = wind direction (east, north) * 0.5 + 0.5, the way it blows,
+	   A = fetch: how developed the sea is from open water upwind (0 in the
+	   lee of land, 1 after a long run of open ocean).
+	   Owned by TerrainGen: each bake deletes the previous one. */
+	unsigned int oceanTex;
 } PlanetGenParams;
 
 extern PlanetGenParams g_planetGen;
@@ -48,6 +55,9 @@ extern PlanetStyle g_planetStyle;
 /* Binds the climate map to texture unit `unit` and uploads g_planetStyle;
    harmless for shaders that don't declare the uniforms. */
 void setPlanetSurfaceUniforms(unsigned int shader, int unit);
+
+/* Binds the ocean map to texture unit `unit` for water.vert/.frag. */
+void setOceanUniforms(unsigned int shader, int unit);
 
 /* Full procedural planet height field bake: GPU shaping (heightbake.frag),
    CPU thermal + hydraulic droplet erosion, percentile normalization, sea

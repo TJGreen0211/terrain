@@ -9,7 +9,6 @@ out vec4 FragColor;
 uniform float systemTime;
 uniform float aspect;
 uniform sampler2D tex;
-uniform sampler2D normalTex;
 uniform float uDisc;
 
 float snoise(vec3 uv, float res)	// by trisomie21
@@ -52,13 +51,12 @@ void main()
 	if ( uDisc > 0.5 ) { if ( length( earlyP ) >= 0.35 ) discard; }
 	else               { if ( length( earlyP ) > 2.0 )    discard; }
 
-	float freqs[4];
-	freqs[0] = texture( normalTex, vec2( 0.01, 0.25 ) ).x;
-	freqs[1] = texture( normalTex, vec2( 0.07, 0.25 ) ).x;
-	freqs[2] = texture( normalTex, vec2( 0.15, 0.25 ) ).x;
-	freqs[3] = texture( normalTex, vec2( 0.30, 0.25 ) ).x;
-
-	float brightness	= freqs[1] * 0.25 + freqs[2] * 0.25;
+	// Fixed "frequency" samples: the red channel of sunNormal.png (4096x2048)
+	// at uv (0.07, 0.25) and (0.15, 0.25), bilinear at mip 0. Baked in so
+	// startup no longer decodes a 19 MB texture for two constants.
+	const float FREQ1 = 0.4358;
+	const float FREQ2 = 0.4825;
+	float brightness	= FREQ1 * 0.25 + FREQ2 * 0.25;
 	float radius		= 0.24 + brightness * 0.2;
 	float invRadius 	= 1.0/radius;
 

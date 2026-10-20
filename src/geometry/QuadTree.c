@@ -28,6 +28,7 @@ static mat4 pos[QT_INSTANCE_CAP];
 
 static GLuint faceVAO[6];
 static GLuint faceVBO[6];
+static GLuint faceEBO[6];
 static GLuint instanceVBO[6];
 
 /* Grid axes per order[] from the terrain Main.c call sites. The baked grids
@@ -193,6 +194,24 @@ static int buildFaceGrid(int grid, int reverseOrder, vec4 *out) {
 	return index;
 }
 
+/* Collapses the triangle list into unique vertices + 16-bit indices. Only
+   bit-identical vertices merge, so the drawn mesh is exactly the same; the
+   vertex shader (height fetch, atan/asin) just runs ~5x less per instance
+   thanks to the post-transform cache. Returns the unique vertex count. */
+static int indexFaceGrid(const vec4 *tris, int count, vec4 *uniq, GLushort *idx)
+{
+	int nu = 0;
+	for(int i = 0; i < count; i++) {
+		int j = 0;
+		while(j < nu && memcmp(&uniq[j], &tris[i], sizeof(vec4)) != 0)
+			j++;
+		if(j == nu)
+			uniq[nu++] = tris[i];
+		idx[i] = (GLushort)j;
+	}
+	return nu;
+}
+
 void QuadTree_InitGL(GLuint shader)
 {
 	GLuint vPosition = glGetAttribLocation(shader, "vPosition");
@@ -202,15 +221,21 @@ void QuadTree_InitGL(GLuint shader)
 	glGenBuffers(6, instanceVBO);
 
 	for(int f = 0; f < 6; f++) {
-		vec4 verts[QT_FACE_VERTS];
+		vec4 verts[QT_FACE_VERTS], uniq[QT_FACE_VERTS];
+		GLushort indices[QT_FACE_VERTS];
 		buildFaceGrid(faceGrid[f], faceReverse[f], verts);
+		int uniqueCount = indexFaceGrid(verts, QT_FACE_VERTS, uniq, indices);
 
 		glGenVertexArrays(1, &faceVAO[f]);
 		glBindVertexArray(faceVAO[f]);
 
 		glGenBuffers(1, &faceVBO[f]);
 		glBindBuffer(GL_ARRAY_BUFFER, faceVBO[f]);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, uniqueCount*sizeof(vec4), uniq, GL_STATIC_DRAW);
+		/* Element buffer binding is VAO state: bound here, it stays with faceVAO[f]. */
+		glGenBuffers(1, &faceEBO[f]);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, faceEBO[f]);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 		glEnableVertexAttribArray(vPosition);
 		/* vec4 positions: w carries the skirt flag (moon's planetVAO keeps a
 		   3-float attribute, where w defaults to 1 but is never read). */
@@ -428,7 +453,7 @@ static void drawFaces(void)
 		if(faceCount[f] == 0)
 			continue;
 		glBindVertexArray(faceVAO[f]);
-		glDrawArraysInstanced(GL_TRIANGLES, 0, QT_FACE_VERTS, faceCount[f]);
+		glDrawElementsInstanced(GL_TRIANGLES, QT_FACE_VERTS, GL_UNSIGNED_SHORT, BUFFER_OFFSET(0), faceCount[f]);
 	}
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -467,6 +492,7 @@ void QuadTree_Shutdown(void)
 	for(int f = 0; f < 6; f++) {
 		glDeleteVertexArrays(1, &faceVAO[f]);
 		glDeleteBuffers(1, &faceVBO[f]);
+		glDeleteBuffers(1, &faceEBO[f]);
 	}
 	glDeleteBuffers(6, instanceVBO);
 }
