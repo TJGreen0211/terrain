@@ -1119,6 +1119,8 @@ int main(int argc, char *argv[])
 		                ocean.dyTexture, ocean.detailTexture,
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
 		setAtmosphereExtinction(waterShader, atmoInner, atmoOuter, atmoC_R);
+		/* Solar brightness for the sky water.frag reflects (same as the dome). */
+		glUniform1f(glGetUniformLocation(waterShader, "E"), atmoE);
 		Rings_BindReceiver(waterShader);
 		/* Water.frag's back-face early-out is only safe from outside the
 		   shell; the surface view (camera inside) must still see it. */

@@ -202,6 +202,85 @@ float specular(vec3 n, vec3 l, vec3 e, float s) {
 	return pow(max(dot(reflect(e, n), l), 0.0), s) * nrm;
 }
 
+// Sky radiance for the reflection: the atmosphere dome's single-scattering
+// march (atmosphere.frag inScatter) along the reflected ray, from the water
+// surface out to the shell, so the sea mirrors the same sky the dome draws.
+// Fewer view steps than the dome; the sun leg uses the dome's unclamped
+// density so samples whose sun ray passes through the planet go dark at
+// night exactly as the dome's do. viewT returns the transmittance along the
+// ray (stars behind the sky). Planet-local p, unit dir and l.
+uniform float E;
+const float G_M = -0.85;
+const int NUM_SKY_STEPS = 4;
+const int NUM_SKY_SUN_STEPS = 4;
+
+float skySunOptic(vec3 p, vec3 q, float scaleH, float scaleL)
+{
+	vec3 step = (q - p) / float(NUM_SKY_SUN_STEPS);
+	vec3 v = p + step * 0.5;
+	float sum = 0.0;
+	for (int i = 0; i < NUM_SKY_SUN_STEPS; i++) {
+		sum += exp(min(-(length(v) - fInnerRadius) * scaleH, 80.0));
+		v += step;
+	}
+	return sum * length(step) * scaleL;
+}
+
+vec3 skyRadiance(vec3 p, vec3 dir, vec3 l, out vec3 viewT)
+{
+	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+	vec3 ext = K_R * C_R + K_M;
+
+	float tEnd = max(shellIntersection(p, dir, fOuterRadius).y, 0.0);
+	float len = tEnd / float(NUM_SKY_STEPS);
+	float segL = len * scaleL;
+	vec3 v = p + dir * (len * 0.5);
+	vec3 sum = vec3(0.0);
+	float viewOptic = 0.0;
+	for (int i = 0; i < NUM_SKY_STEPS; i++) {
+		float dv = exp(-max(length(v) - fInnerRadius, 0.0) * scaleH);
+		float tSun = max(shellIntersection(v, l, fOuterRadius).y, 0.0);
+		float n = (viewOptic + 0.5 * dv * segL
+		         + skySunOptic(v, v + l * tSun, scaleH, scaleL)) * (4.0 * PI);
+		sum += dv * exp(-n * ext) * ringTransmittance(v, l, 1e30);
+		viewOptic += dv * segL;
+		v += dir * len;
+	}
+	sum *= segL;
+	viewT = exp(-viewOptic * (4.0 * PI) * ext);
+	float c = dot(dir, -l);
+	float cc = c * c;
+	float g2 = G_M * G_M;
+	float mb = 1.0 + g2 - 2.0 * G_M * c;
+	float mie = 1.5 * (1.0 - g2) * (1.0 + cc) / (mb * sqrt(mb) * (2.0 + g2));
+	return sum * (K_R * C_R * 0.75 * (1.0 + cc) + K_M * mie) * E;
+}
+
+// Tone map shared with quad.frag (ACES fit, exposure, gamma 2.2), so land
+// and sea go through the same curve and the coastline matches.
+const float EXPOSURE = 1.05;
+const float GAMMA = 2.2;
+vec3 toneMap(vec3 c)
+{
+	vec3 x = c * EXPOSURE;
+	x = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+	return pow(x, vec3(1.0 / GAMMA));
+}
+
+// Inverse of toneMap. The dome and skybox are added straight to the
+// framebuffer (display values, never tone mapped), so a reflected sky
+// converts back to linear radiance here and comes out of toneMap looking
+// like the sky it mirrors.
+vec3 displayToLinear(vec3 d)
+{
+	vec3 y = pow(clamp(d, 0.0, 0.95), vec3(GAMMA));
+	vec3 a = 2.51 - 2.43 * y;
+	vec3 b = 0.03 - 0.59 * y;
+	vec3 x = (-b + sqrt(b * b + 4.0 * a * 0.14 * y)) / (2.0 * a);
+	return x / EXPOSURE;
+}
+
 void main()
 {
 	// Land mask: the planet renders its height field only in the fragment
@@ -305,19 +384,32 @@ void main()
 	vec3 sunCol = sunT * sun;
 	float sky = skyFraction(dot(upGeo, L));
 
-	// Fresnel sky reflection (Schlick, water F0 = 0.02). The reflectance is
-	// gated by sky visibility: where the reflection ray misses the sky, the
-	// water body must stay visible or grazing angles turn black.
+	// Fresnel sky reflection (Schlick, water F0 = 0.02), uncapped: at
+	// grazing angles the sea is a mirror of the bright horizon sky. Rays
+	// that dip under the horizon (wave backs) would really see other water
+	// near the horizon, so they are flattened onto it rather than going
+	// black; skyVis only trims the deepest of them.
 	vec3 up = normalize(localPos);
 	vec3 R = reflect(eye, N);
-	float skyVis = smoothstep(-0.1, 0.4, dot(R, up));
+	float rUp = dot(R, up);
+	float skyVis = smoothstep(-0.35, 0.05, rUp);
 	float nDotV = clamp(dot(N, V), 0.0, 1.0);
-	float fresnel = min((0.02 + 0.98 * pow(1.0 - nDotV, 5.0)) * skyVis, 0.6);
-	vec3 reflected = texture(skybox, R).rgb * skyVis * 1.3;
+	float fresnel = (0.02 + 0.98 * pow(1.0 - nDotV, 5.0)) * skyVis;
+	vec3 Rsky = normalize(R - up * min(rUp, 0.0) + up * 0.01);
+	vec3 skyDisp = vec3(0.0);
+	vec3 starT = vec3(1.0);
+	if (hasAtmosphere > 0.5) {
+		vec3 pSky = up * max(length(localPos), fInnerRadius);
+		skyDisp = skyRadiance(pSky, Rsky, L, starT);
+	}
+	// Dome + skybox, as the sky would draw them looking along Rsky.
+	vec3 reflected = displayToLinear(skyDisp + texture(skybox, Rsky).rgb * starT);
 
-	// Beer's-law style depth tinting: teal shallows to deep navy.
-	vec3 deepCol = vec3(0.008, 0.05, 0.13);
-	vec3 shallowCol = vec3(0.04, 0.26, 0.36);
+	// Body colour (light scattered back out of the water column), linear
+	// radiance under the shared tone map: teal shallows to a dark navy deep
+	// sea (~6% albedo, the darkest surface on the disc, as on Earth).
+	vec3 deepCol = vec3(0.003, 0.015, 0.040);
+	vec3 shallowCol = vec3(0.012, 0.100, 0.130);
 	vec3 waterCol = mix(shallowCol, deepCol, depthT);
 
 	// Hemispheric sky irradiance: the night side of an ocean is lit by the
@@ -334,10 +426,10 @@ void main()
 	float mu0 = max(dot(upGeo, L), 0.0);
 	float mu = max(dot(upGeo, V), 0.0);
 	float lommel = min(2.0 * mu0 / max(mu0 + mu, 1e-4), 1.0);
-	vec3 bodyLight = min(sunCol * lommel + vec3(0.3 * sky) + NIGHT_FLOOR, vec3(1.0));
+	vec3 bodyLight = min(sunCol * lommel + vec3(0.15 * sky) + NIGHT_FLOOR, vec3(1.0));
 	vec3 baseCol = waterCol * bodyLight + skyAmbient;
 
-	vec3 refracted = baseCol + diffuse(N, L, 80.0) * SEA_WATER_COLOR * 0.12 * sunCol;
+	vec3 refracted = baseCol + diffuse(N, L, 80.0) * SEA_WATER_COLOR * 0.03 * sunCol;
 	vec3 color = mix(refracted, reflected, fresnel);
 
 	// Seascape crest brightening.
@@ -360,7 +452,13 @@ void main()
 
 	// Foam: a thin shore band where water is shallow + whitecaps where the
 	// choppy displacement compresses the surface (low Jacobian).
-	float shore = 1.0 - smoothstep(0.0, 0.02, depth);
+	// The surf band is a fixed depth range, so seen from far out it would
+	// cover kilometres of coast in a white halo. It fades as one pixel spans
+	// more ground (radians of the unit sphere per pixel): visible from low
+	// altitude, gone from orbit, where real surf is far below a pixel.
+	float pixelAngle = max(length(dDirX), length(dDirY));
+	float surfVis = 1.0 - smoothstep(2e-5, 1.5e-4, pixelAngle);
+	float shore = (1.0 - smoothstep(0.0, 0.02, depth)) * surfVis;
 	float whitecaps = (1.0 - smoothstep(0.3, 0.8, J)) * (0.25 + 0.75 * depthT);
 	float foam = clamp(shore * 0.9 + whitecaps, 0.0, 1.0);
 	vec3 foamCol = vec3(0.82, 0.87, 0.90)
@@ -372,11 +470,10 @@ void main()
 		color = applyAtmosphere(color, lodCameraPos - bodyCenter, localPos);
 	}
 
-	// Seascape post (fragColor = pow(color, 0.65))
 	// Opacity: the seafloor shows through what the water column, the surface
 	// reflection and foam let pass; the glint stays opaque so it survives
 	// the shallows.
 	float alpha = 1.0 - transmit * (1.0 - fresnel) * (1.0 - foam);
 	alpha = max(alpha, clamp(glint, 0.0, 1.0));
-	FragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(0.65)), alpha);
+	FragColor = vec4(toneMap(max(color, 0.0)), alpha);
 }
