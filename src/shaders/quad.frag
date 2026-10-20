@@ -68,8 +68,8 @@ uniform vec3 C_R;
 
 // Keep the miss sentinel beyond the largest supported shell radius.
 const float ATMO_MAX = 1e30;
-const float K_R = 0.166;
-const float K_M = 0.0025;
+uniform float K_R; // Rayleigh / Mie constants, shared with atmosphere.frag (Atmosphere.c)
+uniform float K_M;
 const int NUM_ATMO_STEPS = 5;
 // atmoOptic straight up from fInnerRadius to fOuterRadius. The shell
 // thickness cancels (scaleH = 4/thickness, scaleL = 1/thickness), so it is

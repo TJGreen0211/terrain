@@ -64,8 +64,8 @@ uniform vec3 C_R;
 
 // Keep the miss sentinel beyond the largest supported shell radius.
 const float ATMO_MAX = 1e30;
-const float K_R = 0.166;
-const float K_M = 0.0025;
+uniform float K_R; // Rayleigh / Mie constants, shared with atmosphere.frag (Atmosphere.c)
+uniform float K_M;
 const int NUM_ATMO_STEPS = 5;
 // atmoOptic straight up from fInnerRadius to fOuterRadius. The shell
 // thickness cancels (scaleH = 4/thickness, scaleL = 1/thickness), so it is
@@ -330,7 +330,7 @@ float meanFresnel(float cosV, float sigmaV)
 // night exactly as the dome's do. viewT returns the transmittance along the
 // ray (stars behind the sky). Planet-local p, unit dir and l.
 uniform float E;
-const float G_M = -0.85;
+uniform float G_M;
 const int NUM_SKY_STEPS = 3;
 const int NUM_SKY_SUN_STEPS = 2;
 // Fresnel range over which the reflection blends from SKY_FALLBACK (below)

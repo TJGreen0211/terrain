@@ -48,6 +48,13 @@ typedef struct {
 	float hadleyStrength;  /* 0 = ignore latitude rain bands, 1 = full */
 	float riverThreshold;  /* river map value where rivers become visible */
 	float rockSlope;       /* slope (rise/run) above which bare rock shows */
+	/* Geometric relief as a fraction of the planet radius (quad.vert,
+	   depth.vert, water.frag). Land rises up to landRelief above sea level;
+	   the seafloor sinks to oceanRelief below it along a squared
+	   (continental shelf) profile. landRelief must stay under
+	   QT_CULL_RELIEF (QuadTree.c) and inside the atmosphere shell. */
+	float landRelief;
+	float oceanRelief;
 } PlanetStyle;
 
 extern PlanetStyle g_planetStyle;
@@ -59,6 +66,42 @@ void setPlanetSurfaceUniforms(unsigned int shader, int unit);
 /* Binds the ocean map to texture unit `unit` for water.vert/.frag. */
 void setOceanUniforms(unsigned int shader, int unit);
 
+/* Bake inputs: everything generatePlanetHeightmap() reads besides fixed
+   pipeline constants. Edited from the debug panel; changes apply on the
+   next bake, not live. */
+#define TERRAIN_PLATE_MAX 32 /* MAX_PLATES in heightbake.frag */
+typedef struct {
+	unsigned int seed;
+	/* Tectonic plates (CPU) */
+	int plateCount;        /* 2..TERRAIN_PLATE_MAX: more = smaller continents, more ranges */
+	float continentArea;   /* share of the sphere on continental plates (~ land fraction) */
+	/* Shaping (heightbake.frag uniforms), raw shaper units, sea level = 0 */
+	float coastFreq;       /* coastline roughness frequency */
+	float coastAmt;        /* coastline roughness amplitude */
+	float plainsH;         /* continental interior base height */
+	float hillAmt;         /* hill country relief */
+	float plateauH;        /* raised flat plateaus */
+	float collideH;        /* suture range height (continent/continent) */
+	float andesH;          /* coastal range height (continent over ocean) */
+	float oldRangeH;       /* old eroded intraplate ranges */
+	float oceanBase;       /* abyssal plain depth (negative) */
+	float ridgeH;          /* mid-ocean ridge rise */
+	float hotspotLo;       /* volcanic island threshold: higher = rarer */
+	float fragLo;          /* microcontinent threshold: higher = fewer */
+	float detailAmt;       /* high-frequency rock texture */
+	/* Erosion (CPU), in pre-normalized [0,1] height units */
+	int thermalPasses;     /* weathering iterations */
+	float thermalTalus;    /* max stable height step per texel */
+	float dropletsPerPx;   /* droplet count = per-px * W * H; dominates bake time */
+	float dropletErosion;  /* fraction of free capacity eroded per step */
+	float dropletDeposit;  /* fraction of surplus deposited per step */
+	float dropletCapacity; /* sediment capacity coefficient */
+	float dropletEvap;     /* fraction of water evaporated per step */
+	float dropletInertia;  /* 0 = runs straight downhill, 1 = keeps its heading */
+} TerrainBakeSettings;
+
+extern TerrainBakeSettings g_terrainBake;
+
 /* Full procedural planet height field bake: GPU shaping (heightbake.frag),
    CPU thermal + hydraulic droplet erosion, percentile normalization, sea
    level statistics, and the 2048x1024 R16F + mip-chain upload. Reentrant:
@@ -69,7 +112,7 @@ void setOceanUniforms(unsigned int shader, int unit);
 #define TERRAIN_THERMAL_STEPS 3    /* evenly spaced through the thermal passes */
 #define TERRAIN_HYDRO_STEPS   8    /* evenly spaced through the droplets */
 #define TERRAIN_BAKE_STEPS    (TERRAIN_THERMAL_STEPS + TERRAIN_HYDRO_STEPS)
-unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
+unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, PlanetGenParams *out,
                                      void (*step)(void));
 
 #endif

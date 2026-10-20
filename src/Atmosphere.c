@@ -4,6 +4,40 @@
 static GLuint atmosphereVAO, atmosphereVBO;
 static int atmosphereVertexCount;
 
+/* OpenGLSolar Earth values. Shell 4.24% above the surface (2x the original
+   2.12% so tall terrain stays inside). A macro so the static initializer
+   below and atmosphereDefaults() share one copy. */
+#define ATMOSPHERE_DEFAULTS { \
+	.outerScale = 1.0424f, \
+	.C_R = { 0.3f, 0.7f, 1.0f }, \
+	.E = 14.3f, \
+	.K_R = 0.166f, \
+	.K_M = 0.0025f, \
+	.G_M = -0.85f, \
+}
+
+atmosphereParams g_atmosphere = ATMOSPHERE_DEFAULTS;
+
+atmosphereParams atmosphereDefaults(void)
+{
+	atmosphereParams p = ATMOSPHERE_DEFAULTS;
+	return p;
+}
+
+/* The scattering uniforms every atmosphere-aware program shares. Programs
+   that don't declare one (quad.frag has no E or G_M) get location -1, which
+   glUniform ignores. */
+static void setScatteringUniforms(GLuint shader, float fInner, const atmosphereParams *atmo)
+{
+	glUniform1f(glGetUniformLocation(shader, "fInnerRadius"), fInner);
+	glUniform1f(glGetUniformLocation(shader, "fOuterRadius"), fInner * atmo->outerScale);
+	glUniform3f(glGetUniformLocation(shader, "C_R"), atmo->C_R.x, atmo->C_R.y, atmo->C_R.z);
+	glUniform1f(glGetUniformLocation(shader, "E"), atmo->E);
+	glUniform1f(glGetUniformLocation(shader, "K_R"), atmo->K_R);
+	glUniform1f(glGetUniformLocation(shader, "K_M"), atmo->K_M);
+	glUniform1f(glGetUniformLocation(shader, "G_M"), atmo->G_M);
+}
+
 void initAtmosphere(GLuint shader, sphere mesh)
 {
 	atmosphereVertexCount = mesh.vertexNumber;
@@ -26,8 +60,9 @@ void initAtmosphere(GLuint shader, sphere mesh)
 }
 
 void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
-                        float fInner, float fOuter, vec3 C_R, float E, vec4 lightPosition)
+                        float fInner, const atmosphereParams *atmo, vec4 lightPosition)
 {
+	float fOuter = fInner * atmo->outerScale;
 	if (fOuter <= fInner) {
 		// no real shell; guard against a degenerate dome
 		return;
@@ -47,11 +82,8 @@ void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
 
 	// Per-body solar brightness + Rayleigh tint (Earth values from OpenGLSolar).
 	// The white Mie term is summed on top, so C_R's RGB sets each limb's hue.
-	glUniform1f(glGetUniformLocation(shader, "fInnerRadius"), fInner);
-	glUniform1f(glGetUniformLocation(shader, "fOuterRadius"), fOuter);
+	setScatteringUniforms(shader, fInner, atmo);
 	glUniform3f(glGetUniformLocation(shader, "camPosition"), camPosition.x, camPosition.y, camPosition.z);
-	glUniform3f(glGetUniformLocation(shader, "C_R"), C_R.x, C_R.y, C_R.z);
-	glUniform1f(glGetUniformLocation(shader, "E"), E);
 	glUniform4f(glGetUniformLocation(shader, "lightPos"), lightPosition.x, lightPosition.y, lightPosition.z, lightPosition.w);
 	// Camera-relative body centre: modelmat is a pure translation, its
 	// translation column is the shell sphere origin (row-vector
@@ -91,10 +123,8 @@ void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
 	glDisable(GL_BLEND);
 }
 
-void setAtmosphereExtinction(GLuint shader, float fInner, float fOuter, vec3 C_R)
+void setAtmosphereExtinction(GLuint shader, float fInner, const atmosphereParams *atmo)
 {
-	glUniform1f(glGetUniformLocation(shader, "hasAtmosphere"), fOuter > fInner ? 1.0f : 0.0f);
-	glUniform1f(glGetUniformLocation(shader, "fInnerRadius"), fInner);
-	glUniform1f(glGetUniformLocation(shader, "fOuterRadius"), fOuter);
-	glUniform3f(glGetUniformLocation(shader, "C_R"), C_R.x, C_R.y, C_R.z);
+	glUniform1f(glGetUniformLocation(shader, "hasAtmosphere"), atmo->outerScale > 1.0f ? 1.0f : 0.0f);
+	setScatteringUniforms(shader, fInner, atmo);
 }

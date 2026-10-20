@@ -36,6 +36,11 @@ typedef struct waves {
    60 fps = 4 updates/s), since frames in between are not interpolated. */
 #define WAVE_UPDATE_INTERVAL 1
 
+/* Live wave multipliers (Main.c), uploaded every frame: [0] oceanOffset
+   (shell radius, keep 1.0 = sea level), [1] waveAmp, [2] normalStrength,
+   [3] tiling, [4] choppiness. Edited from the debug panel. */
+extern float g_waveParams[5];
+
 void generateWaves(waves *water);
 void initializeWaves(waves *water, int dim);
 

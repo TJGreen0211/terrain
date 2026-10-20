@@ -40,36 +40,38 @@ uniform vec4 plateMotion[MAX_PLATES];  // xyz = angular velocity, w = passive ma
 
 const float PI = 3.14159265359;
 
-/* ---- Shaping recipe (tweak here); distances are radians on the sphere ---- */
+/* ---- Shaping recipe; distances are radians on the sphere. The uniforms are
+   TerrainBakeSettings (TerrainGen.c, debug panel); defaults noted inline.
+   The #defines are fixed here. ---- */
 #define PLATE_WARP      0.28   // boundary waviness (warp of the Voronoi lookup)
 #define PLATE_WARP_FREQ 1.3
-#define COAST_FREQ      2.2    // coastline roughness: bays, peninsulas, islands
+uniform float COAST_FREQ;      // coastline roughness: bays, peninsulas, islands [default 2.2]
 #define COAST_OCT       5
-#define COAST_AMT       0.12
+uniform float COAST_AMT;       // coastline roughness amplitude [default 0.12]
 #define COAST_BLEND     0.035  // land/ocean transition width
 #define SHELF_WIDTH     0.10   // continental shelf + slope beyond the coast
 #define CONV_FULL       0.6    // convergence speed counted as fully active
 
-#define PLAINS_H        0.06   // continental interior base height
+uniform float PLAINS_H;        // continental interior base height [default 0.06]
 #define PLAINS_NOISE    0.035  // gentle rolling relief on the plains
-#define HILL_AMT        0.10   // hill country relief where the hill mask allows
-#define PLATEAU_H       0.30   // raised flat plateaus
+uniform float HILL_AMT;        // hill country relief where the hill mask allows [default 0.10]
+uniform float PLATEAU_H;       // raised flat plateaus [default 0.30]
 #define PLATEAU_LO      0.16   // plateau mask noise band (lower = more plateaus)
 #define PLATEAU_HI      0.22   //   narrow band -> steep scarps, flat tops
 #define TIBET_H         0.30   // extra plateau behind continental collisions
 #define TIBET_WIDTH     0.22
-#define COLLIDE_H       1.30   // suture range height (continent/continent)
+uniform float COLLIDE_H;       // suture range height (continent/continent) [default 1.30]
 #define COLLIDE_WIDTH   0.09
-#define ANDES_H         0.95   // coastal range height (continent over ocean)
+uniform float ANDES_H;         // coastal range height (continent over ocean) [default 0.95]
 #define ANDES_WIDTH     0.075
-#define OLD_RANGE_H     0.35   // eroded intraplate ranges (Appalachians/Urals)
+uniform float OLD_RANGE_H;     // eroded intraplate ranges (Appalachians/Urals) [default 0.35]
 #define FREQ_MOUNT      2.6
 #define OCT_MOUNT       5
 
-#define OCEAN_BASE     -0.70   // abyssal plain depth
+uniform float OCEAN_BASE;      // abyssal plain depth [default -0.70]
 #define OCEAN_NOISE     0.10
 #define SHELF_H        -0.08   // shelf depth at the coast
-#define RIDGE_H         0.28   // mid-ocean ridge rise (divergent ocean/ocean)
+uniform float RIDGE_H;         // mid-ocean ridge rise (divergent ocean/ocean) [default 0.28]
 #define RIDGE_WIDTH     0.05
 #define TRENCH_H       -0.30   // subduction trench (ocean side)
 #define TRENCH_WIDTH    0.025
@@ -77,15 +79,15 @@ const float PI = 3.14159265359;
 #define ARC_WIDTH       0.035  //   the ridged crests break the surface
 #define HOTSPOT_FREQ    7.0    // volcanic cones in the open ocean (Hawaii)
 #define HOTSPOT_H       1.30
-#define HOTSPOT_LO      0.50   // cone noise threshold: higher = rarer islands
+uniform float HOTSPOT_LO;      // cone noise threshold: higher = rarer islands [default 0.50]
 #define SHELF_ISLE_H    0.35   // shelf islands (British Isles, Sri Lanka)
 #define SHELF_ISLE_LO   0.05   // shelf bump noise threshold: higher = fewer
 #define FRAG_FREQ       2.3    // microcontinent fragments on oceanic crust
-#define FRAG_LO         0.42   //   (Madagascar / New Zealand); higher = fewer
+uniform float FRAG_LO;         //   (Madagascar / New Zealand) threshold; higher = fewer [default 0.42]
 
 #define FREQ_DETAIL     13.0   // high-frequency rock texture
 #define OCT_DETAIL      3
-#define DETAIL_AMT      0.06
+uniform float DETAIL_AMT;      // rock texture amplitude [default 0.06]
 #define FREQ_ANOMALY    1.7    // climate anomaly: continent-scale wet/dry regions
 #define OCT_ANOMALY     3
 

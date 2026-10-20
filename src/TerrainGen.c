@@ -25,20 +25,11 @@ PlanetGenParams g_planetGen = { 0.5f, 0.22f, 0 };
 #define PRE_LO_PCT           0.01    /* pre-erosion percentile stretch */
 #define PRE_HI_PCT           0.999   /* high: mountain belts are a small share of the area */
 
-#define THERMAL_PASSES       6       /* weathering iterations */
-#define THERMAL_TALUS        0.006f  /* max stable height step per texel; only
-                                        the steepest crests/cliffs exceed it */
-
-#define DROPLETS_PER_PX      0.35f   /* droplet count = per-px * W * H */
+/* Thermal passes/talus, droplet count and rates: g_terrainBake (below). */
 #define DROPLET_MAX_STEPS    64      /* lifetime, in 1-texel steps */
 #define DROPLET_BRUSH_RADIUS 2       /* erosion footprint radius (texels) */
 #define DROPLET_GRAVITY      4.0f
-#define DROPLET_INERTIA      0.05f
-#define DROPLET_CAPACITY     4.0f    /* sediment capacity coefficient */
 #define DROPLET_MIN_SLOPE    0.0005f /* capacity floor on near-flat ground */
-#define DROPLET_DEPOSIT_RATE 0.3f    /* fraction of surplus deposited per step */
-#define DROPLET_EROSION_RATE 0.3f    /* fraction of free capacity eroded per step */
-#define DROPLET_EVAP_RATE    0.02f   /* fraction of water evaporated per step */
 #define DROPLET_START_SPEED  1.0f
 #define DROPLET_START_WATER  1.0f
 #define DELTA_DEPTH          0.004f  /* river-mouth deposits stay this far under sea level */
@@ -48,11 +39,38 @@ PlanetGenParams g_planetGen = { 0.5f, 0.22f, 0 };
 #define OCEAN_DEPTH_PCT      0.95    /* depth normalizing percentile */
 
 /* ---- Tectonic plates (shaping input for heightbake.frag) ---- */
-#define PLATE_COUNT          14
-#define PLATE_MAX            32      /* MAX_PLATES in heightbake.frag */
+/* Plate count and continental area: g_terrainBake (below). */
 #define PLATE_MIN_SEP        0.45    /* min angle between plate centres (rad) */
-#define CONTINENT_AREA       0.42    /* share of the sphere on continental plates */
 #define PLATE_MARGIN_MAX     0.10f   /* passive-margin pullback range (rad) */
+
+/* Bake inputs (TerrainGen.h). Shaping defaults mirror the [default]
+   notes in heightbake.frag. */
+TerrainBakeSettings g_terrainBake = {
+	.seed = 1337u,
+	.plateCount = 14,
+	.continentArea = 0.42f,
+	.coastFreq = 2.2f,
+	.coastAmt = 0.12f,
+	.plainsH = 0.06f,
+	.hillAmt = 0.10f,
+	.plateauH = 0.30f,
+	.collideH = 1.30f,
+	.andesH = 0.95f,
+	.oldRangeH = 0.35f,
+	.oceanBase = -0.70f,
+	.ridgeH = 0.28f,
+	.hotspotLo = 0.50f,
+	.fragLo = 0.42f,
+	.detailAmt = 0.06f,
+	.thermalPasses = 6,
+	.thermalTalus = 0.006f,    /* only the steepest crests/cliffs exceed it */
+	.dropletsPerPx = 0.35f,
+	.dropletErosion = 0.3f,
+	.dropletDeposit = 0.3f,
+	.dropletCapacity = 4.0f,
+	.dropletEvap = 0.02f,
+	.dropletInertia = 0.05f,
+};
 
 /* ---- Climate map (moisture / rivers / lakes); rates are per physical
    texel (one equator texel of distance) ---- */
@@ -297,11 +315,12 @@ static inline float applyBrush(float *h, int W, int H, int cx, int cy, float amt
    isotropically on the sphere. Every on-land deposit is also summed into
    dep (alluvial plains for the climate map). */
 static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
-                           void (*step)(void))
+                           const TerrainBakeSettings *bs, void (*step)(void))
 {
 	size_t n = (size_t)W * H;
-	long drops = (long)((double)DROPLETS_PER_PX * (double)n);
-	const float evapKeep = 1.0f - DROPLET_EVAP_RATE;
+	long drops = (long)((double)bs->dropletsPerPx * (double)n);
+	const float evapKeep = 1.0f - bs->dropletEvap;
+	const float inertia = bs->dropletInertia;
 	long stepEvery = drops / TERRAIN_HYDRO_STEPS;
 	if (stepEvery < 1) stepEvery = 1;
 	int stepsTaken = 0;
@@ -334,8 +353,8 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 			int cx = (int)x, cy = (int)y;
 			float invCos = 1.0f / rowCos[cy];
 
-			float ndx = dx * DROPLET_INERTIA - gx * invCos * (1.0f - DROPLET_INERTIA);
-			float ndy = dy * DROPLET_INERTIA - gy * (1.0f - DROPLET_INERTIA);
+			float ndx = dx * inertia - gx * invCos * (1.0f - inertia);
+			float ndy = dy * inertia - gy * (1.0f - inertia);
 			float len = sqrtf(ndx * ndx + ndy * ndy);
 			if (len < 1e-9f) break;           /* stalled/flat: kill, never divide */
 			dx = ndx / len; dy = ndy / len;
@@ -360,10 +379,10 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 				break;
 			}
 
-			float capacity = fmaxf(-dh, DROPLET_MIN_SLOPE) * speed * water * DROPLET_CAPACITY;
+			float capacity = fmaxf(-dh, DROPLET_MIN_SLOPE) * speed * water * bs->dropletCapacity;
 			if (sediment > capacity || dh > 0.0f) {
 				float amt = (dh > 0.0f) ? fminf(dh, sediment)
-				                        : (sediment - capacity) * DROPLET_DEPOSIT_RATE;
+				                        : (sediment - capacity) * bs->dropletDeposit;
 				if (amt > 0.0f) {
 					/* Bilinear deposit at the droplet's own position. */
 					float fx = x - (float)cx, fy = y - (float)cy;
@@ -378,7 +397,7 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 					sediment -= amt;
 				}
 			} else {
-				float amt = fminf((capacity - sediment) * DROPLET_EROSION_RATE, -dh);
+				float amt = fminf((capacity - sediment) * bs->dropletErosion, -dh);
 				if (amt > 0.0f)
 					sediment -= applyBrush(h, W, H, cx, cy, -amt, FLT_MAX);
 			}
@@ -906,6 +925,8 @@ PlanetStyle g_planetStyle = {
 	1.0f,    /* hadleyStrength */
 	0.52f,   /* riverThreshold */
 	0.55f,   /* rockSlope */
+	0.025f,  /* landRelief */
+	0.01f,   /* oceanRelief */
 };
 
 /* sRGB transfer function -> linear, componentwise over n floats. */
@@ -963,7 +984,7 @@ static void debugDump(const float *h, size_t n)
 /* ---------------- Tectonic plates ---------------- */
 
 /* Plate centres (min-separated random points), continental flags (random
-   plates until CONTINENT_AREA of the sphere, by Monte-Carlo cell area),
+   plates until continentArea of the sphere, by Monte-Carlo cell area),
    rotation poles/speeds and passive-margin widths, uploaded to the shaping
    shader. Own PRNG so the erosion stream is unaffected. */
 static unsigned int plRng;
@@ -979,14 +1000,16 @@ static void plRandDir(float v[3])
 	v[0] = r * cosf(a); v[1] = r * sinf(a); v[2] = z;
 }
 
-static void uploadPlates(unsigned int seed)
+static void uploadPlates(const TerrainBakeSettings *bs)
 {
-	float c[PLATE_MAX][4], mo[PLATE_MAX][4];
+	float c[TERRAIN_PLATE_MAX][4], mo[TERRAIN_PLATE_MAX][4];
 	int np = 0;
-	plRng = seed * 747796405u + 2891336453u;
+	int plateCount = bs->plateCount < 2 ? 2
+	               : (bs->plateCount > TERRAIN_PLATE_MAX ? TERRAIN_PLATE_MAX : bs->plateCount);
+	plRng = bs->seed * 747796405u + 2891336453u;
 	if (!plRng) plRng = 1u;
 	float minDot = cosf(PLATE_MIN_SEP);
-	for (int tries = 0; np < PLATE_COUNT && tries < 10000; tries++) {
+	for (int tries = 0; np < plateCount && tries < 10000; tries++) {
 		float v[3];
 		plRandDir(v);
 		int ok = 1;
@@ -998,7 +1021,7 @@ static void uploadPlates(unsigned int seed)
 	}
 
 	/* Cell areas (unwarped Voronoi) by uniform sampling. */
-	int count[PLATE_MAX] = { 0 };
+	int count[TERRAIN_PLATE_MAX] = { 0 };
 	const int samples = 8192;
 	for (int s = 0; s < samples; s++) {
 		float v[3];
@@ -1011,7 +1034,7 @@ static void uploadPlates(unsigned int seed)
 		count[best]++;
 	}
 	/* Random order; mark continental until the area target (min 2). */
-	int order[PLATE_MAX];
+	int order[TERRAIN_PLATE_MAX];
 	for (int k = 0; k < np; k++) order[k] = k;
 	for (int k = np - 1; k > 0; k--) {
 		int j = (int)(plRand() * (float)(k + 1)); if (j > k) j = k;
@@ -1019,7 +1042,7 @@ static void uploadPlates(unsigned int seed)
 	}
 	float area = 0.0f;
 	for (int k = 0, nc = 0; k < np; k++) {
-		if (nc >= 2 && area >= CONTINENT_AREA) break;
+		if (nc >= 2 && area >= bs->continentArea) break;
 		c[order[k]][3] = 1.0f;
 		area += (float)count[order[k]] / (float)samples;
 		nc++;
@@ -1037,11 +1060,30 @@ static void uploadPlates(unsigned int seed)
 	glUniform4fv(glGetUniformLocation(bakeProgram, "plateMotion"), np, &mo[0][0]);
 }
 
+/* Shaping recipe uniforms (heightbake.frag keeps the #define names). */
+static void uploadShaping(const TerrainBakeSettings *bs)
+{
+	glUniform1f(glGetUniformLocation(bakeProgram, "COAST_FREQ"), bs->coastFreq);
+	glUniform1f(glGetUniformLocation(bakeProgram, "COAST_AMT"), bs->coastAmt);
+	glUniform1f(glGetUniformLocation(bakeProgram, "PLAINS_H"), bs->plainsH);
+	glUniform1f(glGetUniformLocation(bakeProgram, "HILL_AMT"), bs->hillAmt);
+	glUniform1f(glGetUniformLocation(bakeProgram, "PLATEAU_H"), bs->plateauH);
+	glUniform1f(glGetUniformLocation(bakeProgram, "COLLIDE_H"), bs->collideH);
+	glUniform1f(glGetUniformLocation(bakeProgram, "ANDES_H"), bs->andesH);
+	glUniform1f(glGetUniformLocation(bakeProgram, "OLD_RANGE_H"), bs->oldRangeH);
+	glUniform1f(glGetUniformLocation(bakeProgram, "OCEAN_BASE"), bs->oceanBase);
+	glUniform1f(glGetUniformLocation(bakeProgram, "RIDGE_H"), bs->ridgeH);
+	glUniform1f(glGetUniformLocation(bakeProgram, "HOTSPOT_LO"), bs->hotspotLo);
+	glUniform1f(glGetUniformLocation(bakeProgram, "FRAG_LO"), bs->fragLo);
+	glUniform1f(glGetUniformLocation(bakeProgram, "DETAIL_AMT"), bs->detailAmt);
+}
+
 /* ---------------- Full bake ---------------- */
 
-unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
+unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenParams *out,
                                      void (*step)(void))
 {
+	const unsigned int seed = bs->seed;
 	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
 	const size_t n = (size_t)W * H;
 	static Histo hf;   /* 32 KB: keep it off the stack */
@@ -1063,7 +1105,8 @@ unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glUseProgram(bakeProgram);
 	glUniform1f(glGetUniformLocation(bakeProgram, "seed"), (float)seed);
-	uploadPlates(seed);
+	uploadPlates(bs);
+	uploadShaping(bs);
 	glBindVertexArray(bakeQuadVAO);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glFinish();
@@ -1099,11 +1142,11 @@ unsigned int generatePlanetHeightmap(unsigned int seed, PlanetGenParams *out,
 	clock_t t2 = clock();
 
 	/* 3. Thermal erosion (weathering), then 4. hydraulic droplet erosion. */
-	thermalErode(h, W, H, THERMAL_PASSES, THERMAL_TALUS, step);
+	thermalErode(h, W, H, bs->thermalPasses, bs->thermalTalus, step);
 	clock_t t3 = clock();
 
 	/* Droplets spawn only on land; reaching the sea is a river mouth. */
-	hydraulicErode(h, dep, W, H, seaLevel0, step);
+	hydraulicErode(h, dep, W, H, seaLevel0, bs, step);
 	clock_t t4 = clock();
 
 	/* 5. Percentile-stretch the relief to [0,1], carrying the sea level

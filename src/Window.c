@@ -4,6 +4,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
+void char_callback(GLFWwindow* window, unsigned int codepoint);
 
 static float windowWidth = 1.0f, windowHeight = 1.0f;
 
@@ -48,6 +49,7 @@ GLFWwindow *setupGLFW() {
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetScrollCallback(window, scroll_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
+	glfwSetCharCallback(window, char_callback);
 	return window;
 }
 

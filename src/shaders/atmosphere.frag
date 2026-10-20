@@ -27,9 +27,9 @@ const float PI = 3.14159265359;
 // atmosphere shells can be millions of world units across.
 const float MAX = 1e30;
 
-const float K_R = 0.166;//Rayleigh constant > thicker
-const float K_M = 0.0025;//Mie constant > thicker
-const float G_M = -0.85;
+uniform float K_R; // Rayleigh constant > thicker (default 0.166, Atmosphere.c)
+uniform float K_M; // Mie constant > thicker (default 0.0025)
+uniform float G_M; // Mie phase asymmetry, -0.75..-0.999 (default -0.85)
 
 // SCALE_H / SCALE_L are computed per invocation in main() and passed down:
 // non-constant global initializers reading uniforms are not valid core GLSL

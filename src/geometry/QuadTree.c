@@ -21,7 +21,8 @@
 #define QT_LEVEL_PER_RADIUS (128.0f / 30.0f)
 #define QT_SPLIT_LOD 256.0f
 /* Culling margin as a fraction of the body radius: covers the land relief
-   (LAND_RELIEF in Main.c), the water shell + swell, and the skirts. */
+   (g_planetStyle.landRelief, capped below this by the debug panel), the
+   water shell + swell, and the skirts. */
 #define QT_CULL_RELIEF 0.05f
 
 static mat4 pos[QT_INSTANCE_CAP];

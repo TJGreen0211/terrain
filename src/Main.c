@@ -4,6 +4,7 @@
 #include "Atmosphere.h"
 #include "LoadingScreen.h"
 #include "GUI.h"
+#include "DebugGUI.h"
 #include "TerrainGen.h"
 #include "Rings.h"
 #include <stdio.h>
@@ -48,13 +49,11 @@ float g_waveParams[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp,
    pole/grazing corrections in the shaders. */
 GLuint planetHeightTex;
 #define LOD_K_NUMER (0.7853982f*1024.0f/3.1415926f)
-/* Geometric land relief as a fraction of the planet radius (quad.vert /
-   depth.vert displace the unit sphere by it). Sea level is radius 1.0 for
-   both the planet and the water shell. The seafloor sinks to OCEAN_RELIEF
-   below it along a squared (continental shelf) profile, so vertices next to
-   the coast stay near sea level and coast-straddling triangles barely sag. */
-#define LAND_RELIEF 0.025f
-#define OCEAN_RELIEF 0.01f
+/* Geometric relief (quad.vert / depth.vert displace the unit sphere by it)
+   is g_planetStyle.landRelief / oceanRelief (TerrainGen.h). Sea level is
+   radius 1.0 for both the planet and the water shell; the squared shelf
+   profile keeps vertices next to the coast near sea level, so
+   coast-straddling triangles barely sag. */
 struct sphere planet;
 struct ring planetRing;
 struct quadCube qc, qc2;
@@ -467,8 +466,8 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	   water.frag would drift the discard edge off the drawn coastline. */
 	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
 	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
-	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
-	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
+	glUniform1f(glGetUniformLocation(shader, "landRelief"), g_planetStyle.landRelief);
+	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), g_planetStyle.oceanRelief);
 	/* quad.frag rewrites gl_FragDepth for seafloor that pokes through the
 	   water; it needs the main projection's convention and near plane. */
 	glUniform1f(glGetUniformLocation(shader, "depthNear"), CAMERA_NEAR);
@@ -748,8 +747,8 @@ void drawPlanetDepth(GLuint shader, mat4 m, float lodRadius) {
 	glActiveTexture(GL_TEXTURE0);
 	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
 	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
-	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
-	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
+	glUniform1f(glGetUniformLocation(shader, "landRelief"), g_planetStyle.landRelief);
+	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), g_planetStyle.oceanRelief);
 	/* Same vertex lod inputs as setBodyUniforms, so the displaced caster
 	   matches the drawn surface vertex for vertex. */
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
@@ -898,6 +897,7 @@ int main(int argc, char *argv[])
 	attachGUIShaders();
 	uiInit();
 	uiSetupCameraSliders();
+	DebugGUI_Init(window);
 	LoadingScreen_Step(); // all shader programs
 	/* The quadtree body LOD: six face grids + shared instance VBO, attribute
 	   layout wired once (all three body programs declare vPosition at 0 and
@@ -941,13 +941,15 @@ int main(int argc, char *argv[])
 	//GLuint quadVAO = initQuadVAO();
 
 	/* Bake the planet height field: GPU shaping + CPU erosion + sea level
-	   stats (TerrainGen.c). The seed advances on every H-key re-bake. */
-	unsigned int planetSeed = 1337u;
-	planetHeightTex = generatePlanetHeightmap(planetSeed, &g_planetGen, LoadingScreen_Step);
+	   stats (TerrainGen.c), from g_terrainBake. The seed advances on every
+	   H-key re-bake; the debug panel edits the rest and re-bakes on demand. */
+	planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetGen, LoadingScreen_Step);
+	unsigned int ringSeed = g_terrainBake.seed;
 
-	/* Procedural rings, seeded with the planet (re-rolled with it on H).
-	   Every program that samples the ring shadow is a receiver. */
-	Rings_Init(planetSeed, rockVAOs, rockVerts);
+	/* Procedural rings, seeded with the planet (re-rolled with it when the
+	   seed changes). Every program that samples the ring shadow is a
+	   receiver. */
+	Rings_Init(ringSeed, rockVAOs, rockVerts);
 	Rings_AttachReceiver(quadShader);
 	Rings_AttachReceiver(waterShader);
 	Rings_AttachReceiver(ringShader);
@@ -1014,11 +1016,21 @@ int main(int argc, char *argv[])
 		}*/
 		fpsFrames++;
 
-		/* H: re-roll the seed and re-bake the height field (1-3 s hitch). */
+		/* H: re-roll the seed and re-bake the height field; the debug
+		   panel's regenerate button re-bakes with its current settings
+		   (1-3 s hitch either way). */
+		int rebake = DebugGUI_ConsumeRegenerate();
 		if (consumeRegenRequest()) {
+			g_terrainBake.seed++;
+			rebake = 1;
+		}
+		if (rebake) {
 			glDeleteTextures(1, &planetHeightTex);
-			planetHeightTex = generatePlanetHeightmap(++planetSeed, &g_planetGen, NULL);
-			Rings_Regenerate(planetSeed);
+			planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetGen, NULL);
+			if (g_terrainBake.seed != ringSeed) {
+				ringSeed = g_terrainBake.seed;
+				Rings_Regenerate(ringSeed);
+			}
 		}
 
 		generateWaves(&ocean);
@@ -1046,14 +1058,11 @@ int main(int argc, char *argv[])
 		float fScale = 300.0;
 		float fScaleFactor = 1.25;//1.025;
 
-		/* Atmosphere (OpenGLSolar Earth params): shell 4.24% above the
-		   surface (2x the original 2.12% so tall terrain stays inside),
-		   Rayleigh tint C_R, solar brightness E. Shared by the dome
-		   (in-scatter) and the planet/water passes (extinction). */
+		/* Atmosphere: shell starts at the planet surface; the rest of its
+		   parameters live in g_atmosphere (Atmosphere.c, debug panel).
+		   Shared by the dome (in-scatter) and the planet/water passes
+		   (extinction). */
 		float atmoInner = fScale;
-		float atmoOuter = fScale * 1.0424f;
-		vec3 atmoC_R = { 0.3f, 0.7f, 1.0f };
-		float atmoE = 14.3f;
 
 		//int terrainMaxLOD = (int)(log(fScale)/log(2));
 
@@ -1084,7 +1093,7 @@ int main(int argc, char *argv[])
 		   eclipsed by it. */
 		{
 			double sunDist = dlengthvec3(dsubvec3(lightWorld, translation));
-			double boundR = fScale * (1.0 + LAND_RELIEF) * 1.02;
+			double boundR = fScale * (1.0 + g_planetStyle.landRelief) * 1.02;
 			double halfAngle = asin(fmin(boundR / sunDist, 0.99));
 			double reach = MOON_ORBIT + MOON_RADIUS * 1.5;
 			float nearP = (float)fmax(sunDist - reach, 1.0);
@@ -1149,7 +1158,7 @@ int main(int argc, char *argv[])
 		//blend over the seafloor.
 		setBodyUniforms(quadShader, fScale, model, lightPosition,
 		                0, dxWaveTex, 0, 0, 0, 0);
-		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
+		setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
 		Rings_BindReceiver(quadShader);
 		QuadTree_DrawSphere(model, fScale, viewProj);
 
@@ -1161,9 +1170,8 @@ int main(int argc, char *argv[])
 		setBodyUniforms(waterShader, fScale, model, lightPosition,
 		                ocean.dyTexture, ocean.detailTexture,
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
-		setAtmosphereExtinction(waterShader, atmoInner, atmoOuter, atmoC_R);
-		/* Solar brightness for the sky water.frag reflects (same as the dome). */
-		glUniform1f(glGetUniformLocation(waterShader, "E"), atmoE);
+		/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
+		setAtmosphereExtinction(waterShader, atmoInner, &g_atmosphere);
 		/* Detail layers' slope variance (BRDF roughness, water.frag). */
 		glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
 		/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
@@ -1197,7 +1205,7 @@ int main(int argc, char *argv[])
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//scaled planet shell; params above with the planet extinction)
 		drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
-		                   atmoInner, atmoOuter, atmoC_R, atmoE, lightPosition);
+		                   atmoInner, &g_atmosphere, lightPosition);
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
 		drawSunGlow(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
@@ -1219,9 +1227,13 @@ int main(int argc, char *argv[])
 		}
 		uiDrawAll();
 
+		//Debug panel (F1): drawn last, over the sliders.
+		DebugGUI_Frame();
+
 		glfwPollEvents();
 		glfwSwapBuffers(window);
 	}
+	DebugGUI_Shutdown();
 	glfwTerminate();
 	return 0;
 }

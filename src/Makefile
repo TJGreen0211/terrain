@@ -9,6 +9,7 @@ SRCS = Main.c \
 	Rings.c \
 	LoadingScreen.c \
 	GUI.c \
+	DebugGUI.c \
 	TerrainGen.c \
 	glad.c \
 	LoadShader.c \
