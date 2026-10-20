@@ -56,8 +56,10 @@ static Arcball arcball = {
     {0.0f, 0.0f, 0.0f}
 };
 
-/* Point the camera orbits / looks at. Defaults to the planet at the origin. */
-static vec3 Pivot = { 0.0f, 0.0f, 0.0f };
+/* Point the camera orbits / looks at. Defaults to the planet at the origin.
+   An absolute world coordinate in double: WASD accumulation never quantizes
+   against the scene scale (camera-relative rendering, see getViewMatrix). */
+static dvec3 Pivot = { 0.0, 0.0, 0.0 };
 static int dragging = 0;
 
 /* Sub-solar surface preset. When active the camera stands just above the
@@ -75,7 +77,7 @@ vec3 Front = {0.0f, 0.0f, -1.0f};
 vec3 Up = {0.0f, 1.0f, 0.0f};
 vec3 Right = {1.0f, 0.0f, 0.0f};
 
-void setCameraPivot(vec3 pivot)
+void setCameraPivot(dvec3 pivot)
 {
     Pivot = pivot;
 }
@@ -147,7 +149,7 @@ static void arcballRotation(void)
 }
 
 static int  surfaceViewActive(void);
-static vec3 surfaceEye(void);
+static dvec3 surfaceEye(void);
 static mat4 surfaceViewRotation(void);
 
 mat4 getViewRotation()
@@ -204,18 +206,20 @@ static mat4 surfaceLookAt(vec3 eye, vec3 target, vec3 upRef)
 
 static int surfaceViewActive(void) { return surfaceView; }
 
-static vec3 surfaceEye(void)
+static dvec3 surfaceEye(void)
 {
-    vec3 e;
-    e.x = SURFACE_SUN.x * surfAlt;
-    e.y = SURFACE_SUN.y * surfAlt;
-    e.z = SURFACE_SUN.z * surfAlt;
+    dvec3 e;
+    e.x = (double)SURFACE_SUN.x * surfAlt;
+    e.y = (double)SURFACE_SUN.y * surfAlt;
+    e.z = (double)SURFACE_SUN.z * surfAlt;
     return e;
 }
 
+/* Orientation of the surface pose only: the eye is never baked into a float
+   matrix (camera-relative rendering), so the lookAt runs from the origin. */
 static mat4 surfaceViewMatrix(void)
 {
-    vec3 eye = surfaceEye();
+    vec3 eye = { 0.0f, 0.0f, 0.0f };
     /* A horizontal tangent at the sub-solar point, perpendicular to the sun
        direction in the XZ plane (dot with SURFACE_SUN is 0). */
     vec3 h; h.x =  0.7071068f; h.y = 0.0f; h.z = -0.7071068f;
@@ -247,18 +251,6 @@ static mat4 surfaceViewRotation(void)
     return r;
 }
 
-static mat4 surfaceViewPosition(void)
-{
-    /* Translation t satisfying r33 * t = the view translation column (r33 is
-       orthonormal, so its inverse is a transpose). Keeps R * T == V exactly. */
-    mat4 v = surfaceViewMatrix();
-    mat4 r = surfaceViewRotation();
-    float tx = r.m[0][0]*v.m[0][3] + r.m[1][0]*v.m[1][3] + r.m[2][0]*v.m[2][3];
-    float ty = r.m[0][1]*v.m[0][3] + r.m[1][1]*v.m[1][3] + r.m[2][1]*v.m[2][3];
-    float tz = r.m[0][2]*v.m[0][3] + r.m[1][2]*v.m[1][3] + r.m[2][2]*v.m[2][3];
-    return translate(tx, ty, tz);
-}
-
 void toggleSurfaceCamera(void)
 {
     surfaceView = !surfaceView;
@@ -270,49 +262,29 @@ int isSurfaceCamera(void)
     return surfaceView;
 }
 
-mat4 getViewPosition()
-{
-    if (surfaceViewActive()) return surfaceViewPosition();
-    mat4 r = getViewRotation();
-    /* t is the translation that puts the pivot d units straight ahead on the
-       view axis: R * (pivot + t) == (0, 0, -d). */
-    float tx = -CameraDistance * r.m[2][0] - Pivot.x;
-    float ty = -CameraDistance * r.m[2][1] - Pivot.y;
-    float tz = -CameraDistance * r.m[2][2] - Pivot.z;
-    return translate(tx, ty, tz);
-}
-
+/* Floating-origin view matrix: a pure rotation. Every world position reaching
+   the GPU has already had the camera position subtracted on the CPU in double,
+   so the camera sits at exactly the origin and no translation (whose size
+   would re-quantize against the scene scale) enters the float pipeline.
+   Algebraically identical to the old R * translate(-cam) applied to absolute
+   positions: R*(v - cam) == R*v_rel. */
 mat4 getViewMatrix()
 {
-    if (surfaceViewActive()) return surfaceViewMatrix();
-    return multiplymat4(getViewRotation(), getViewPosition());
+    return getViewRotation();
 }
 
-static vec3 getCameraWorldPos()
+/* Absolute world camera position in double: never hand it to the GPU.
+   Subtract it from world positions in double and downcast only the
+   difference. The orbit camera sits CameraDistance behind the pivot. */
+dvec3 getCameraPosition(void)
 {
     if (surfaceViewActive()) return surfaceEye();
     mat4 r = getViewRotation();
-    vec3 c;
-    c.x = CameraDistance * r.m[2][0] + Pivot.x;
-    c.y = CameraDistance * r.m[2][1] + Pivot.y;
-    c.z = CameraDistance * r.m[2][2] + Pivot.z;
+    dvec3 c;
+    c.x = Pivot.x + (double)CameraDistance * r.m[2][0];
+    c.y = Pivot.y + (double)CameraDistance * r.m[2][1];
+    c.z = Pivot.z + (double)CameraDistance * r.m[2][2];
     return c;
-}
-
-/* Public accessor (used to recenter objects near the view). */
-vec3 getCamera()
-{
-    return getCameraWorldPos();
-}
-
-/* The scene's draw functions keep this signature but the shaders ignore the
-   uploaded position; return the orbit camera's world position. */
-vec4 getCameraPosition(mat4 position)
-{
-    (void)position;
-    vec3 c = getCameraWorldPos();
-    vec4 pos = { c.x, c.y, c.z, 1.0f };
-    return pos;
 }
 
 /* The view transform is v_cam = R * (v_world + t), so a world direction d
@@ -336,13 +308,13 @@ void processKeyboard(enum Camera_Movement direction, GLfloat deltaTime, GLfloat 
     updateCameraVectors();
 
     if (direction == FORWARD)
-        Pivot = plusequalvec3(Pivot, scalarMultvec3(Front, velocity));
+        Pivot = daddvec3(Pivot, (dvec3){Front.x * velocity, Front.y * velocity, Front.z * velocity});
     if (direction == BACKWARD)
-        Pivot = minusequalvec3(Pivot, scalarMultvec3(Front, velocity));
+        Pivot = dsubvec3(Pivot, (dvec3){Front.x * velocity, Front.y * velocity, Front.z * velocity});
     if (direction == LEFT)
-        Pivot = minusequalvec3(Pivot, scalarMultvec3(Right, velocity));
+        Pivot = dsubvec3(Pivot, (dvec3){Right.x * velocity, Right.y * velocity, Right.z * velocity});
     if (direction == RIGHT)
-        Pivot = plusequalvec3(Pivot, scalarMultvec3(Right, velocity));
+        Pivot = daddvec3(Pivot, (dvec3){Right.x * velocity, Right.y * velocity, Right.z * velocity});
 }
 
 /* terrain's mouse_callback has no discrete press/release event; it reports the

@@ -4,7 +4,7 @@ uniform vec3 camPosition;
 uniform vec3 C_R;
 uniform float E;
 uniform vec4 lightPos;
-uniform vec3 shellCenter;   // world-space body centre (shell sphere origin)
+uniform vec3 shellCenter;   // camera-relative body centre (shell sphere origin)
 
 uniform float fInnerRadius;
 uniform float fOuterRadius;

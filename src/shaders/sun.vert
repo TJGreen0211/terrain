@@ -10,7 +10,7 @@ out float sunDepth;  // sun centre's depth-buffer value in [0,1]
 uniform mat4 view;
 uniform mat4 projection;
 uniform float sunRadius;
-uniform vec3 sunCenter;   // sun centre in WORLD space
+uniform vec3 sunCenter;   // sun centre, camera-relative (camera at the origin)
 
 void main()
 {

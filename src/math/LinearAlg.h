@@ -35,6 +35,28 @@ typedef struct quaternion {
 	float w, x, y, z;
 } quaternion;
 
+/* Double-precision types for CPU-side world coordinates (camera-relative
+   rendering, ported from OpenGLSolar). The GPU never sees these: absolute
+   positions live here, the camera position is subtracted in double, and only
+   the (small) difference is downcast to the float vec3/mat4 sent to OpenGL. */
+typedef struct dvec3 {
+	double x, y, z;
+} dvec3;
+
+typedef struct dmat4 {
+	double m[4][4];
+} dmat4;
+
+dvec3 dsubvec3(dvec3 v, dvec3 u);
+dvec3 daddvec3(dvec3 v, dvec3 u);
+dvec3 dscalarvec3(dvec3 v, double s);
+double dlengthvec3(dvec3 v);
+vec3 dvec3tovec3(dvec3 v);
+dmat4 dtranslatevec3(dvec3 v);
+dmat4 dmultiplymat4(dmat4 c, dmat4 d);
+dmat4 dmat4frommat4(mat4 a);
+mat4 dmat4tomat4(dmat4 a);
+
 float quatLength(quaternion q);
 quaternion quatNormalize(quaternion q);
 quaternion quatConjugate(quaternion q);

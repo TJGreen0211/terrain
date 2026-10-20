@@ -39,14 +39,18 @@ uniform float outsideShell;
 
 const float PI = 3.14159265359;
 
-// True world camera (cameraPos carries the shifted legacy position).
+// Camera-relative rendering: fragPos, lightPosition and bodyCenter (the
+// planet centre) are all relative to the camera, which sits at the origin
+// (cameraPos = lodCameraPos = 0). Planet-local positions are fragPos -
+// bodyCenter.
 uniform vec3 lodCameraPos;
+uniform vec3 bodyCenter;
 
 // Atmospheric extinction (OpenGLSolar planet.frag port): dims the surface by
 // the transmittance along the surface-to-camera path through the dome's shell.
 // The atmosphere dome pass adds the in-scattered light over both the limb and
 // the planet disc; adding it here as well would count that radiance twice.
-// fragPos/lodCameraPos are planet-local: the planet sits at the world origin.
+// applyAtmosphere takes planet-local eye/fragment positions (shell-centred).
 uniform float hasAtmosphere;
 uniform float fInnerRadius;
 uniform float fOuterRadius;
@@ -159,14 +163,15 @@ void main()
 	// planet. Discarding them first lets drivers recover early-Z. Gated off
 	// while the camera is inside the shell (surface view).
 	vec3 Vv = cameraPos - fragPos;
-	if (outsideShell > 0.5 && dot(Vv, fragPos) < 0.0)
+	vec3 localPos = fragPos - bodyCenter;
+	if (outsideShell > 0.5 && dot(Vv, localPos) < 0.0)
 		discard;
 
 	float zc = clamp(dObj.z, -1.0, 1.0);
 	vec2 huv = vec2((atan(dObj.y, dObj.x)/PI + 1.0)*0.5,
 	                (asin(zc)/PI + 0.5));
 	float cosLat = max(sqrt(max(1.0 - zc*zc, 1e-4)), 0.02);
-	float graz = max(abs(dot(normalize(fragPos), normalize(Vv))), 0.15);
+	float graz = max(abs(dot(normalize(localPos), normalize(Vv))), 0.15);
 	float lod = log2(max(length(Vv)*lodK, 1e-4)) - log2(graz) + log2(1.0/cosLat);
 	float h = textureLod(heightMap, huv, clamp(lod, 0.0, 11.0)).r;
 	float e = clamp(h, 0.0, 1.0);
@@ -235,7 +240,7 @@ void main()
 	// Fresnel sky reflection (Schlick, water F0 = 0.02). The reflectance is
 	// gated by sky visibility: where the reflection ray misses the sky, the
 	// water body must stay visible or grazing angles turn black.
-	vec3 up = normalize(fragPos);
+	vec3 up = normalize(localPos);
 	vec3 R = reflect(eye, N);
 	float skyVis = smoothstep(-0.1, 0.4, dot(R, up));
 	float nDotV = clamp(dot(N, V), 0.0, 1.0);
@@ -283,7 +288,7 @@ void main()
 
 	// Surface extinction, matching quad.frag so the coastline stays seamless.
 	if (hasAtmosphere > 0.5) {
-		color = applyAtmosphere(color, lodCameraPos, fragPos);
+		color = applyAtmosphere(color, lodCameraPos - bodyCenter, localPos);
 	}
 
 	// Seascape post (fragColor = pow(color, 0.65))

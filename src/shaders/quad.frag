@@ -18,11 +18,15 @@ uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
 uniform sampler2D depthMap;
+// Camera-relative rendering: fragPos, lightPosition and bodyCenter (the
+// planet centre) are all relative to the camera, which sits at the origin
+// (cameraPos = lodCameraPos = 0). Planet-local positions are fragPos -
+// bodyCenter.
+uniform vec3 bodyCenter;
 // Height field baked once at startup from the original fbm3 (heightbake.frag).
-// lodCameraPos is the true world camera (cameraPos intentionally carries the
-// legacy sun-relative position); lodK folds the pixel/texel angular-size
-// ratio into log2(dist*lodK), plus the equirect pole and grazing corrections,
-// clamped to the bake's 11 mips (2048 wide).
+// lodK folds the pixel/texel angular-size ratio into log2(dist*lodK), plus
+// the equirect pole and grazing corrections, clamped to the bake's 11 mips
+// (2048 wide).
 uniform sampler2D heightMap;
 uniform vec3 lodCameraPos;
 uniform float lodK;
@@ -37,7 +41,7 @@ const float PI = 3.14159265359;
 // the transmittance along the surface-to-camera path through the dome's shell.
 // The atmosphere dome pass adds the in-scattered light over both the limb and
 // the planet disc; adding it here as well would count that radiance twice.
-// fragPos/lodCameraPos are planet-local: the planet sits at the world origin.
+// applyAtmosphere takes planet-local eye/fragment positions (shell-centred).
 uniform float hasAtmosphere;
 uniform float fInnerRadius;
 uniform float fOuterRadius;
@@ -269,7 +273,7 @@ void main()
 	// folded into lodK) plus grazing correction (footprint grows by 1/cos of
 	// the view angle at the surface).
 	vec3 camDir = lodCameraPos - fragPos;
-	float graz = max(abs(dot(normalize(fragPos), normalize(camDir))), 0.15);
+	float graz = max(abs(dot(normalize(fragPos - bodyCenter), normalize(camDir))), 0.15);
 	float lodBase = log2(max(length(camDir)*lodK, 1e-4)) - log2(graz);
 	// Gradient step = one texel of the mip being sampled, so the bump
 	// resolves exactly the detail the lod shows: a fixed step was ~10
@@ -426,7 +430,7 @@ void main()
 	// Surface extinction only (linear radiance, before the tone map); the
 	// atmosphere dome owns all in-scattered radiance.
 	if (hasAtmosphere > 0.5) {
-		lit = applyAtmosphere(lit, lodCameraPos, fragPos);
+		lit = applyAtmosphere(lit, lodCameraPos - bodyCenter, fragPos - bodyCenter);
 	}
 
 	// Filmic (ACES) tone map: compresses hot specular while preserving albedo

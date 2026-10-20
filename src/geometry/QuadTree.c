@@ -391,20 +391,19 @@ void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj)
 {
 	/* Last walk's inputs: the planet and water passes draw the same body
 	   from the same camera back to back, so the second pass reuses the
-	   instance buffers the first one uploaded. */
+	   instance buffers the first one uploaded. The camera is always the
+	   origin, so a moved camera shows up as a changed (camera-relative)
+	   model matrix. */
 	static mat4 lastModel, lastViewProj;
-	static vec3 lastCam;
 	static float lastRadius = -1.0f;
 	static int faceCount[6];
 
-	/* Terrain keeps absolute world coordinates (no floating origin): the
-	   node centres computed by sphereCenter are world-space, so the LOD walk
-	   compares them against the world camera position, not (0,0,0). */
-	vec4 cam = getCameraPosition(identityMatrix());
-	vec3 camPos = { cam.x, cam.y, cam.z };
+	/* Floating origin: the model matrices handed to this pass are already
+	   camera-relative, so the camera sits at the origin of the same space
+	   and the LOD walk compares node centres against (0,0,0). */
+	vec3 camPos = { 0.0f, 0.0f, 0.0f };
 
 	int cached = radius == lastRadius
-	          && camPos.x == lastCam.x && camPos.y == lastCam.y && camPos.z == lastCam.z
 	          && memcmp(&model, &lastModel, sizeof(mat4)) == 0
 	          && memcmp(&viewProj, &lastViewProj, sizeof(mat4)) == 0;
 
@@ -421,7 +420,7 @@ void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj)
 				glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*faceCount[f], pos, GL_STREAM_DRAW);
 			}
 		}
-		lastModel = model; lastViewProj = viewProj; lastCam = camPos; lastRadius = radius;
+		lastModel = model; lastViewProj = viewProj; lastRadius = radius;
 	}
 
 	/* Patch skirts must render double-sided, so culling is off entirely for

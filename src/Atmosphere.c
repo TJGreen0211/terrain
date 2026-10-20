@@ -38,9 +38,10 @@ void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
 
 	glUseProgram(shader);
 
-	mat4 tv = transposemat4(multiplymat4(modelmat, getViewPosition()));
-	vec4 camMult = {-tv.m[3][0], -tv.m[3][1], -tv.m[3][2], -tv.m[3][3]};
-	vec4 camPosition = multiplymat4vec4(tv, camMult);
+	/* Floating origin: modelmat is the camera-relative planet centre and the
+	   camera sits at the origin, so the camera in the shell-centred frame is
+	   just -planetTransform. */
+	vec3 camPosition = {-modelmat.m[0][3], -modelmat.m[1][3], -modelmat.m[2][3]};
 
 	mat4 m = multiplymat4(modelmat, scale(fOuter));
 
@@ -52,7 +53,7 @@ void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
 	glUniform3f(glGetUniformLocation(shader, "C_R"), C_R.x, C_R.y, C_R.z);
 	glUniform1f(glGetUniformLocation(shader, "E"), E);
 	glUniform4f(glGetUniformLocation(shader, "lightPos"), lightPosition.x, lightPosition.y, lightPosition.z, lightPosition.w);
-	// World-space body centre: modelmat is a pure translation, its
+	// Camera-relative body centre: modelmat is a pure translation, its
 	// translation column is the shell sphere origin (row-vector
 	// convention, m[0][3]..m[2][3])
 	glUniform3f(glGetUniformLocation(shader, "shellCenter"), modelmat.m[0][3], modelmat.m[1][3], modelmat.m[2][3]);

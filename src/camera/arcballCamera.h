@@ -24,11 +24,13 @@ extern const float CameraDistanceMax;
 extern GLfloat MovementSpeed;
 extern GLfloat CameraScrollSpeed;
 
-void setCameraPivot(vec3 pivot);
-vec3 getCamera();
-vec4 getCameraPosition(mat4 position);
+/* Camera-relative rendering: getViewMatrix() is rotation only, and the camera
+   sits at the origin of every space the GPU sees. getCameraPosition() is the
+   absolute world camera in double: subtract it from world positions in double
+   and downcast only the difference (see LinearAlg.h dvec3). */
+void setCameraPivot(dvec3 pivot);
+dvec3 getCameraPosition(void);
 mat4 getViewMatrix();
-mat4 getViewPosition();
 mat4 getViewRotation();
 
 void updateCameraVectors();
