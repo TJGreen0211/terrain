@@ -7,6 +7,8 @@
 #include "DebugGUI.h"
 #include "TerrainGen.h"
 #include "Rings.h"
+#include "WorldConfig.h"
+#include "Bodies.h"
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -15,23 +17,14 @@
 #include <sys/stat.h>
 //#include <pthread.h>
 
-/* Main camera near plane (world units; 1 unit = planet radius / 300, ~21 km
-   at Earth scale, so this is ~0.1 m). The main pass uses an infinite
-   reversed-Z projection into a float depth buffer (see the scene target
-   below), whose relative precision is the same at every distance, so the
-   near plane can sit at surface scale while the sun and moon stay in view. */
-#define CAMERA_NEAR 5e-6f
+/* World units are metres; every scale constant (camera near plane, shadow
+   map size, body sizes and orbits, ...) is in WorldConfig.h. The main pass
+   uses an infinite reversed-Z projection into a float depth buffer (see the
+   scene target below), whose relative precision is the same at every
+   distance, so the near plane can sit at surface scale while the sun and
+   moon stay in view. */
+#define CAMERA_NEAR ((float)CAMERA_NEAR_M)
 GLuint depthMap;
-/* Sun shadow map: a square depth texture rendered from the sun's position
-   (it is a point light, so the light projection is a perspective frustum
-   from the sun just wide enough to enclose the planet). Its resolution is
-   independent of the window. */
-#define SHADOW_MAP_SIZE 4096
-/* Shadow-casting moon (moonWorldPosition / drawOrbit): orbit radius and
-   body radius in world units. The light frustum's depth range must reach
-   the moon on both sides of the planet. */
-#define MOON_ORBIT  2000.0
-#define MOON_RADIUS 100.0
 /* Per-frame extras for the quadtree body passes (set once per frame, read by
    setBodyUniforms / bindShadowMap). lightSpace maps CAMERA-RELATIVE
    positions to the shadow map's clip space; shadowTexel is the world size of
@@ -108,17 +101,16 @@ GLuint initInstanceShader() {
 
 /* Camera sliders (bottom-left, blue = movement speed on top, orange =
    scroll speed below), ported from OpenGLSolar. Log-mapped so the low end
-   stays usable: t in [0,1] -> min*(max/min)^t. Ranges keep the camera
-   defaults (MovementSpeed 200, CameraScrollSpeed 10) at the same relative
-   spot OpenGLSolar's do. */
+   stays usable: t in [0,1] -> min*(max/min)^t. The ranges (WorldConfig.h)
+   keep the camera defaults at the same relative spot OpenGLSolar's do. */
 #define UI_SLIDER_MOVEMENT 0
 #define UI_SLIDER_SCROLL   1
 #define UI_SLIDER_COUNT    2
 
-#define CAMERA_MOVEMENT_MIN 5.0f
-#define CAMERA_MOVEMENT_MAX 2000.0f
-#define CAMERA_SCROLL_MIN 0.5f
-#define CAMERA_SCROLL_MAX 200.0f
+#define CAMERA_MOVEMENT_MIN ((float)CAMERA_MOVE_SPEED_MIN)
+#define CAMERA_MOVEMENT_MAX ((float)CAMERA_MOVE_SPEED_MAX)
+#define CAMERA_SCROLL_MIN ((float)CAMERA_SCROLL_STEP_MIN)
+#define CAMERA_SCROLL_MAX ((float)CAMERA_SCROLL_STEP_MAX)
 
 static float cameraSliderValue(float minV, float maxV, float t)
 {
@@ -461,6 +453,9 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glUniform1i(glGetUniformLocation(shader, "heightMap"), 6);
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
+	/* World units are metres, so the body radius is its radius in metres
+	   (water.frag sizes the sub-pixel wind waves from it). */
+	glUniform1f(glGetUniformLocation(shader, "planetRadiusM"), lodRadius);
 	/* Sea level + ocean depth from the last bake. planet and water go through
 	   this one function so they can never disagree — a different seaLevel in
 	   water.frag would drift the discard edge off the drawn coastline. */
@@ -654,21 +649,14 @@ void drawWTest(GLuint vao, GLuint shader, waves *ocean, mat4 m, float amp) {
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-/* Draws the sun marker and returns the light's WORLD position (double):
-   callers downcast it camera-relative for shading, and build the shadow
-   light view from the world value. */
-dvec3 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float theta, dvec3 position)
+/* Draws the sun marker sphere at the sun body (whose world position is the
+   light's; callers downcast it camera-relative for shading). */
+void rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, const Body *sun)
 {
 	glUseProgram(shader);
 	glBindVertexArray (vao);
 
-	dvec3 translation;
-	translation.x = (-4000.0);// * cos(theta/75.0);
-	translation.y = 0.0;
-	translation.z = (-4000.0);// * sin(theta/75.0);
-	dvec3 world = daddvec3(position, translation);
-
-	mat4 model = multiplymat4(multiplymat4(camRelTranslate(world), scale(15.0)),rotateX(90.0));
+	mat4 model = dmat4tomat4(Body_ModelMatrix(sun, g_cam));
 	initMVP(shader, model, getViewMatrix());
 
 	glUniform3f(glGetUniformLocation(shader, "cameraPos"), 0.0f, 0.0f, 0.0f);
@@ -680,8 +668,6 @@ dvec3 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float
 	bindShadowMap(shader, 1);
 	glDrawArrays(GL_TRIANGLES, 0, vertices);
 	glBindVertexArray(0);
-
-	return world;
 }
 
 /* Moon drawn as an LOD quadtree sphere (same face-grid geometry as the
@@ -689,21 +675,11 @@ dvec3 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float
    that initQuadCube used to bake, so moon.jpg frames it unchanged. Only the
    uniforms drawOrbit always set are touched; `instanced` is reset afterwards
    because ringShader is shared with the sun marker. */
-/* World position of the moon's centre (orbiting the planet at `position`). */
-static dvec3 moonWorldPosition(float theta, dvec3 position)
-{
-	dvec3 translation;
-	translation.x = MOON_ORBIT * cos(theta/100.0);
-	translation.y = 0.0;
-	translation.z = MOON_ORBIT * sin(theta/100.0);
-	return daddvec3(position, translation);
-}
-
-void drawOrbit(GLuint shader, GLuint texture, float theta, dvec3 position, vec4 lightPosition)
+void drawOrbit(GLuint shader, GLuint texture, const Body *moon, vec4 lightPosition)
 {
 	glUseProgram(shader);
 
-	mat4 model = multiplymat4(multiplymat4(camRelTranslate(moonWorldPosition(theta, position)), scale(MOON_RADIUS)),rotateX(90.0));
+	mat4 model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
 	initMVP(shader, model, getViewMatrix());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 
@@ -715,7 +691,7 @@ void drawOrbit(GLuint shader, GLuint texture, float theta, dvec3 position, vec4 
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
 	/* Receives the planet's shadow when it passes behind it. */
 	bindShadowMap(shader, 1);
-	QuadTree_DrawSphere(model, (float)MOON_RADIUS, getViewProjection());
+	QuadTree_DrawSphere(model, (float)moon->radius, getViewProjection());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -841,7 +817,8 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 int main(int argc, char *argv[])
 {
 	struct obj rockObj[3];
-	float theta = 0.0;
+	/* Simulation clock (seconds, double): drives every orbit and spin. */
+	double simTime = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	{
 		char exePath[MAX_PATH];
@@ -981,8 +958,6 @@ int main(int argc, char *argv[])
 
 	float deltaTime = 0.0;
 	float lastFrame = 0.0;
-	/* World position of the planet centre (the scene origin). */
-	dvec3 translation = {0.0, 0.0, 0.0};
 	g_waveParams[0] = 1.0f;   // shell radius = sea level (planet coast is at 1.0)
 	g_waveParams[1] = 0.25f;  // ~0.0006 rms: well under the land relief
 	g_waveParams[2] = 1.0f;
@@ -1035,13 +1010,20 @@ int main(int argc, char *argv[])
 
 		generateWaves(&ocean);
 
-		if (!getRotationPaused())
-			theta += 0.5;
-
 		GLfloat currentFrame = glfwGetTime();
 		deltaTime = currentFrame - lastFrame;
 		lastFrame = currentFrame;
 		doMovement(deltaTime);
+
+		/* Advance the bodies (R pauses). The step is capped so a hitch (the
+		   first frame after loading, a re-bake) does not jump hours ahead. */
+		if (!getRotationPaused())
+			simTime += fmin(deltaTime, 0.1) * SIM_TIME_SCALE;
+		Bodies_Update(simTime);
+		const Body *earth = &g_bodies[BODY_EARTH];
+		const Body *sun = &g_bodies[BODY_SUN];
+		const Body *moon = &g_bodies[BODY_MOON];
+
 		/* This frame's floating origin (see camRelTranslate). */
 		g_cam = getCameraPosition();
 
@@ -1052,11 +1034,9 @@ int main(int argc, char *argv[])
 			lastTime += 1.0;
 		}
 
-		/* Planet radius in world units. Everything planet-coupled (sun
-		   distance, shadow ortho/depth divisor, sun billboard, moon orbit,
-		   camera distance, surface presets) is scaled with this. */
-		float fScale = 300.0;
-		float fScaleFactor = 1.25;//1.025;
+		/* Planet radius (metres) and world centre. */
+		float fScale = (float)earth->radius;
+		dvec3 translation = earth->position;
 
 		/* Atmosphere: shell starts at the planet surface; the rest of its
 		   parameters live in g_atmosphere (Atmosphere.c, debug panel).
@@ -1069,8 +1049,9 @@ int main(int argc, char *argv[])
 		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 		glClearColor(0.0, 0.0, 0.0, 1.0);
 
-		//Light calculations per frame
-		dvec3 lightWorld = rotateLight(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, theta, translation);
+		//Light calculations per frame: the sun body is the light
+		rotateLight(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, sun);
+		dvec3 lightWorld = sun->position;
 		/* Shading and shadows both use the camera-relative light. */
 		vec3 lightPositionXYZ = toCamRel(lightWorld);
 		vec4 lightPosition = {lightPositionXYZ.x, lightPositionXYZ.y, lightPositionXYZ.z, 1.0};
@@ -1081,27 +1062,29 @@ int main(int argc, char *argv[])
 		Rings_BindReceiver(ringShader);
 		Rings_BindReceiver(atmosphereShader);
 
-		/* Planet orientation, shared by the shadow casters and the main pass. */
-		mat4 matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
-		mat4 planetModel = multiplymat4(camRelTranslate(translation), multiplymat4(scale(fScale), matR));
+		/* Planet model (scale * spin/tilt, camera-relative), composed in
+		   double and downcast once; shared by the shadow casters and the
+		   main pass. */
+		mat4 planetModel = dmat4tomat4(Body_ModelMatrix(earth, g_cam));
 
-		/* Shadow frustum: a perspective from the sun (a point light, matching
-		   the per-pixel light direction the shaders use) whose cone is tangent
-		   to the planet's bounding sphere (land relief + margin), so all
-		   SHADOW_MAP_SIZE^2 texels land on the planet. Depth spans the moon's
-		   orbit on either side so it can both eclipse the planet and be
-		   eclipsed by it. */
+		/* Shadow frustum: the sun is far enough away to be a directional
+		   light, so an orthographic box along the sun direction, just wide
+		   enough for the planet's bounding sphere (land relief + margin) so
+		   all SHADOW_MAP_SIZE^2 texels land on the planet. Its eye sits a
+		   finite distance up-sun (never at the sun itself: a 1 AU float
+		   translation would quantise depth to kilometres). Depth spans the
+		   moon's orbit on either side so it can both eclipse the planet and
+		   be eclipsed by it. */
 		{
-			double sunDist = dlengthvec3(dsubvec3(lightWorld, translation));
-			double boundR = fScale * (1.0 + g_planetStyle.landRelief) * 1.02;
-			double halfAngle = asin(fmin(boundR / sunDist, 0.99));
-			double reach = MOON_ORBIT + MOON_RADIUS * 1.5;
-			float nearP = (float)fmax(sunDist - reach, 1.0);
-			float farP = (float)(sunDist + reach);
-			mat4 lightProjection = perspective((float)(2.0 * halfAngle * 180.0 / M_PI), 1.0f, nearP, farP);
-			mat4 lightView = getLightViewMatrix(lightWorld, translation);
+			dvec3 toSun = dsubvec3(lightWorld, translation);
+			dvec3 sunDir = dscalarvec3(toSun, 1.0 / dlengthvec3(toSun));
+			double boundR = fScale * (1.0 + g_planetStyle.landRelief) * SHADOW_BOUND_MARGIN;
+			double reach = dlengthvec3(dsubvec3(moon->position, translation)) + moon->radius * 1.5 + boundR;
+			dvec3 eye = daddvec3(translation, dscalarvec3(sunDir, reach));
+			mat4 lightProjection = ortho((float)-boundR, (float)boundR, (float)-boundR, (float)boundR, 0.0f, (float)(2.0 * reach));
+			mat4 lightView = getLightViewMatrix(eye, translation);
 			g_lightSpaceMatrix = multiplymat4(lightProjection, lightView);
-			g_shadowTexel = (float)(2.0 * sunDist * tan(halfAngle) / SHADOW_MAP_SIZE);
+			g_shadowTexel = (float)(2.0 * boundR / SHADOW_MAP_SIZE);
 		}
 		mat4 lightSpaceMatrix = g_lightSpaceMatrix;
 
@@ -1115,7 +1098,7 @@ int main(int argc, char *argv[])
 			glClear(GL_DEPTH_BUFFER_BIT);
 			glEnable(GL_POLYGON_OFFSET_FILL);
 			glPolygonOffset(1.5f, 2.0f);
-			model = multiplymat4(multiplymat4(camRelTranslate(moonWorldPosition(theta, translation)), scale(MOON_RADIUS)),rotateX(90.0));
+			model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
 			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model);
 			drawPlanetDepth(depthShader, planetModel, fScale);
 			glDisable(GL_POLYGON_OFFSET_FILL);
@@ -1136,17 +1119,16 @@ int main(int argc, char *argv[])
 		drawSkybox(skyboxTexture, skyboxProj, getViewRotation());
 
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
-		drawOrbit(ringShader, moonTex, theta, translation, lightPosition);
+		drawOrbit(ringShader, moonTex, moon, lightPosition);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 		//Planet
-		model = multiplymat4(camRelTranslate(translation), scale(fScale));
-		mat4 m = multiplymat4(model,matR);
 		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, dxWaveTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
 		//Water: drawn after the planet, shell at sea level (see drawWater)
 		//Sun (billboard): opaque disc drawn with the scene; glow drawn last (below)
 		mat4 sunProj = cameraProjection();
 		mat4 sunView = getViewMatrix();
-		drawSunDisc(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
+		float sunGlowRadius = (float)(sun->radius * SUN_GLOW_RADII);
+		drawSunDisc(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
 
 		//Quadtree planet: LOD sphere built from six instanced face grids,
 		//centred camera-relative (the walk runs with the camera at the origin).
@@ -1208,7 +1190,7 @@ int main(int argc, char *argv[])
 		                   atmoInner, &g_atmosphere, lightPosition);
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
-		drawSunGlow(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
+		drawSunGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
 
 		/* Resolve the scene into the window; the UI draws there directly,
 		   with the standard depth convention restored. */

@@ -1,15 +1,17 @@
 #include "arcballCamera.h"
+#include "WorldConfig.h"
 #include <math.h>
 
 static const float toRadians = (float)(M_PI / 180.0f);
 
-/* Orbit radius: how far the camera sits behind the pivot it orbits. Spawns
-   at 0 (the camera sits on the pivot; dragging turns it in place) and scroll
-   dollies it out to the max, at which point dragging orbits the pivot. */
+/* Orbit radius (m): how far the camera sits behind the pivot it orbits.
+   Spawns at 0 (the camera sits on the pivot; dragging turns it in place) and
+   scroll dollies it out to the max, at which point dragging orbits the
+   pivot. Distances and speeds are in WorldConfig.h. */
 float CameraDistance = 0.0f;
-const float CameraDistanceMax = 6000.0f;
-GLfloat MovementSpeed = 200.0f;
-GLfloat CameraScrollSpeed = 10.0f;   // fine: lets you dolly all the way through the atmosphere shell
+const float CameraDistanceMax = (float)CAMERA_DISTANCE_MAX_M;
+GLfloat MovementSpeed = (GLfloat)CAMERA_MOVE_SPEED_MPS;
+GLfloat CameraScrollSpeed = (GLfloat)CAMERA_SCROLL_STEP_M;   // fine: lets you dolly all the way through the atmosphere shell
 
 /* The whole orbit orientation is one unit quaternion: the world -> camera
    rotation. A drag never accumulates per frame; it recomposes from the
@@ -23,18 +25,19 @@ static int dragging = 0;
 /* Point the camera orbits / looks at: an absolute world coordinate in
    double, so WASD accumulation never quantizes against the scene scale
    (camera-relative rendering, see getViewMatrix). Starts where the camera
-   used to spawn (900 in front of the planet) since the distance starts at 0. */
-static dvec3 Pivot = { 0.0, 0.0, 900.0 };
+   used to spawn (in front of the planet) since the distance starts at 0. */
+static dvec3 Pivot = { 0.0, 0.0, CAMERA_SPAWN_DISTANCE_M };
 
-/* Sub-solar surface preset. When active the camera stands just above the
-   planet surface (radius 300) at the sub-solar point — the spot where the fixed
-   sun (dir normalize(-4000,0,-4000)) is directly overhead — looking across a
-   local tangent tilted SURFACE_TILT below the horizon, up = the radial
-   direction. That gives a lit daytime interior: blue sky dome up top, bright
-   horizon, sunlit fog-ground below. Press G to toggle (see Input.c). */
+/* Sub-solar surface preset. When active the camera stands above the planet
+   surface at the sub-solar point — the spot where the fixed sun
+   (SUN_ORBIT_PHASE_DEG in WorldConfig.h) is directly overhead — looking
+   across a local tangent tilted SURFACE_TILT below the horizon, up = the
+   radial direction. That gives a lit daytime interior: blue sky dome up top,
+   bright horizon, sunlit fog-ground below. Press G to toggle (see Input.c). */
 static int surfaceView = 0;
-#define SURFACE_RAD 330.0f
-#define SURFACE_TILT 24.0f
+#define SURFACE_RAD ((float)SURFACE_CAMERA_MIN_RADIUS_M)
+#define SURFACE_MAX ((float)SURFACE_CAMERA_MAX_RADIUS_M)
+#define SURFACE_TILT ((float)SURFACE_CAMERA_TILT_DEG)
 static float surfAlt = SURFACE_RAD;
 
 static vec3 Front = {0.0f, 0.0f, -1.0f};
@@ -120,12 +123,17 @@ mat4 getViewRotation()
     return r;
 }
 
-/* Sub-solar "stand on the planet" pose. The sun is fixed along
-   normalize(-400,0,-400). We place the camera on the sub-solar point (the spot
+/* Sub-solar "stand on the planet" pose. The sun is fixed in the XZ plane at
+   SUN_ORBIT_PHASE_DEG. We place the camera on the sub-solar point (the spot
    where the sun is directly overhead) and look across a local tangent, tilted
    SURFACE_TILT below the horizon. That yields a sunlit daytime interior: a blue
    sky dome overhead, lit fog-ground below, and a bright horizon between. */
-static const vec3 SURFACE_SUN = { -0.7071068f, 0.0f, -0.7071068f };
+static vec3 surfaceSun(void)
+{
+    double a = SUN_ORBIT_PHASE_DEG * (M_PI / 180.0);
+    vec3 s = { (float)cos(a), 0.0f, (float)sin(a) };
+    return s;
+}
 
 /* OpenGL lookAt (world -> camera), same row layout as the orbit view. */
 static mat4 surfaceLookAt(vec3 eye, vec3 target, vec3 upRef)
@@ -153,10 +161,11 @@ static int surfaceViewActive(void) { return surfaceView; }
 
 static dvec3 surfaceEye(void)
 {
+    double a = SUN_ORBIT_PHASE_DEG * (M_PI / 180.0);
     dvec3 e;
-    e.x = (double)SURFACE_SUN.x * surfAlt;
-    e.y = (double)SURFACE_SUN.y * surfAlt;
-    e.z = (double)SURFACE_SUN.z * surfAlt;
+    e.x = cos(a) * surfAlt;
+    e.y = 0.0;
+    e.z = sin(a) * surfAlt;
     return e;
 }
 
@@ -165,9 +174,10 @@ static dvec3 surfaceEye(void)
 static mat4 surfaceViewMatrix(void)
 {
     vec3 eye = { 0.0f, 0.0f, 0.0f };
+    vec3 SURFACE_SUN = surfaceSun();
     /* A horizontal tangent at the sub-solar point, perpendicular to the sun
        direction in the XZ plane (dot with SURFACE_SUN is 0). */
-    vec3 h; h.x =  0.7071068f; h.y = 0.0f; h.z = -0.7071068f;
+    vec3 h; h.x = -SURFACE_SUN.z; h.y = 0.0f; h.z = SURFACE_SUN.x;
     float t  = SURFACE_TILT * toRadians;
     float c  = cosf(t);
     float s  = sinf(t);
@@ -300,14 +310,14 @@ int arcballDragging(void)
 
 /* Scroll in (yoffset < 0) shrinks the orbit radius to 0, out grows it to max.
    In surface mode the same scroll dollies the camera altitude through the
-   atmosphere shell (300 -> 445) instead of the orbit radius. */
+   atmosphere shell (SURFACE_RAD -> SURFACE_MAX) instead of the orbit radius. */
 void processMouseScroll(float yoffset)
 {
     if (surfaceViewActive())
     {
         surfAlt += yoffset * CameraScrollSpeed;
         if (surfAlt < SURFACE_RAD) surfAlt = SURFACE_RAD;
-        if (surfAlt > 445.0f) surfAlt = 445.0f;
+        if (surfAlt > SURFACE_MAX) surfAlt = SURFACE_MAX;
         return;
     }
     CameraDistance += yoffset * CameraScrollSpeed;

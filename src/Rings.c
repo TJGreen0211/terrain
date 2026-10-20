@@ -1,5 +1,6 @@
 #include "Main.h"
 #include "Rings.h"
+#include "WorldConfig.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -14,27 +15,28 @@
 #define RING_TILT_X 10.0
 /* Sun angular radius (radians): sets the penumbra width of the planet's
    shadow on the ring and of the ring's shadow on everything else. */
-#define RING_SUN_ANGLE 0.012f
+#define RING_SUN_ANGLE ((float)SUN_ANGULAR_RADIUS_RAD)
 #define RING_PROFILE_SIZE 16384
 /* Texture unit for ringProfile in every program; setBodyUniforms uses 0-8. */
 #define RING_PROFILE_UNIT 9
 
 /* Close-up field. The sheet fades out over RING_FADE_* (distance from the
-   camera, as fractions of ROCK_RANGE) where the rocks and dust take over. */
-#define ROCK_RANGE 70.0f
-#define ROCK_CELL 3.5f
+   camera, as fractions of ROCK_RANGE) where the rocks and dust take over.
+   Sizes in metres come from WorldConfig.h. */
+#define ROCK_RANGE ((float)RING_ROCK_RANGE_M)
+#define ROCK_CELL ((float)RING_ROCK_CELL_M)
 #define ROCK_DENSITY 0.35f          /* spawn probability per unit optical depth, per mesh */
-#define ROCK_MIN_SIZE 0.12f
-#define ROCK_MAX_SIZE 2.5f
+#define ROCK_MIN_SIZE ((float)RING_ROCK_MIN_SIZE_M)
+#define ROCK_MAX_SIZE ((float)RING_ROCK_MAX_SIZE_M)
 #define ROCK_MESH_SCALE (1.0f/1.6f) /* rock*.obj extents (~1.6) -> unit radius */
-#define RING_HALF_THICKNESS 3.0f
+#define RING_HALF_THICKNESS ((float)RING_HALF_THICKNESS_M)
 #define RING_FADE_NEAR 0.35f
 #define RING_FADE_FAR 0.9f
-#define DUST_RANGE 30.0f
-#define DUST_CELL 1.0f
+#define DUST_RANGE ((float)RING_DUST_RANGE_M)
+#define DUST_CELL ((float)RING_DUST_CELL_M)
 #define DUST_PER_CELL 3
 #define DUST_DENSITY 0.6f
-#define DUST_HALF_THICKNESS 2.0f
+#define DUST_HALF_THICKNESS ((float)RING_DUST_HALF_THICKNESS_M)
 
 static struct {
 	GLuint profileTex;

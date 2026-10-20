@@ -1,5 +1,6 @@
 #include "Main.h"
 #include "TerrainGen.h"
+#include "WorldConfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -790,7 +791,7 @@ static GLuint bakeClimate(const float *h, const float *anom, float *dep, float s
 /* Sea state for water.vert/.frag, from the same prevailing-wind bands that
    carry computeMoisture's rain, so the waves and the climate agree. */
 #define OCEAN_FETCH_KM     400.0f   /* fetch at which the sea is ~63% developed */
-#define PLANET_RADIUS_KM   6371.0f  /* matches water.frag's PLANET_RADIUS_M */
+#define PLANET_RADIUS_KM   (EARTH_RADIUS_M / 1000.0)  /* WorldConfig.h */
 #define WIND_MAX_MS        20.0f    /* wind speed stored as R = 1 */
 #define WIND_EDGE_DEG      5.0      /* half-width of the calm band between cells */
 #define WIND_ANOMALY_AMT   0.6f     /* storm/calm regions from the climate anomaly */

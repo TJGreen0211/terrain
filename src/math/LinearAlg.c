@@ -99,6 +99,38 @@ dmat4 dtranslatevec3(dvec3 v)
 	return c;
 }
 
+dmat4 dscalemat4(double s)
+{
+	dmat4 c = {{
+		{s,   0.0, 0.0, 0.0},
+		{0.0, s,   0.0, 0.0},
+		{0.0, 0.0, s,   0.0},
+		{0.0, 0.0, 0.0, 1.0}
+	}};
+	return c;
+}
+
+/* Double versions of rotateX/rotateZ (degrees, same layout). */
+dmat4 drotateX(double theta)
+{
+	double a = (M_PI / 180.0) * theta;
+	dmat4 r = dscalemat4(1.0);
+	r.m[1][1] = r.m[2][2] = cos(a);
+	r.m[2][1] = sin(a);
+	r.m[1][2] = -r.m[2][1];
+	return r;
+}
+
+dmat4 drotateZ(double theta)
+{
+	double a = (M_PI / 180.0) * theta;
+	dmat4 r = dscalemat4(1.0);
+	r.m[0][0] = r.m[1][1] = cos(a);
+	r.m[1][0] = sin(a);
+	r.m[0][1] = -r.m[1][0];
+	return r;
+}
+
 dmat4 dmultiplymat4(dmat4 c, dmat4 d)
 {
 	dmat4 out;

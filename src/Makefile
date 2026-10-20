@@ -7,6 +7,7 @@ SRCS = Main.c \
 	Skybox.c \
 	Atmosphere.c \
 	Rings.c \
+	Bodies.c \
 	LoadingScreen.c \
 	GUI.c \
 	DebugGUI.c \

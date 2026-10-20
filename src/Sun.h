@@ -4,9 +4,10 @@
 #include <glad/glad.h>
 #include "LinearAlg.h"
 
-// Projected on-screen size of the sun (its NDC half-size is the projected
-// radius of a sphere this big at the sun's depth).
-extern const float SUN_GLOW_RADIUS;
+// `radius` (both passes): world-space radius used to project the sun's
+// on-screen size. The NDC half-size is the projected radius of a sphere this
+// big at the sun's depth, so the sun shrinks/grows with the camera like a
+// real sphere would. Main.c passes sun radius * SUN_GLOW_RADII (WorldConfig.h).
 
 // Creates the sun billboard shader + fullscreen quad and loads the
 // sun colour + normal textures. Call once after the GL context is ready.

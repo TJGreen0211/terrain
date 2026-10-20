@@ -216,7 +216,8 @@ uniform float detailVar;          // mean squared slope of one detail layer
 // ~1 cm to ~100 m, far below what the FFT patch resolves at planet scale,
 // so the share of them smaller than a pixel joins S: nearly all of it from
 // orbit, fading only once pixels shrink to metres.
-const float PLANET_RADIUS_M = 6.371e6;
+// Body radius in metres (setBodyUniforms; WorldConfig.h).
+uniform float planetRadiusM;
 const float WIND_WAVE_MIN_M = 0.01;
 const float WIND_WAVE_MAX_M = 100.0;
 // Same sun radiance as quad.frag, so glint and land share one sun.
@@ -503,7 +504,7 @@ void main()
 	// wavelength (k^-4 height spectrum), so the share below the pixel
 	// footprint is its log position in the wind-wave band.
 	float pixelAngle = max(length(dDirX), length(dDirY));
-	float footM = pixelAngle * PLANET_RADIUS_M;
+	float footM = pixelAngle * planetRadiusM;
 	float unresolved = clamp(log2(footM / WIND_WAVE_MIN_M) / log2(WIND_WAVE_MAX_M / WIND_WAVE_MIN_M), 0.0, 1.0);
 	// Local wind: short wind waves develop within a few km, so fetch only
 	// trims the roughness a little (it matters far more for the swell and
