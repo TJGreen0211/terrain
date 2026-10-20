@@ -5,6 +5,7 @@
 #include "LoadingScreen.h"
 #include "GUI.h"
 #include "TerrainGen.h"
+#include "Rings.h"
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -788,7 +789,7 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 
 int main(int argc, char *argv[])
 {
-	struct obj object, ship;
+	struct obj rockObj[3], ship;
 	float theta = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	{
@@ -872,12 +873,18 @@ int main(int argc, char *argv[])
 	LoadingScreen_Step();
 	GLuint objectVAO = initObjectBuffer("../assets/rifter.obj", &ship);
 	LoadingScreen_Step();
-	GLuint rockVAO = initObjectBuffer("../assets/rock.obj", &object);
+	/* Ring rocks (Rings.c). Each mesh keeps its own obj: the vertex counts
+	   differ. */
+	GLuint rockVAOs[3];
+	int rockVerts[3];
+	rockVAOs[0] = initObjectBuffer("../assets/rock.obj", &rockObj[0]);
 	LoadingScreen_Step();
-	GLuint rock2VAO = initObjectBuffer("../assets/rock2.obj", &object);
+	rockVAOs[1] = initObjectBuffer("../assets/rock2.obj", &rockObj[1]);
 	LoadingScreen_Step();
-	GLuint rock3VAO = initObjectBuffer("../assets/rock3.obj", &object);
+	rockVAOs[2] = initObjectBuffer("../assets/rock3.obj", &rockObj[2]);
 	LoadingScreen_Step();
+	for (int i = 0; i < 3; i++)
+		rockVerts[i] = rockObj[i].vertexNumber;
 
 	GLuint quadCubeVAO = initQuadCube(30);
 	LoadingScreen_Step();
@@ -891,6 +898,14 @@ int main(int argc, char *argv[])
 	   stats (TerrainGen.c). The seed advances on every H-key re-bake. */
 	unsigned int planetSeed = 1337u;
 	planetHeightTex = generatePlanetHeightmap(planetSeed, &g_planetGen, LoadingScreen_Step);
+
+	/* Procedural rings, seeded with the planet (re-rolled with it on H).
+	   Every program that samples the ring shadow is a receiver. */
+	Rings_Init(planetSeed, rockVAOs, rockVerts);
+	Rings_AttachReceiver(quadShader);
+	Rings_AttachReceiver(waterShader);
+	Rings_AttachReceiver(ringShader);
+	Rings_AttachReceiver(atmosphereShader);
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
@@ -957,6 +972,7 @@ int main(int argc, char *argv[])
 		if (consumeRegenRequest()) {
 			glDeleteTextures(1, &planetHeightTex);
 			planetHeightTex = generatePlanetHeightmap(++planetSeed, &g_planetGen, NULL);
+			Rings_Regenerate(planetSeed);
 		}
 
 		generateWaves(&ocean);
@@ -1004,6 +1020,12 @@ int main(int argc, char *argv[])
 		vec3 lightPositionXYZ = toCamRel(lightWorld);
 		vec4 lightPosition = {lightPositionXYZ.x, lightPositionXYZ.y, lightPositionXYZ.z, 1.0};
 
+		/* Ring frame for this camera + light; ring-shadow receivers that are
+		   not set up through setBodyUniforms bind here. */
+		Rings_SetFrame(translation, g_cam, fScale, lightPosition);
+		Rings_BindReceiver(ringShader);
+		Rings_BindReceiver(atmosphereShader);
+
 		/* Planet orientation, shared by the shadow casters and the main pass. */
 		mat4 matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
 		mat4 planetModel = multiplymat4(camRelTranslate(translation), multiplymat4(scale(fScale), matR));
@@ -1028,10 +1050,11 @@ int main(int argc, char *argv[])
 		}
 		mat4 lightSpaceMatrix = g_lightSpaceMatrix;
 
-		/* Shadow pass. The ring is not a caster: it is not drawn in the main
-		   pass either, and the invisible ring was shadowing the planet. A
-		   slope-scaled polygon offset handles the remaining grazing acne
-		   together with the receiver offsets in sunVisibility. */
+		/* Shadow pass. The ring is not a caster: its shadow is semi-
+		   transparent, so the receivers compute it analytically from the
+		   ring profile instead (ringTransmittance). A slope-scaled polygon
+		   offset handles the remaining grazing acne together with the
+		   receiver offsets in sunVisibility. */
 		glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
 			glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 			glClear(GL_DEPTH_BUFFER_BIT);
@@ -1054,9 +1077,6 @@ int main(int argc, char *argv[])
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
 		drawOrbit(ringShader, moonTex, theta, translation, lightPosition);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-		//Planet ring
-		model = multiplymat4(multiplymat4(camRelTranslate(translation), rotateX(80.0)), scale(fScale*1.5));
-		//draw(ringVAO, ringShader, planetRing.vertexNumber, ringTex, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
 		//Planet
 		model = multiplymat4(camRelTranslate(translation), scale(fScale));
 		mat4 m = multiplymat4(model,matR);
@@ -1087,6 +1107,7 @@ int main(int argc, char *argv[])
 		setBodyUniforms(quadShader, fScale, model, lightPosition,
 		                0, dxWaveTex, 0, 0, 0, 0);
 		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
+		Rings_BindReceiver(quadShader);
 		QuadTree_DrawSphere(model, fScale, viewProj);
 
 		//Water: same quadtree LOD as the planet (reuses its walk), FFT-
@@ -1098,6 +1119,7 @@ int main(int argc, char *argv[])
 		                ocean.dyTexture, ocean.detailTexture,
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
 		setAtmosphereExtinction(waterShader, atmoInner, atmoOuter, atmoC_R);
+		Rings_BindReceiver(waterShader);
 		/* Water.frag's back-face early-out is only safe from outside the
 		   shell; the surface view (camera inside) must still see it. */
 		double shellCamDist = dlengthvec3(dsubvec3(g_cam, translation));
@@ -1116,11 +1138,12 @@ int main(int argc, char *argv[])
 			drawWTest(testQuadVAO, wTestShader, &ocean, testModel, 300.0);
 		}*/
 
-		//Ring
-		//glUseProgram(instanceShader);
-		//drawInstanced(rockVAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos1, rotations, model, scaleArray, theta, lightPosition);
-		//drawInstanced(rock2VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos2, rotations, model, scaleArray, theta, lightPosition);
-		//drawInstanced(rock3VAO, positionsVBO, instanceShader, object.vertexNumber, instancedDraws, pos3, rotations, model, scaleArray, theta, lightPosition);
+		//Rings: opaque close-up rocks, then the analytic sheet and the dust
+		//(premultiplied, depth-tested, no depth write). Before the
+		//atmosphere dome, which takes the sheet's coverage out of its glow.
+		Rings_DrawRocks(sunProj, sunView);
+		Rings_DrawSheet(sunProj, sunView);
+		Rings_DrawDust(sunProj, sunView);
 
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//scaled planet shell; params above with the planet extinction)

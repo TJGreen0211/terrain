@@ -9,6 +9,15 @@ uniform vec3 shellCenter;   // camera-relative body centre (shell sphere origin)
 uniform float fInnerRadius;
 uniform float fOuterRadius;
 
+// Rings (Rings.c). Everything here is planet-local, and the ring is centred
+// on the planet, so positions need no ringCenter offset.
+uniform float hasRing;
+uniform sampler1D ringProfile;
+uniform vec3 ringNormal;
+uniform vec2 ringRadii;      // inner, outer (world units)
+uniform float ringSunAngle;
+uniform vec2 ringFade;       // ring.frag's near-camera sheet fade
+
 in vec3 fLocalPos;
 
 out vec4 FragColor;
@@ -79,6 +88,23 @@ float rayleighPhase( float cc ) {
 	return 0.75 * ( 1.0 + cc );
 }
 
+// Ring shadow on a scattering sample (same lookup as quad.frag): the sky
+// darkens in the ring's shadow just like the ground under it.
+float ringTransmittance(vec3 p, vec3 l) {
+	float mu = dot(l, ringNormal);
+	if (hasRing < 0.5 || abs(mu) < 1e-4)
+		return 1.0;
+	float t = -dot(p, ringNormal) / mu;
+	if (t <= 0.0)
+		return 1.0;
+	float r01 = (length(p + l * t) - ringRadii.x) / (ringRadii.y - ringRadii.x);
+	if (r01 <= 0.0 || r01 >= 1.0)
+		return 1.0;
+	float texelW = (ringRadii.y - ringRadii.x) / float(textureSize(ringProfile, 0));
+	float tau = textureLod(ringProfile, r01, log2(max(t * ringSunAngle / texelW, 1.0))).a;
+	return exp(-tau / abs(mu));
+}
+
 //exp(fScaleOverScaleDepth * (fInnerRadius - fHeight));
 float density(vec3 p, float scaleH) {
 	return exp(-(length(p) - fInnerRadius) * scaleH);
@@ -116,7 +142,7 @@ vec3 inScatter(vec3 o, vec3 dir, vec2 e, vec3 l, float scaleH, float scaleL) {
 		vec3 u = v + l * f.y;
 		float dv = density(v, scaleH);
 		float n = (viewOptic + 0.5 * dv * segL + optic(v, u, scaleH, scaleL))*(PI * 4.0);
-		sum += dv * exp(-n * ( K_R * C_R + K_M ));
+		sum += dv * exp(-n * ( K_R * C_R + K_M )) * ringTransmittance(v, l);
 		viewOptic += dv * segL;
 		v += step;
 	}
@@ -133,6 +159,15 @@ void main (void)
 
 	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
 	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+
+	// Ring sheet along the view ray. The dome is additive, so where the
+	// sheet lies in front of the shell its coverage has to be taken out of
+	// the glow here (same alpha and near-camera fade as ring.frag). Sampled
+	// before any discard so the implicit-derivative mip is defined.
+	float ringMu = dot(dir, ringNormal);
+	float ringT = -dot(eye, ringNormal) / (abs(ringMu) > 1e-6 ? ringMu : 1e-6);
+	float ringR01 = (length(eye + dir * ringT) - ringRadii.x) / (ringRadii.y - ringRadii.x);
+	float ringTau = texture(ringProfile, clamp(ringR01, 0.0, 1.0)).a;
 
 	vec2 e = rayIntersection(eye, dir, fOuterRadius);
 	if ( e.x > e.y ) {
@@ -162,6 +197,14 @@ void main (void)
 		: normalize(lightPos.xyz);
 
 	vec3 I = inScatter(eye, dir, e, l, scaleH, scaleL);
+
+	// The ring lies wholly outside the shell, so its hit is either before
+	// the scattering segment (sheet in front) or after it (sky over ring).
+	if (hasRing > 0.5 && ringT > 0.0 && ringT < e.x && ringR01 > 0.0 && ringR01 < 1.0) {
+		float a = (1.0 - exp(-ringTau / max(abs(ringMu), 1e-3)))
+		        * smoothstep(ringFade.x, ringFade.y, ringT);
+		I *= 1.0 - a;
+	}
 
 	FragColor = vec4(I, 1.0);
 }

@@ -140,6 +140,29 @@ float sunVisibility(vec3 p, vec3 n, vec3 l) {
 	return lit / 9.0;
 }
 
+// Ring shadow (same analytic lookup as quad.frag).
+uniform float hasRing;
+uniform sampler1D ringProfile;
+uniform vec3 ringCenter;     // camera-relative planet centre
+uniform vec3 ringNormal;
+uniform vec2 ringRadii;      // inner, outer (world units)
+uniform float ringSunAngle;
+
+float ringTransmittance(vec3 p, vec3 l, float maxT) {
+	float mu = dot(l, ringNormal);
+	if (hasRing < 0.5 || abs(mu) < 1e-4)
+		return 1.0;
+	float t = -dot(p, ringNormal) / mu;
+	if (t <= 0.0 || t >= maxT)
+		return 1.0;
+	float r01 = (length(p + l * t) - ringRadii.x) / (ringRadii.y - ringRadii.x);
+	if (r01 <= 0.0 || r01 >= 1.0)
+		return 1.0;
+	float texelW = (ringRadii.y - ringRadii.x) / float(textureSize(ringProfile, 0));
+	float tau = textureLod(ringProfile, r01, log2(max(t * ringSunAngle / texelW, 1.0))).a;
+	return exp(-tau / abs(mu));
+}
+
 // Seascape (Alexander Alekseev aka TDM) sea palette and lighting terms.
 const vec3 SEA_BASE = vec3(0.0, 0.09, 0.18);
 const vec3 SEA_WATER_COLOR = vec3(0.8, 0.9, 0.6) * 0.6;
@@ -250,6 +273,7 @@ void main()
 	vec3 upGeo = normalize(localPos);
 	float shadowWeight = smoothstep(-0.06, 0.0, dot(upGeo, L));
 	float sun = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
+	sun *= ringTransmittance(fragPos - ringCenter, L, length(lightPosition - fragPos));
 
 	// Fresnel sky reflection (Schlick, water F0 = 0.02). The reflectance is
 	// gated by sky visibility: where the reflection ray misses the sky, the

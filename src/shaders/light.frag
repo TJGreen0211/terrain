@@ -32,6 +32,30 @@ float sunVisibility(vec3 p, vec3 n, vec3 l) {
 	return lit / 9.0;
 }
 
+// Ring shadow (same analytic lookup as quad.frag): the moon can pass
+// through it near the anti-sun side.
+uniform float hasRing;
+uniform sampler1D ringProfile;
+uniform vec3 ringCenter;     // camera-relative planet centre
+uniform vec3 ringNormal;
+uniform vec2 ringRadii;      // inner, outer (world units)
+uniform float ringSunAngle;
+
+float ringTransmittance(vec3 p, vec3 l, float maxT) {
+	float mu = dot(l, ringNormal);
+	if (hasRing < 0.5 || abs(mu) < 1e-4)
+		return 1.0;
+	float t = -dot(p, ringNormal) / mu;
+	if (t <= 0.0 || t >= maxT)
+		return 1.0;
+	float r01 = (length(p + l * t) - ringRadii.x) / (ringRadii.y - ringRadii.x);
+	if (r01 <= 0.0 || r01 >= 1.0)
+		return 1.0;
+	float texelW = (ringRadii.y - ringRadii.x) / float(textureSize(ringProfile, 0));
+	float tau = textureLod(ringProfile, r01, log2(max(t * ringSunAngle / texelW, 1.0))).a;
+	return exp(-tau / abs(mu));
+}
+
 void main()
 {   
 	vec4 ambientProduct = vec4(0.2, 0.2, 0.2, 1.0)*vec4(0.2, 0.2, 1.0, 1.0);
@@ -56,6 +80,7 @@ void main()
 	vec3 lighting = (ambient * (diffuse+specular));
 	float gamma = 2.2;
 	float vis = sunVisibility(fragPos, normalize(fN), normalize(fL));
+	vis *= ringTransmittance(fragPos - ringCenter, normalize(lightPosition - fragPos), length(lightPosition - fragPos));
 	FragColor = vec4(pow(ambient+vis*(diffuse+specular), vec3(1.0/gamma)), color.a);
 	//vec3 lighting = (ambient+(1.0-shadow) * (diffuse+specular));
 	//FragColor = vec4(vec3(shadow), 1.0);

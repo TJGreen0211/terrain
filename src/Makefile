@@ -6,6 +6,7 @@ SRCS = Main.c \
 	Sun.c \
 	Skybox.c \
 	Atmosphere.c \
+	Rings.c \
 	LoadingScreen.c \
 	GUI.c \
 	TerrainGen.c \
