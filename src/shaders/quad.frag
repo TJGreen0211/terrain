@@ -78,7 +78,9 @@ float atmoOptic(vec3 p, vec3 q, float scaleH, float scaleL)
 	vec3 v = p + step * 0.5;
 	float sum = 0.0;
 	for (int i = 0; i < NUM_ATMO_STEPS; i++) {
-		sum += exp(-(length(v) - fInnerRadius) * scaleH);
+		// Clamped at the ground: a sun ray that cuts through the planet
+		// sees sea-level density along its chord instead of an exploding one.
+		sum += exp(-max(length(v) - fInnerRadius, 0.0) * scaleH);
 		v += step;
 	}
 	return sum * length(step) * scaleL;
@@ -114,6 +116,41 @@ vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 
 	float tau = atmoOptic(eye + dir * e.x, eye + dir * e.y, scaleH, scaleL) * (4.0 * PI);
 	return color * exp(-(K_R * C_R + K_M) * tau);
+}
+
+// Sunlight colour at p after the sun-ward path through the shell, relative to
+// an overhead sun (so the midday tuning of sunRadiance is unchanged): white at
+// noon, warming and dimming toward the terminator. SUN_EXTINCTION scales the
+// excess optical depth (1 = same air as the sky dome, which reads a little
+// orange across the whole day side). The horizon factor covers the sun's disc
+// setting behind the geometric limb, sized by its angular radius.
+#define SUN_EXTINCTION 0.5
+vec3 sunTransmittance(vec3 p, vec3 l, float sunAngle)
+{
+	vec3 up = normalize(p);
+	float horizon = smoothstep(-sunAngle, sunAngle, dot(up, l));
+	if (hasAtmosphere < 0.5 || horizon <= 0.0)
+		return vec3(horizon);
+	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+	// Start on or above the ground: the shell geometry and displaced
+	// fragments can sit slightly under fInnerRadius.
+	p = up * max(length(p), fInnerRadius);
+	float tSun = shellIntersection(p, l, fOuterRadius).y;
+	float tau = atmoOptic(p, p + l * max(tSun, 0.0), scaleH, scaleL);
+	float tauZenith = atmoOptic(up * fInnerRadius, up * fOuterRadius, scaleH, scaleL);
+	float excess = max(tau - tauZenith, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
+	return exp(-(K_R * C_R + K_M) * excess) * horizon;
+}
+
+// Skylight on a surface as a fraction of its daytime strength: the sky
+// itself is lit by the sun, so it fades through twilight (sun up to ~12 deg
+// below the horizon) instead of lighting the night side. NIGHT_FLOOR is the
+// starlight/airglow left over, so the dark side reads as dark, not black.
+#define NIGHT_FLOOR vec3(0.003, 0.004, 0.006)
+float skyFraction(float sunUp)
+{
+	return smoothstep(-0.2, 0.3, sunUp);
 }
 
 // Terrain height field + lighting controls (tweak here)
@@ -434,33 +471,38 @@ void main()
 	// Schlick fresnel
 	vec3 F = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
 
-	vec3 lit = ambientSky * albedo;             // indirect sky/airlight term
-	float wrap = 0.25;                           // wrap diffuse: soft terminator
-	if (NdotL > -wrap) {
-		float wl = clamp((NdotL + wrap) / (1.0 + wrap), 0.0, 1.0);
+	// Indirect sky/airlight term: follows the sun through twilight, and
+	// slopes facing away from the zenith see less of the sky dome.
+	vec3 upGeo = normalize(fragPos - bodyCenter);
+	float sunUp = dot(upGeo, L);
+	vec3 lit = (ambientSky * skyFraction(sunUp) * (0.6 + 0.4 * max(dot(N, upGeo), 0.0))
+	          + NIGHT_FLOOR) * albedo;
+	// Plain Lambert: the cosine falls to zero at the terminator on its own,
+	// and sunTransmittance supplies the reddening. (A wrap term left ~20 %
+	// of the light at the horizon for the sunset fade to cut off hard.)
+	if (NdotL > 0.0) {
 		vec3 kd = 1.0 - F;                       // energy conservation (dielectric)
-		vec3 diff = albedo / PI * kd * wl;
-		vec3 spec = vec3(0.0);
-		if (NdotL > 0.0) {
-			// Smith-Schlick geometry term. Unlike the Charlie visibility
-			// approximation, G -> 0 as NdotL -> 0, so the specular cleanly vanishes
-			// at grazing incidence instead of diverging to white. The NdotL
-			// foreshortening is folded into the denominator (f·NdotL = D·G·F/(4·NdotV)),
-			// so the lobe also fades correctly toward the terminator.
-			float k = a2 * 0.5;
-			float G1L = NdotL / (NdotL * (1.0 - k) + k);
-			float G1V = NdotV / (NdotV * (1.0 - k) + k);
-			spec = (D * G1L * G1V * F) / (4.0 * NdotV + 1e-4);
-		}
+		vec3 diff = albedo / PI * kd * NdotL;
+		// Smith-Schlick geometry term. Unlike the Charlie visibility
+		// approximation, G -> 0 as NdotL -> 0, so the specular cleanly vanishes
+		// at grazing incidence instead of diverging to white. The NdotL
+		// foreshortening is folded into the denominator (f·NdotL = D·G·F/(4·NdotV)),
+		// so the lobe also fades correctly toward the terminator.
+		float k = a2 * 0.5;
+		float G1L = NdotL / (NdotL * (1.0 - k) + k);
+		float G1V = NdotV / (NdotV * (1.0 - k) + k);
+		vec3 spec = (D * G1L * G1V * F) / (4.0 * NdotV + 1e-4);
 		// Cast shadows (terrain, moon). Below the geometric terminator the
 		// planet body itself occludes the sun in the shadow map; fade the
-		// test out there so the wrap-lit twilight band stays soft instead
-		// of being cut off by a hard self-shadow edge.
-		vec3 upGeo = normalize(fragPos - bodyCenter);
-		float shadowWeight = smoothstep(-0.06, 0.0, dot(upGeo, L));
+		// test out there so sunlit peaks past the terminator are not cut
+		// off by a hard self-shadow edge.
+		float shadowWeight = smoothstep(-0.06, 0.0, sunUp);
 		float vis = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
 		vis *= ringTransmittance(fragPos - ringCenter, L, length(lightPosition - fragPos));
-		lit += (diff + spec) * sunRadiance * vis;
+		// Sunlight reddened by its long path through the air near the
+		// terminator, and cut off as the sun sets behind the limb.
+		vec3 sunCol = sunTransmittance(fragPos - bodyCenter, L, ringSunAngle);
+		lit += (diff + spec) * sunRadiance * sunCol * vis;
 	}
 
 	// Surface extinction only (linear radiance, before the tone map); the

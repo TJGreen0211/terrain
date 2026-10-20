@@ -86,7 +86,8 @@ float atmoOptic(vec3 p, vec3 q, float scaleH, float scaleL)
 	vec3 v = p + step * 0.5;
 	float sum = 0.0;
 	for (int i = 0; i < NUM_ATMO_STEPS; i++) {
-		sum += exp(-(length(v) - fInnerRadius) * scaleH);
+		// Clamped at the ground (same as quad.frag).
+		sum += exp(-max(length(v) - fInnerRadius, 0.0) * scaleH);
 		v += step;
 	}
 	return sum * length(step) * scaleL;
@@ -122,6 +123,31 @@ vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 
 	float tau = atmoOptic(eye + dir * e.x, eye + dir * e.y, scaleH, scaleL) * (4.0 * PI);
 	return color * exp(-(K_R * C_R + K_M) * tau);
+}
+
+// Sunlight colour relative to an overhead sun and skylight fraction; must
+// match quad.frag (see the comments there) so the coastline stays seamless.
+#define SUN_EXTINCTION 0.5
+vec3 sunTransmittance(vec3 p, vec3 l, float sunAngle)
+{
+	vec3 up = normalize(p);
+	float horizon = smoothstep(-sunAngle, sunAngle, dot(up, l));
+	if (hasAtmosphere < 0.5 || horizon <= 0.0)
+		return vec3(horizon);
+	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
+	p = up * max(length(p), fInnerRadius);
+	float tSun = shellIntersection(p, l, fOuterRadius).y;
+	float tau = atmoOptic(p, p + l * max(tSun, 0.0), scaleH, scaleL);
+	float tauZenith = atmoOptic(up * fInnerRadius, up * fOuterRadius, scaleH, scaleL);
+	float excess = max(tau - tauZenith, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
+	return exp(-(K_R * C_R + K_M) * excess) * horizon;
+}
+
+#define NIGHT_FLOOR vec3(0.003, 0.004, 0.006)
+float skyFraction(float sunUp)
+{
+	return smoothstep(-0.2, 0.3, sunUp);
 }
 
 // Sun visibility from the shadow map (same lookup as quad.frag): 1 = lit.
@@ -274,6 +300,10 @@ void main()
 	float shadowWeight = smoothstep(-0.06, 0.0, dot(upGeo, L));
 	float sun = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
 	sun *= ringTransmittance(fragPos - ringCenter, L, length(lightPosition - fragPos));
+	// Reddened, setting sunlight (quad.frag) and the twilight skylight fade.
+	vec3 sunT = sunTransmittance(localPos, L, ringSunAngle);
+	vec3 sunCol = sunT * sun;
+	float sky = skyFraction(dot(upGeo, L));
 
 	// Fresnel sky reflection (Schlick, water F0 = 0.02). The reflectance is
 	// gated by sky visibility: where the reflection ray misses the sky, the
@@ -295,34 +325,46 @@ void main()
 	// side keeps its sun-driven contrast.
 	float upDotN = clamp(dot(N, up), 0.0, 1.0);
 	vec3 skyAmbient = mix(vec3(0.010, 0.024, 0.048), vec3(0.030, 0.058, 0.095), upDotN)
-	                * (0.25 + 0.75 * (1.0 - sun));
-	vec3 baseCol = waterCol + skyAmbient;
+	                * (0.25 + 0.75 * (1.0 - sun)) * sky;
+	// The body colour is light scattered back out of the water column, so
+	// it needs light to scatter: the sun by day, the sky through twilight.
+	// Sun term follows Lommel-Seeliger (single scattering in a turbid
+	// layer), normalized to 1 for overhead sun and view: it fades smoothly to
+	// zero at the terminator but stays flat across the day side and limb.
+	float mu0 = max(dot(upGeo, L), 0.0);
+	float mu = max(dot(upGeo, V), 0.0);
+	float lommel = min(2.0 * mu0 / max(mu0 + mu, 1e-4), 1.0);
+	vec3 bodyLight = min(sunCol * lommel + vec3(0.3 * sky) + NIGHT_FLOOR, vec3(1.0));
+	vec3 baseCol = waterCol * bodyLight + skyAmbient;
 
-	vec3 refracted = baseCol + diffuse(N, L, 80.0) * SEA_WATER_COLOR * 0.12 * sun;
+	vec3 refracted = baseCol + diffuse(N, L, 80.0) * SEA_WATER_COLOR * 0.12 * sunCol;
 	vec3 color = mix(refracted, reflected, fresnel);
 
 	// Seascape crest brightening.
 	float atten = 1.0 / (1.0 + dot(dist, dist) * 0.0000002);
-	color += SEA_WATER_COLOR * (fWave * 30.0) * 0.18 * atten * sun;
+	color += SEA_WATER_COLOR * (fWave * 30.0) * 0.18 * atten * sunCol;
 
 	// Fast subsurface scattering: sun light through wave crests toward
 	// the viewer (Jensen/Uncharted approximation).
 	float crest = clamp(fWave / 0.008, 0.0, 1.0) * (0.4 + 0.6 * depthT);
 	vec3 sssDir = normalize(L + N * 0.3);
-	float sssSun = pow(clamp(dot(V, sssDir), 0.0, 1.0), 3.0) * sun;
-	float sssSky = pow(clamp(dot(V, up), 0.0, 1.0), 2.0) * (1.0 - sun);
+	vec3 sssSun = pow(clamp(dot(V, sssDir), 0.0, 1.0), 3.0) * sunCol;
+	float sssSky = pow(clamp(dot(V, up), 0.0, 1.0), 2.0) * (1.0 - sun) * sky;
 	color += SEA_WATER_COLOR * crest * 1.5 * (sssSun + 0.15 * sssSky);
 
-	// Sun glint (Seascape specular, softened with distance).
-	float glint = specular(N, L, eye, 6000.0 * inversesqrt(dot(dist, dist))) * sun;
-	color += glint;
+	// Sun glint (Seascape specular, softened with distance), tinted by the
+	// sun's transmittance; the scalar keeps driving the opacity below.
+	float spec = specular(N, L, eye, 6000.0 * inversesqrt(dot(dist, dist)));
+	float glint = spec * sun * max(sunT.r, max(sunT.g, sunT.b));
+	color += spec * sunCol;
 
 	// Foam: a thin shore band where water is shallow + whitecaps where the
 	// choppy displacement compresses the surface (low Jacobian).
 	float shore = 1.0 - smoothstep(0.0, 0.02, depth);
 	float whitecaps = (1.0 - smoothstep(0.3, 0.8, J)) * (0.25 + 0.75 * depthT);
 	float foam = clamp(shore * 0.9 + whitecaps, 0.0, 1.0);
-	vec3 foamCol = vec3(0.82, 0.87, 0.90) * (0.30 + 0.85 * max(dot(N, L), 0.0)) * mix(0.25, 1.0, sun);
+	vec3 foamCol = vec3(0.82, 0.87, 0.90)
+	             * ((0.30 * sky * mix(0.25, 1.0, sun) + NIGHT_FLOOR) + 0.85 * max(dot(N, L), 0.0) * sunCol);
 	color = mix(color, foamCol, foam);
 
 	// Surface extinction, matching quad.frag so the coastline stays seamless.
