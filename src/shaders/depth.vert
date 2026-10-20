@@ -30,8 +30,9 @@ void main()
 		vec2 uv = vec2((atan(p.y, p.x)/PI + 1.0)*0.5,
 		               (asin(clamp(p.z, -1.0, 1.0))/PI + 0.5));
 		float h = textureLod(heightMap, uv, 4.0).r;
+		float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
 		float relief = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
-		             - oceanRelief * clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
+		             - oceanRelief * s * s;
 		p *= 1.0 + relief;
 	}
 	gl_Position = vec4(p, 1.0)*model*lightSpace;

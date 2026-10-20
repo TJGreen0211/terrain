@@ -31,10 +31,15 @@ GLuint planetHeightTex;
 #define LOD_K_NUMER (0.7853982f*1024.0f/3.1415926f)
 /* Geometric land relief as a fraction of the planet radius (quad.vert /
    depth.vert displace the unit sphere by it). Sea level is radius 1.0 for
-   both the planet and the water shell; the ocean floor is pushed below it by
-   OCEAN_RELIEF at full oceanDepth, so the shell needs no offset to clear it. */
+   both the planet and the water shell. The seafloor sinks to OCEAN_RELIEF
+   below it along a squared (continental shelf) profile, so vertices next to
+   the coast stay near sea level and coast-straddling triangles barely sag. */
 #define LAND_RELIEF 0.025f
 #define OCEAN_RELIEF 0.01f
+/* Main-pass clip planes (setBodyUniforms' projection); quad.frag needs them
+   to rewrite gl_FragDepth for seafloor that pokes through the water. */
+#define BODY_NEAR 0.5f
+#define BODY_FAR  100000.0f
 struct sphere planet;
 struct ring planetRing;
 struct quadCube qc, qc2;
@@ -317,7 +322,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
                      GLuint tex0, GLuint tex2, GLuint slopeTex, GLuint dispTex, GLuint jacobTex, GLuint skyTex) {
 	glUseProgram(shader);
 
-	mat4 p = perspective(45.0, getWindowWidth()/getWindowHeight(), 0.5, 100000.0);
+	mat4 p = perspective(45.0, getWindowWidth()/getWindowHeight(), BODY_NEAR, BODY_FAR);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &p.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
 	mat4 v = getViewMatrix();
@@ -369,6 +374,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
 	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
 	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
+	glUniform2f(glGetUniformLocation(shader, "depthPlanes"), BODY_NEAR, BODY_FAR);
 	/* Climate map (unit 8) + surface style for quad.frag's biome shading. */
 	setPlanetSurfaceUniforms(shader, 8);
 	glActiveTexture(GL_TEXTURE0);
@@ -1004,12 +1010,18 @@ int main(int argc, char *argv[])
 		model = multiplymat4(camRelTranslate(translation), multiplymat4(scale(fScale), matR));
 		mat4 viewProj = getViewProjection();
 
-		//Water: same quadtree LOD as the planet, FFT-displaced sea-level
-		//shell that discards over land in-shader (waveHeight/Disp/Slope + tiled
-		//detail normals + skybox reflection in water.frag). Drawn BEFORE the
-		//planet: both are opaque, so the order does not change the image, but
-		//the ocean floor under the shell then fails early-Z instead of running
-		//the full quad.frag only to be overwritten.
+		//Planet (land + seafloor): drawn first so the translucent water can
+		//blend over the seafloor.
+		setBodyUniforms(quadShader, fScale, model, lightPosition,
+		                0, dxWaveTex, 0, 0, 0, 0);
+		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
+		QuadTree_DrawSphere(model, fScale, viewProj);
+
+		//Water: same quadtree LOD as the planet (reuses its walk), FFT-
+		//displaced sea-level shell that discards over land in-shader
+		//(waveHeight/Disp/Slope + tiled detail normals + skybox reflection in
+		//water.frag). Alpha-blended: water.frag fades to clear in the
+		//shallows from the per-pixel water depth.
 		setBodyUniforms(waterShader, fScale, model, lightPosition,
 		                ocean.dyTexture, ocean.detailTexture,
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
@@ -1019,13 +1031,10 @@ int main(int argc, char *argv[])
 		double shellCamDist = dlengthvec3(dsubvec3(g_cam, translation));
 		glUniform1f(glGetUniformLocation(waterShader, "outsideShell"),
 		            shellCamDist > fScale*1.05 ? 1.0f : 0.0f);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		QuadTree_DrawSphere(model, fScale, viewProj);
-
-		//Planet: reuses the water pass's quadtree walk (same model/camera).
-		setBodyUniforms(quadShader, fScale, model, lightPosition,
-		                0, dxWaveTex, 0, 0, 0, 0);
-		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
-		QuadTree_DrawSphere(model, fScale, viewProj);
+		glDisable(GL_BLEND);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 		//TEST: flat animated wave grid above the planet (debug for FFT water)

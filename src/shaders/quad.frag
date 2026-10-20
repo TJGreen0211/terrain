@@ -34,6 +34,8 @@ uniform float lodK;
 // ramp and the material bands all key off this single value, and water.frag
 // gets the identical value so the discard edge sits on the coastline.
 uniform float seaLevel;
+// Main-pass near/far planes, to rewrite gl_FragDepth (see the seafloor branch).
+uniform vec2 depthPlanes;
 
 const float PI = 3.14159265359;
 
@@ -112,7 +114,7 @@ vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 // Terrain height field + lighting controls (tweak here)
 #define TEXEL_ANG       (2.0*PI/2048.0) // heightmap texel angle at the equator, mip 0
 #define NORMAL_STRENGTH 0.62    // bump relief amount
-#define SEA_CLIP        0.0005  // seafloor this close under radius 1 is hidden by the shell
+#define SEA_CLIP        0.0005  // min. seafloor clearance under the water, planet radii
 #define BEACH_OFF       0.012   // shoreline width above seaLevel
 #define WET_SAND        0.003   // darker wet sand just above the waterline
 #define LAKE_MIN        0.03    // climate A (lake depth) where lakes start
@@ -157,10 +159,12 @@ float heightAt(vec3 d, float lodBase) {
 	return textureLod(heightMap, uv, lod).r;
 }
 
-vec3 oceanFloorColor(float e) {
-	vec3 deep  = vec3(0.02, 0.09, 0.20);
-	vec3 shall = vec3(0.05, 0.22, 0.38);
-	return mix(deep, shall, smoothstep(0.0, seaLevel, e));
+// Seafloor albedo under the water (which adds its own tint): pale sand on
+// the shelf, darker silt/rock toward the abyss.
+vec3 seafloorColor(float e) {
+	vec3 sand = vec3(0.52, 0.48, 0.36);
+	vec3 silt = vec3(0.10, 0.12, 0.11);
+	return mix(silt, sand, smoothstep(seaLevel * 0.6, seaLevel, e));
 }
 
 // Cheap 3D value noise for colour variation (sampled on the unit sphere).
@@ -264,6 +268,9 @@ void main()
 	// Height field sampled from the startup-baked texture (rotates with the
 	// planet: dObj lives in the planet-local frame). Every face samples this
 	// one continuous field, so it is seamless across all six quadtree faces.
+	// Only the seafloor branch moves it; every path must write it.
+	gl_FragDepth = gl_FragCoord.z;
+
 	vec3 dObj = normalize(fSurfDir);
 	vec3 up = (abs(dObj.y) > 0.99) ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
 	vec3 T = normalize(cross(up, dObj));
@@ -292,19 +299,30 @@ void main()
 	float rough, waterMask;
 
 	if (e < seaLevel) {
-		// Seafloor that the coarse LOD triangles lift to (or above) the water
-		// shell: a triangle straddling the coast interpolates its land vertex
-		// across pixels the fine field calls sea, poking jagged strips through
-		// the water. The water shell (drawn first, same per-pixel mask) is
-		// right behind it, so dropping the fragment puts the coastline on the
-		// per-pixel mask at every LOD. The margin also clears the shallow
-		// floor that would z-fight the shell at radius 1.
-		if (fRadius > 1.0 - SEA_CLIP)
-			discard;
-		// Seafloor (under the water shell).
-		albedo = oceanFloorColor(e);
-		rough = 0.15;
-		waterMask = 1.0;
+		// Seafloor, seen through the translucent water. Coarse LOD triangles
+		// straddling the coast interpolate their land height across pixels
+		// the fine field calls sea, so the floor can sit at or above the
+		// water (jagged strips, or z-fighting the shell in the shallows).
+		// Discarding would punch a hole now that the water is see-through, so
+		// push the fragment's depth along the view ray to just under the
+		// shell instead: the water then draws over it and the coastline
+		// follows the per-pixel mask at every LOD. The clearance grows with
+		// the 24-bit depth resolution, ~D^2/(near*2^24), so it holds at range.
+		float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
+		float D = length(camDir);
+		float clearance = max(SEA_CLIP * R, 4.0 * D * D / (depthPlanes.x * 16777216.0));
+		float poke = (fRadius - 1.0) * R + clearance;   // world units above the target
+		if (poke > 0.0) {
+			float n = depthPlanes.x, f = depthPlanes.y;
+			float zNdc = gl_FragCoord.z * 2.0 - 1.0;
+			float zEye = 2.0 * n * f / ((f + n) - zNdc * (f - n));
+			// View-space depth scales with distance along the ray.
+			float zNew = zEye * (D + poke / graz) / max(D, 1e-4);
+			gl_FragDepth = 0.5 * ((f + n) - 2.0 * n * f / zNew) / (f - n) + 0.5;
+		}
+		albedo = seafloorColor(e);
+		rough = 0.9;
+		waterMask = 0.0;
 	} else {
 		float lod;
 		vec2 uv = mapUV(dObj, lodBase, lod);

@@ -34,6 +34,11 @@ uniform float lodK;
 // old hardcoded 0.22 constant).
 uniform float seaLevel;
 uniform float oceanDepth;
+// Seafloor shelf depth (planet radii), same profile as quad.vert, so the
+// water column thickness behind each pixel matches the drawn seafloor.
+uniform float oceanRelief;
+// Light absorbed per planet radius of water path: clear shallows, opaque abyss.
+const float WATER_ABSORB = 500.0;
 // 1 when the camera is outside the water shell; gates the back-face early-out.
 uniform float outsideShell;
 
@@ -182,6 +187,10 @@ void main()
 	// percentile depth of the eroded field so the tint spans its real range.
 	float depth = seaLevel - e;
 	float depthT = clamp(depth / max(oceanDepth, 1e-4), 0.0, 1.0);
+	// Beer-Lambert transmittance down to the seafloor and back along the
+	// view ray: 1 at the coastline, so the water edge fades into the shore.
+	float column = oceanRelief * depthT * depthT;
+	float transmit = exp(-WATER_ABSORB * column / graz);
 
 	vec2 duv = huv;
 	vec2 uv = duv * waveTiling;
@@ -276,7 +285,8 @@ void main()
 	color += SEA_WATER_COLOR * crest * 1.5 * (sssSun + 0.15 * sssSky);
 
 	// Sun glint (Seascape specular, softened with distance).
-	color += specular(N, L, eye, 6000.0 * inversesqrt(dot(dist, dist))) * sun;
+	float glint = specular(N, L, eye, 6000.0 * inversesqrt(dot(dist, dist))) * sun;
+	color += glint;
 
 	// Foam: a thin shore band where water is shallow + whitecaps where the
 	// choppy displacement compresses the surface (low Jacobian).
@@ -292,5 +302,10 @@ void main()
 	}
 
 	// Seascape post (fragColor = pow(color, 0.65))
-	FragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(0.65)), 1.0);
+	// Opacity: the seafloor shows through what the water column, the surface
+	// reflection and foam let pass; the glint stays opaque so it survives
+	// the shallows.
+	float alpha = 1.0 - transmit * (1.0 - fresnel) * (1.0 - foam);
+	alpha = max(alpha, clamp(glint, 0.0, 1.0));
+	FragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(0.65)), alpha);
 }

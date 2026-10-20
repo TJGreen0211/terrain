@@ -20,7 +20,6 @@ uniform float waveTiling;
 uniform sampler2D heightMap;
 uniform float seaLevel;
 uniform float oceanDepth;
-uniform float oceanRelief;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 
@@ -65,8 +64,8 @@ void main()
 		float calm = smoothstep(0.0, SHORE_CALM, depthT);
 		float h = texture(waveHeight, uv*waveTiling).r;
 		wave = h * waveAmp * calm;
-		// Keep troughs above the (now sunken) seafloor.
-		float d = max(wave, -0.5 * oceanRelief * depthT);
+		// Troughs may dip under radius 1: the planet draws no sea pixels.
+		float d = wave;
 		// Tessendorf choppy waves: shift the vertex horizontally along the
 		// east/north tangents of the long/lat map (same basis as water.frag).
 		// Shares the height's units, so choppiness 1 is the physical amount.

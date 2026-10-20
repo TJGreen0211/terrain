@@ -11,8 +11,9 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 lightPosition;
 // Baked height field (TerrainGen.c): the land is geometrically displaced
-// above the unit sphere and the ocean floor below it, so sea level is
-// exactly radius 1 where the water shell sits. lodK/lodCameraPos drive the vertex texture-fetch
+// above the unit sphere and the seafloor below it along a squared shelf
+// profile, so sea level is exactly radius 1 where the water shell sits and
+// vertices near the coast stay close to it. lodK/lodCameraPos drive the vertex texture-fetch
 // LOD, combined with the quadtree node's cell size so the geometry follows
 // the field at its own resolution and never crinkles finer than it can draw.
 uniform sampler2D heightMap;
@@ -31,9 +32,8 @@ out vec3 fL;
 out vec2 fTexCoords;
 out vec3 vColor;
 out vec3 fSurfDir;
-// Interpolated geometric radius (sea level = 1): quad.frag compares it with
-// the per-pixel height to hide seafloor that coarse triangles lift above the
-// water shell.
+// Interpolated geometric radius (sea level = 1): quad.frag pushes seafloor
+// that coarse triangles lift above the water back behind the shell.
 out float fRadius;
 out mat3 fNormalMat;
 
@@ -58,10 +58,13 @@ void main()
 	float lod = clamp(max(lodCell, lodPix), 0.0, 11.0);
 	float h = textureLod(heightMap, huv, lod).r;
 
-	// Linear relief ramps from sea level (radius 1): up to the field maximum
-	// on land, down to oceanDepth on the seafloor (fraction of planet radius).
+	// Relief as a fraction of the planet radius (model scale): a linear ramp
+	// from sea level to the field maximum on land, and a squared shelf down
+	// to oceanRelief at oceanDepth on the seafloor (water.frag's column
+	// thickness uses the same profile).
+	float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
 	float relief = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
-	             - oceanRelief * clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
+	             - oceanRelief * s * s;
 	float radius = 1.0 + relief;
 
 	// Boundary skirt: wall vertices (w = 1) sit just under the DISPLACED
