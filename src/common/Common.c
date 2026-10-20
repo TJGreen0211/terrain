@@ -12,6 +12,14 @@ void createShader(GLuint *shader, char *vert, char *frag)
     glAttachShader(*shader, vertShader);
     glAttachShader(*shader, fragShader);
     glLinkProgram(*shader);
+
+    GLint linked;
+    glGetProgramiv(*shader, GL_LINK_STATUS, &linked);
+    if (linked == GL_FALSE) {
+        char log[1024];
+        glGetProgramInfoLog(*shader, sizeof(log), 0, log);
+        fprintf(stderr, "Program link failed (%s + %s):\n %s\n", vert, frag, log);
+    }
 }
 
 /*

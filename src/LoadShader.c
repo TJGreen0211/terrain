@@ -18,18 +18,79 @@ char *readShader(char *filename)
             	count = fread(content,sizeof(char),count,fp);
             	content[count] = '\0';
         	}
+			fclose(fp);
         }
-        fclose(fp);
 	}
 	return content;	
 }
 
+/* Expands `#include "file"` lines (one level, path relative to the
+   including shader's directory), so shared GLSL lives in one file. A #line
+   after each insert keeps compile errors on the including file's numbering. */
+static char *expandIncludes(char *src, const char *shaderPath)
+{
+	if (src == NULL || strstr(src, "#include") == NULL)
+		return src;
+
+	char dir[260] = "";
+	const char *slash = strrchr(shaderPath, '/');
+	if (slash != NULL && (size_t)(slash - shaderPath) + 1 < sizeof(dir)) {
+		memcpy(dir, shaderPath, slash - shaderPath + 1);
+		dir[slash - shaderPath + 1] = '\0';
+	}
+
+	size_t cap = strlen(src) + 1, len = 0;
+	char *out = malloc(cap);
+	int lineNo = 1;
+	char *line = src;
+	while (*line) {
+		char *end = strchr(line, '\n');
+		size_t lineLen = end ? (size_t)(end - line) + 1 : strlen(line);
+		const char *p = line;
+		while (*p == ' ' || *p == '\t') p++;
+
+		char *insert = NULL;
+		char directive[64] = "";
+		if (strncmp(p, "#include", 8) == 0) {
+			const char *q0 = strchr(p, '"');
+			const char *q1 = q0 ? strchr(q0 + 1, '"') : NULL;
+			if (q0 && q1 && q1 < line + lineLen) {
+				char path[520];
+				snprintf(path, sizeof(path), "%s%.*s", dir, (int)(q1 - q0 - 1), q0 + 1);
+				insert = readShader(path);
+				if (insert == NULL)
+					fprintf(stderr, "Shader include not found: %s\n", path);
+				snprintf(directive, sizeof(directive), "\n#line %d\n", lineNo + 1);
+			}
+		}
+
+		const char *piece = insert ? insert : line;
+		size_t pieceLen = insert ? strlen(insert) : lineLen;
+		size_t need = len + pieceLen + strlen(directive) + 1;
+		if (need > cap) {
+			cap = need * 2;
+			out = realloc(out, cap);
+		}
+		memcpy(out + len, piece, pieceLen);
+		len += pieceLen;
+		memcpy(out + len, directive, strlen(directive));
+		len += strlen(directive);
+		free(insert);
+
+		line += lineLen;
+		lineNo++;
+	}
+	out[len] = '\0';
+	free(src);
+	return out;
+}
+
 GLuint LoadShader(char *shaderPath, int shaderType)
-{	
+{
 	GLuint shader = glCreateShader(shaderType);
-	
-	char *shaderStr = readShader(shaderPath);
-	
+
+	char *shaderStr = expandIncludes(readShader(shaderPath), shaderPath);
+
 	printf("Compiling %d, %s shader\n", shaderType, shaderPath);
 	GLint length = strlen(shaderStr);
 	glShaderSource(shader, 1, (const char **)&shaderStr, &length);
@@ -41,7 +102,7 @@ GLuint LoadShader(char *shaderPath, int shaderType)
 	if(success == GL_FALSE) {
 		char log[1024];
 		glGetShaderInfoLog(shader, sizeof(log), 0, log);
-		printf("Shader compile info: \n %s \n", log);
+		fprintf(stderr, "Shader compile failed (%s):\n %s \n", shaderPath, log);
 		glDeleteShader(shader);
 		return 1;
 	}

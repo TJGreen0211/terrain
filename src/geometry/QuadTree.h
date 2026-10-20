@@ -12,32 +12,36 @@
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 
-typedef struct qTreeNode {
-	vec3 center;
-	vec3 nw;
-	float width;
-} qTreeNode;
+/* Cube-sphere quadtree LOD bodies (planet, water shell, moon).
 
-/* Build the six cube-face grids (10x10 cells each) and the shared instance
-   matrix VBO, wiring the instance-matrix vertex attributes (locations 4-7)
-   into every face VAO. `shader` must be the planet program whose vertex
-   shader declares `layout(location = 4) in mat4 vInstanceMatrix` and the
-   `instanced` uniform. */
-void QuadTree_InitGL(GLuint shader);
+   `model` everywhere is the body's CAMERA-RELATIVE model matrix in double
+   (Body_ModelMatrix: translate(position - camera) * scale(radius) *
+   rotation). The walk computes each patch's four corners on the sphere from
+   it in double, so the vertex shaders (shaders/patch.glsl) only ever handle
+   small, camera-relative numbers. */
 
-/* Draw one planet-sized LOD sphere centred at the origin of `model`: each of
-   the six face grids is subdivided as a quadtree around the camera (nodes
-   closer than the halving split distance refine; only leaves are drawn) and
-   drawn with one instanced call per face. Nodes outside the `viewProj`
-   frustum or past the body's horizon are culled and never refined. LOD split
-   distance scales with `radius` so every body gets the same screen-space
-   detail. Back-to-back calls with identical inputs reuse the last walk. */
-void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj);
+/* Build the shared base grid and the patch instance buffer. Every body
+   program's vertex shader includes shaders/patch.glsl (vPosition at
+   location 0, patch instance attributes at 4-10). */
+void QuadTree_InitGL(void);
+
+/* Draw one LOD sphere with the currently bound program: each cube face is
+   subdivided as a quadtree around the camera (nodes closer than the halving
+   split distance refine; only leaves are drawn), in one instanced draw.
+   Nodes outside the `viewProj` frustum or past the body's horizon are culled
+   and never refined. LOD split distance scales with `radius` so every body
+   gets the same screen-space detail. Back-to-back calls with identical
+   inputs reuse the last walk. */
+void QuadTree_DrawSphere(const dmat4 *model, double radius, mat4 viewProj);
 
 /* Shadow-map caster pass for the same body: identical camera-centred LOD
    (caster mesh == drawn mesh), culled against the light's projection * view
    instead of the camera frustum and without the camera horizon cull. */
-void QuadTree_DrawShadowCasters(mat4 model, float radius, mat4 lightViewProj);
+void QuadTree_DrawShadowCasters(const dmat4 *model, double radius, mat4 lightViewProj);
+
+/* Debug (panel toggle): 1 = place vertices with the old float path, for
+   comparing against the double-precision patch corners. */
+extern int g_qtLegacyPath;
 
 void QuadTree_Shutdown(void);
 

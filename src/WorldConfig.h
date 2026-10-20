@@ -61,12 +61,13 @@
 /* Scroll-out limit of the orbit radius behind the pivot. */
 #define CAMERA_DISTANCE_MAX_M     (20.0 * EARTH_RADIUS_M)
 /* WASD speed (m/s) and scroll step (m per wheel notch): defaults, and the
-   log-mapped ranges of the two on-screen sliders. */
+   log-mapped ranges of the two on-screen sliders. The minimums reach
+   walking pace so the surface can be inspected up close. */
 #define CAMERA_MOVE_SPEED_MPS     (0.667 * EARTH_RADIUS_M)
-#define CAMERA_MOVE_SPEED_MIN     (0.0167 * EARTH_RADIUS_M)
+#define CAMERA_MOVE_SPEED_MIN     1.0
 #define CAMERA_MOVE_SPEED_MAX     (6.667 * EARTH_RADIUS_M)
 #define CAMERA_SCROLL_STEP_M      (0.0333 * EARTH_RADIUS_M)
-#define CAMERA_SCROLL_STEP_MIN    (0.00167 * EARTH_RADIUS_M)
+#define CAMERA_SCROLL_STEP_MIN    0.1
 #define CAMERA_SCROLL_STEP_MAX    (0.667 * EARTH_RADIUS_M)
 /* Sub-solar surface preset (G): altitude range measured from the planet
    centre, and the view tilt below the horizon. */

@@ -679,7 +679,8 @@ void drawOrbit(GLuint shader, GLuint texture, const Body *moon, vec4 lightPositi
 {
 	glUseProgram(shader);
 
-	mat4 model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
+	dmat4 modelD = Body_ModelMatrix(moon, g_cam);
+	mat4 model = dmat4tomat4(modelD);
 	initMVP(shader, model, getViewMatrix());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 
@@ -691,7 +692,7 @@ void drawOrbit(GLuint shader, GLuint texture, const Body *moon, vec4 lightPositi
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
 	/* Receives the planet's shadow when it passes behind it. */
 	bindShadowMap(shader, 1);
-	QuadTree_DrawSphere(model, (float)moon->radius, getViewProjection());
+	QuadTree_DrawSphere(&modelD, moon->radius, getViewProjection());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -711,7 +712,8 @@ void drawDepth(GLuint vao, GLuint shader, int vertices, mat4 m) {
 	glBindVertexArray(0);
 }
 
-void drawPlanetDepth(GLuint shader, mat4 m, float lodRadius) {
+void drawPlanetDepth(GLuint shader, dmat4 md, float lodRadius) {
+	mat4 m = dmat4tomat4(md);
 	glUseProgram(shader);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 	glUniform1f(glGetUniformLocation(shader, "displace"), 1.0f);
@@ -729,7 +731,7 @@ void drawPlanetDepth(GLuint shader, mat4 m, float lodRadius) {
 	   matches the drawn surface vertex for vertex. */
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
-	QuadTree_DrawShadowCasters(m, lodRadius, g_lightSpaceMatrix);
+	QuadTree_DrawShadowCasters(&md, lodRadius, g_lightSpaceMatrix);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -879,7 +881,7 @@ int main(int argc, char *argv[])
 	/* The quadtree body LOD: six face grids + shared instance VBO, attribute
 	   layout wired once (all three body programs declare vPosition at 0 and
 	   the instance matrix at 4-7). */
-	QuadTree_InitGL(quadShader);
+	QuadTree_InitGL();
 	LoadingScreen_Step();
 
 	initSun();
@@ -1065,7 +1067,8 @@ int main(int argc, char *argv[])
 		/* Planet model (scale * spin/tilt, camera-relative), composed in
 		   double and downcast once; shared by the shadow casters and the
 		   main pass. */
-		mat4 planetModel = dmat4tomat4(Body_ModelMatrix(earth, g_cam));
+		dmat4 planetModelD = Body_ModelMatrix(earth, g_cam);
+		mat4 planetModel = dmat4tomat4(planetModelD);
 
 		/* Shadow frustum: the sun is far enough away to be a directional
 		   light, so an orthographic box along the sun direction, just wide
@@ -1100,7 +1103,7 @@ int main(int argc, char *argv[])
 			glPolygonOffset(1.5f, 2.0f);
 			model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
 			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model);
-			drawPlanetDepth(depthShader, planetModel, fScale);
+			drawPlanetDepth(depthShader, planetModelD, fScale);
 			glDisable(GL_POLYGON_OFFSET_FILL);
 
 		/* Main pass: the multisampled float-depth scene target, reversed-Z
@@ -1142,7 +1145,7 @@ int main(int argc, char *argv[])
 		                0, dxWaveTex, 0, 0, 0, 0);
 		setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
 		Rings_BindReceiver(quadShader);
-		QuadTree_DrawSphere(model, fScale, viewProj);
+		QuadTree_DrawSphere(&planetModelD, earth->radius, viewProj);
 
 		//Water: same quadtree LOD as the planet (reuses its walk), FFT-
 		//displaced sea-level shell that discards over land in-shader
@@ -1166,7 +1169,7 @@ int main(int argc, char *argv[])
 		            shellCamDist > fScale*1.05 ? 1.0f : 0.0f);
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		QuadTree_DrawSphere(model, fScale, viewProj);
+		QuadTree_DrawSphere(&planetModelD, earth->radius, viewProj);
 		glDisable(GL_BLEND);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 

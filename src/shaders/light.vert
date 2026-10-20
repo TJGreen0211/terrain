@@ -3,17 +3,18 @@
 layout (location = 0) in vec4 vPosition;
 layout (location = 1) in vec3 vNormal;
 layout (location = 2) in vec2 vTexCoords;
-layout (location = 4) in mat4 vInstanceMatrix;
+// Quadtree patch instance (locations 4-10) + patchDir/patchSphere.
+#include "patch.glsl"
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 lightPosition;
-// 1 = body drawn as a quadtree LOD instance (moon): transform the flat
-// face-grid vertex by the instance matrix and project it onto the unit
-// sphere, then reuse the plain-mesh shading with that direction. The
-// equirectangular UVs reproduce the CPU-baked quadCube mapping, so
-// moon.jpg frames the sphere identically. 0 = sun billboard / ship paths.
+// 1 = body drawn as a quadtree LOD instance (moon): the patch vertex is
+// placed on the unit sphere exactly like the planet (patch.glsl), then
+// reuses the plain-mesh shading with that direction. The equirectangular
+// UVs reproduce the CPU-baked quadCube mapping, so moon.jpg frames the
+// sphere identically. 0 = sun billboard / ship paths.
 uniform int instanced;
 
 out vec3 fragPos;
@@ -25,22 +26,24 @@ out vec2 fTexCoords;
 void main()
 {
 	vec3 p = vPosition.xyz;
+	vec3 world;
 	if(instanced == 1) {
-		vec3 transformed = (vec4(vPosition.xyz, 1.0)*vInstanceMatrix).xyz;
-		p = (length(transformed) > 0.0001) ? normalize(transformed) : vec3(0.0);
+		vec2 uv = vPosition.xy;
+		p = patchDir(uv);
+		world = patchSphere(uv, p, model);
 	}
-
-	vec4 world = vec4(p, 1.0)*model;
-	gl_Position = world*view*projection;
+	else {
+		world = (vec4(p, 1.0)*model).xyz;
+	}
+	gl_Position = vec4(world, 1.0)*view*projection;
 
 	mat3 normalMatrix = transpose(inverse(mat3(model)));
-	vec4 lightPos = vec4(lightPosition, 1.0);
-	vec3 lightDir = normalize(world - lightPos).xyz;
-	fE = -normalize(world).xyz;
+	vec3 lightDir = normalize(world - lightPosition);
+	fE = -normalize(world);
 	fN = (instanced == 1) ? normalize(p*normalMatrix) : normalize(vNormal*normalMatrix);
-	fL = -normalize(lightDir);
+	fL = -lightDir;
 
-	fragPos = world.xyz;
+	fragPos = world;
 	fTexCoords = (instanced == 1)
 		? vec2((atan(p.y, p.x)/3.1415926 + 1.0)*0.5,
 		       (asin(clamp(p.z, -1.0, 1.0))/3.1415926 + 0.5))

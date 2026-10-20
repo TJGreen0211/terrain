@@ -3,7 +3,9 @@
 #include "Atmosphere.h"
 #include "TerrainGen.h"
 #include "Water.h"
+#include "Bodies.h"
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 
 #define NK_INCLUDE_FIXED_TYPES
@@ -135,6 +137,22 @@ static void atmosphereSection(void)
 		*a = atmosphereDefaults();
 }
 
+/* Camera altitude above Earth's sea-level sphere, and the vertex precision
+   comparison: the legacy path places quadtree vertices the old float way
+   (unit sphere, then scaled), which jitters by ~0.5-1 m at Earth scale. */
+static void cameraSection(void)
+{
+	const Body *earth = &g_bodies[BODY_EARTH];
+	double alt = dlengthvec3(dsubvec3(getCameraPosition(), earth->position)) - earth->radius;
+
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	if (fabs(alt) < 1e4)
+		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f m", alt);
+	else
+		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
+	nk_checkbox_label(ctx, "Legacy float vertex path", &g_qtLegacyPath);
+}
+
 /* Live: g_waveParams is uploaded every frame. [0] (oceanOffset) is left
    out: the water shell must stay at sea level or it detaches from the
    coastline. */
@@ -261,7 +279,7 @@ static void buildPanel(void)
 			nk_tree_pop(ctx);
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Camera", NK_MINIMIZED)) {
-			placeholderRow();
+			cameraSection();
 			nk_tree_pop(ctx);
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Terrain", NK_MINIMIZED)) {

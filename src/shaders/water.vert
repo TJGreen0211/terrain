@@ -4,7 +4,8 @@ layout (location = 0) in vec4 vPosition;
 layout (location = 1) in vec3 vNormal;
 layout (location = 2) in vec2 vTexCoords;
 layout (location = 3) in vec3 vTangent;
-layout (location = 4) in mat4 vInstanceMatrix;
+// Quadtree patch instance (locations 4-10) + patchDir/patchSphere.
+#include "patch.glsl"
 
 uniform mat4 model;
 uniform mat4 view;
@@ -45,18 +46,20 @@ out float fWave;
 
 void main()
 {
-	// Match quad.vert: instance-transform the face grid, normalize to the unit
-	// sphere, then the model (scale * planet rotation) maps to the world.
-	vec4 fPosition = vec4(vPosition.xyz, 1.0);
-	vec3 transformed = (fPosition*vInstanceMatrix).xyz;
-	vec3 p = (length(transformed) > 0.0001) ? normalize(transformed) : vec3(0.0);
+	// Match quad.vert: the same patch point on the unit sphere (body-local
+	// direction p) and its camera-relative position (patch.glsl). The shell
+	// displacement below is the small offset from that sphere point, in
+	// body radii.
+	vec2 puv = vPosition.xy;
+	vec3 p = patchDir(puv);
+	vec3 sphere = patchSphere(puv, p, model);
 
 	vec3 disp;
 	float wave;
 	if(vPosition.w > 0.5) {
 		// Boundary skirt: wall vertices skip the wave displacement and sit
 		// just under sea level, hiding LOD patch-edge cracks under the shell.
-		disp = p * (oceanOffset - 0.001);
+		disp = p * ((oceanOffset - 1.0) - 0.001);
 		wave = 0.0;
 	}
 	else {
@@ -66,9 +69,9 @@ void main()
 		               (asin(p.z) / 3.1415926 + 0.5));
 		// Water depth under this vertex, fetched like quad.vert so the
 		// shell and the seafloor agree on the coastline.
-		float cell = vInstanceMatrix[0].w;
+		float cell = patchCell();
 		float lodCell = log2(max(cell*2048.0/PI, 1.0));
-		float lodPix = log2(max(length(vec4(p, 1.0)*model - vec4(lodCameraPos, 0.0))*lodK, 1e-4));
+		float lodPix = log2(max(length(sphere - lodCameraPos)*lodK, 1e-4));
 		float th = textureLod(heightMap, uv, clamp(max(lodCell, lodPix), 0.0, 11.0)).r;
 		float depthT = clamp((seaLevel - th) / max(oceanDepth, 1e-4), 0.0, 1.0);
 		// Waves die out toward the shore: at the coastline the shell sits
@@ -93,7 +96,7 @@ void main()
 		vec2 D = texture(waveDisp, uv*waveTiling).rg * (waveAmp * waveChoppy * calm);
 		vec3 T = normalize(vec3(-p.y, p.x, 1e-4));
 		vec3 B = normalize(cross(p, T));
-		disp = p * (oceanOffset + d) + T * D.x + B * D.y;
+		disp = p * ((oceanOffset - 1.0) + d) + T * D.x + B * D.y;
 	}
 
 	// Row-vector pipeline convention (p * model), matching quad.vert. The
@@ -102,7 +105,7 @@ void main()
 	// matches on walls.
 	fSurfDir = p;
 	fWave = wave;
-	vec4 wp = vec4(disp, 1.0) * model;
-	fragPos = wp.xyz;
-	gl_Position = wp * view * projection;
+	vec3 wp = sphere + patchOffset(disp, model);
+	fragPos = wp;
+	gl_Position = vec4(wp, 1.0) * view * projection;
 }
