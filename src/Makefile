@@ -1,5 +1,5 @@
 CC = cl.exe
-CFLAGS = /nologo /W3 /D_USE_MATH_DEFINES
+CFLAGS = /nologo /W3 /O2 /openmp /D_USE_MATH_DEFINES
 PROG = cube.exe
 
 SRCS = Main.c \
@@ -7,6 +7,7 @@ SRCS = Main.c \
 	Skybox.c \
 	Atmosphere.c \
 	LoadingScreen.c \
+	GUI.c \
 	TerrainGen.c \
 	glad.c \
 	LoadShader.c \

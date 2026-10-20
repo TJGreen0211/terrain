@@ -1,4 +1,5 @@
 #include "Input.h"
+#include "GUI.h"
 
 static int actionPress, keys;
 static int wireframe = 0;
@@ -55,7 +56,25 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 	mouseZoomOffset = processMouseScroll(yoffset);
 }
 
+/* Left press over a camera slider grabs it; the grab owns the drag until the
+   release, so the arcball never sees that press. */
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+	if (button != GLFW_MOUSE_BUTTON_LEFT)
+		return;
+	if (action == GLFW_PRESS) {
+		double mx, my;
+		glfwGetCursorPos(window, &mx, &my);
+		uiSliderPress((float)mx, (float)my);
+	}
+	else if (action == GLFW_RELEASE) {
+		uiSliderRelease();
+	}
+}
+
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+	uiSetMouse((float)xpos, (float)ypos);
+	if (uiSliderGrabbed())
+		return;
 	int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
 	//xpos = 1.0*xpos/getWindowWidth()*2 - 1.0;
 	//ypos =  1.0*ypos/getWindowHeight()*2 - 1.0;

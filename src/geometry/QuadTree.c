@@ -20,12 +20,15 @@
    the same screen-space behaviour by scaling the start distance with radius. */
 #define QT_LEVEL_PER_RADIUS (128.0f / 30.0f)
 #define QT_SPLIT_LOD 256.0f
+/* Culling margin as a fraction of the body radius: covers the land relief
+   (LAND_RELIEF in Main.c), the water shell + swell, and the skirts. */
+#define QT_CULL_RELIEF 0.05f
 
 static mat4 pos[QT_INSTANCE_CAP];
 
 static GLuint faceVAO[6];
 static GLuint faceVBO[6];
-static GLuint instanceVBO;
+static GLuint instanceVBO[6];
 
 /* Grid axes per order[] from the terrain Main.c call sites. The baked grids
    are NOT on the axis their name suggests: the X grid builds on z=-1, the Y
@@ -194,9 +197,9 @@ void QuadTree_InitGL(GLuint shader)
 {
 	GLuint vPosition = glGetAttribLocation(shader, "vPosition");
 
-	glGenBuffers(1, &instanceVBO);
-	glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*QT_INSTANCE_CAP, NULL, GL_DYNAMIC_DRAW);
+	/* One instance buffer per face, so a cached walk (QuadTree_DrawSphere)
+	   can be redrawn without re-uploading. */
+	glGenBuffers(6, instanceVBO);
 
 	for(int f = 0; f < 6; f++) {
 		vec4 verts[QT_FACE_VERTS];
@@ -214,7 +217,8 @@ void QuadTree_InitGL(GLuint shader)
 		glVertexAttribPointer(vPosition, 4, GL_FLOAT, GL_FALSE, 4*sizeof(float), BUFFER_OFFSET(0));
 
 		/* mat4 instance transform in attributes 4..7 (quad.vert layout). */
-		glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+		glBindBuffer(GL_ARRAY_BUFFER, instanceVBO[f]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*QT_INSTANCE_CAP, NULL, GL_STREAM_DRAW);
 		for(int k = 0; k < 4; k++) {
 			glEnableVertexAttribArray(4+k);
 			glVertexAttribPointer(4+k, 4, GL_FLOAT, GL_FALSE, sizeof(mat4), BUFFER_OFFSET(k*sizeof(vec4)));
@@ -225,92 +229,200 @@ void QuadTree_InitGL(GLuint shader)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-/* One frame's quadtree walk over a single face: fills pos[] with the visible
-   node instances (zeroed parents + leaves) and returns the instance count.
-   Port of the terrain traverseQuad traversal. */
-static int traverseFace(mat4 model, const int *order, float negate, vec3 camPos, float level)
+/* Per-walk culling inputs shared by every face: the body's world centre and
+   radius, the world camera, the horizon angle, and the six view-frustum
+   planes (ax + by + cz + d >= 0 inside). */
+typedef struct qtCull {
+	vec3 center;
+	float radius;
+	vec3 camPos;
+	vec3 camDir;        /* unit direction centre -> camera */
+	float horizon;      /* max visible angle from camDir; > PI disables */
+	float frustum[6][4];
+} qtCull;
+
+/* Conservative visibility of a node's bounding sphere. A node of face
+   half-width qScale has every (displaced) vertex within
+   radius*(qScale*sqrt(2) + QT_CULL_RELIEF) of its centre: projecting the
+   cube face onto the unit sphere never stretches distances, and the relief
+   only moves vertices radially. Culled nodes are neither drawn nor split,
+   so their whole subtree drops out. */
+static int nodeVisible(const qtCull *c, vec3 nodeCenter, float qScale)
 {
-	int globalCount = 0;
-	float qScale = 1.0;
+	float chord = qScale * 1.41421356f;
+	float r = c->radius * (chord + QT_CULL_RELIEF);
+
+	for(int p = 0; p < 6; p++) {
+		const float *pl = c->frustum[p];
+		if(pl[0]*nodeCenter.x + pl[1]*nodeCenter.y + pl[2]*nodeCenter.z + pl[3] < -r)
+			return 0;
+	}
+
+	if(c->horizon < (float)M_PI) {
+		vec3 d = { nodeCenter.x - c->center.x, nodeCenter.y - c->center.y, nodeCenter.z - c->center.z };
+		float len = sqrtf(d.x*d.x + d.y*d.y + d.z*d.z);
+		if(len > 1e-6f) {
+			float cosA = (d.x*c->camDir.x + d.y*c->camDir.y + d.z*c->camDir.z) / len;
+			if(cosA < -1.0f) cosA = -1.0f;
+			if(cosA > 1.0f) cosA = 1.0f;
+			/* Angular half-size of the node on the unit sphere. */
+			float nodeAng = 2.0f * asinf(fminf(chord * 0.5f, 1.0f));
+			if(acosf(cosA) - nodeAng > c->horizon)
+				return 0;
+		}
+	}
+	return 1;
+}
+
+/* One frame's quadtree walk over a single face: fills out[] with the visible
+   leaf instances only (split parents and culled nodes emit nothing) and
+   returns the instance count. Port of the terrain traverseQuad traversal. */
+static int traverseFace(mat4 model, const int *order, float negate, const qtCull *cull, float level, mat4 *out)
+{
+	static qTreeNode qq[QT_INSTANCE_CAP];
+	static float qqScale[QT_INSTANCE_CAP];
 
 	int n, a, b;
 	float plane;
 	faceAxes(order, &n, &a, &b, &plane);
 
-	qTreeNode qq[QT_INSTANCE_CAP];
-
 	/* Root node: the full face. nw stores the node's 2D center on the face;
 	   its LOD point is the face center pushed onto the rendered sphere. */
 	qq[0].nw.x = 0.0; qq[0].nw.y = 0.0; qq[0].nw.z = 0.0;
 	qq[0].width = 2.0;
+	qqScale[0] = 1.0f;
 	vec3 rootLocal = {0.0, 0.0, 0.0};
 	setAxis(&rootLocal, n, negate*plane);
 	qq[0].center = sphereCenter(model, rootLocal);
 
-	vec3 rootT = {0.0, 0.0, 0.0};
-	vec3 rootS = {1.0, 1.0, 1.0};
-	setAxis(&rootS, n, negate);
-	pos[globalCount] = instanceMatrix(rootT, rootS);
-	/* Spare matrix slot (m[3][0], identity row-3 otherwise carries no data):
-	   this instance's face cell half-width. The vertex shader derives the
-	   height-map mip from it; sphereCenter only reads rows 0..2. */
-	pos[globalCount].m[3][0] = 1.0f;
-
-	int numNodes = 1;
 	int terrainMaxLOD = (int)(log(QT_SPLIT_LOD)/log(2.0));
-	int lastNodeCount = 0;
+	int numNodes = 1;
+	int levelStart = 0;
+	int emitted = 0;
 
-	for(int i = 0; i < terrainMaxLOD; i++) {
-		qScale /= 2.0;
+	for(int depth = 0; depth <= terrainMaxLOD; depth++) {
+		int levelEnd = numNodes;
+		for(int k = levelStart; k < levelEnd; k++) {
+			float qScale = qqScale[k];
+			if(!nodeVisible(cull, qq[k].center, qScale))
+				continue;
 
-		for(int k = lastNodeCount; k < numNodes; k++) {
-			if(pointDistance(qq[k].center, camPos) < level) {
-				if(globalCount + 4 >= QT_INSTANCE_CAP)
-					break;
-				pos[k] = scale(0.0);
+			int split = depth < terrainMaxLOD
+			         && numNodes + 4 <= QT_INSTANCE_CAP
+			         && pointDistance(qq[k].center, cull->camPos) < level;
+			if(split) {
+				float cs = qScale * 0.5f;
 				for(int j = 0; j < 4; j++) {
-					globalCount++;
-
 					/* Child 2D centers: (+,+), (-,+), (-,-), (+,-) around the parent. */
-					float ox = (j == 0 || j == 3) ? qScale : -qScale;
-					float oy = (j == 0 || j == 1) ? qScale : -qScale;
+					float ox = (j == 0 || j == 3) ? cs : -cs;
+					float oy = (j == 0 || j == 1) ? cs : -cs;
 					float cx = qq[k].nw.x + ox;
 					float cy = qq[k].nw.y + oy;
 
-					/* Instance: shrink in-plane axes to the child size, keep the
-					   face-normal axis at +/-1, shift the child onto its quadrant. */
-					vec3 t = {0.0, 0.0, 0.0};
-					setAxis(&t, a, cx); setAxis(&t, b, cy);
-					vec3 s = {qScale, qScale, qScale};
-					setAxis(&s, n, negate);
-					pos[globalCount] = instanceMatrix(t, s);
-					pos[globalCount].m[3][0] = qScale;
-
-					qq[globalCount].nw.x = cx; qq[globalCount].nw.y = cy; qq[globalCount].nw.z = 0.0;
-					qq[globalCount].width = qScale*2.0f;
+					qq[numNodes].nw.x = cx; qq[numNodes].nw.y = cy; qq[numNodes].nw.z = 0.0;
+					qq[numNodes].width = cs*2.0f;
+					qqScale[numNodes] = cs;
 
 					/* LOD point: the child's center on the face, projected to the sphere. */
 					vec3 plocal = {0.0, 0.0, 0.0};
 					setAxis(&plocal, a, cx); setAxis(&plocal, b, cy); setAxis(&plocal, n, negate*plane);
-					qq[globalCount].center = sphereCenter(model, plocal);
+					qq[numNodes].center = sphereCenter(model, plocal);
+					numNodes++;
 				}
+				continue;
 			}
+
+			/* Leaf instance: shrink in-plane axes to the node size, keep the
+			   face-normal axis at +/-1, shift the node onto its quadrant. */
+			vec3 t = {0.0, 0.0, 0.0};
+			setAxis(&t, a, qq[k].nw.x); setAxis(&t, b, qq[k].nw.y);
+			vec3 s = {qScale, qScale, qScale};
+			setAxis(&s, n, negate);
+			out[emitted] = instanceMatrix(t, s);
+			/* Spare matrix slot (m[3][0], identity row-3 otherwise carries no
+			   data): this instance's face cell half-width. The vertex shader
+			   derives the height-map mip from it. */
+			out[emitted].m[3][0] = qScale;
+			emitted++;
 		}
-		lastNodeCount = numNodes;
-		numNodes = globalCount+1;
+		levelStart = levelEnd;
 		level /= 2.0f;
 	}
-	return globalCount + 1;
+	return emitted;
 }
 
-void QuadTree_DrawSphere(mat4 model, float radius)
+static void buildCull(qtCull *c, mat4 model, mat4 viewProj, vec3 camPos)
 {
+	c->center.x = model.m[0][3]; c->center.y = model.m[1][3]; c->center.z = model.m[2][3];
+	/* Uniform scale: length of the model's first basis column. */
+	c->radius = sqrtf(model.m[0][0]*model.m[0][0] + model.m[1][0]*model.m[1][0] + model.m[2][0]*model.m[2][0]);
+	c->camPos = camPos;
+
+	/* Horizon: the solid unit sphere (ocean floor / undisplaced body) hides
+	   everything past acos(R/d); terrain up to R*(1 + relief) peeks over it
+	   by a further acos(1/(1 + relief)). Inside the sphere: no horizon. */
+	vec3 rel = { camPos.x - c->center.x, camPos.y - c->center.y, camPos.z - c->center.z };
+	float d = sqrtf(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
+	if(d > c->radius) {
+		c->camDir.x = rel.x/d; c->camDir.y = rel.y/d; c->camDir.z = rel.z/d;
+		c->horizon = acosf(c->radius/d) + acosf(1.0f/(1.0f + QT_CULL_RELIEF));
+	}
+	else {
+		c->camDir.x = 0.0f; c->camDir.y = 0.0f; c->camDir.z = 1.0f;
+		c->horizon = 4.0f;
+	}
+
+	/* Gribb-Hartmann planes from clip = viewProj * world (column vectors,
+	   rows m[i][*]): left/right, bottom/top, near/far. */
+	for(int p = 0; p < 6; p++) {
+		int row = p >> 1;
+		float sign = (p & 1) ? -1.0f : 1.0f;
+		float len;
+		for(int k = 0; k < 4; k++)
+			c->frustum[p][k] = viewProj.m[3][k] + sign*viewProj.m[row][k];
+		len = sqrtf(c->frustum[p][0]*c->frustum[p][0] + c->frustum[p][1]*c->frustum[p][1] + c->frustum[p][2]*c->frustum[p][2]);
+		if(len > 0.0f)
+			for(int k = 0; k < 4; k++)
+				c->frustum[p][k] /= len;
+	}
+}
+
+void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj)
+{
+	/* Last walk's inputs: the planet and water passes draw the same body
+	   from the same camera back to back, so the second pass reuses the
+	   instance buffers the first one uploaded. */
+	static mat4 lastModel, lastViewProj;
+	static vec3 lastCam;
+	static float lastRadius = -1.0f;
+	static int faceCount[6];
+
 	/* Terrain keeps absolute world coordinates (no floating origin): the
 	   node centres computed by sphereCenter are world-space, so the LOD walk
 	   compares them against the world camera position, not (0,0,0). */
 	vec4 cam = getCameraPosition(identityMatrix());
 	vec3 camPos = { cam.x, cam.y, cam.z };
-	float level0 = radius * QT_LEVEL_PER_RADIUS;
+
+	int cached = radius == lastRadius
+	          && camPos.x == lastCam.x && camPos.y == lastCam.y && camPos.z == lastCam.z
+	          && memcmp(&model, &lastModel, sizeof(mat4)) == 0
+	          && memcmp(&viewProj, &lastViewProj, sizeof(mat4)) == 0;
+
+	if(!cached) {
+		qtCull cull;
+		buildCull(&cull, model, viewProj, camPos);
+		float level0 = radius * QT_LEVEL_PER_RADIUS;
+		for(int f = 0; f < 6; f++) {
+			faceCount[f] = traverseFace(model, faceOrder[f], faceNegate[f], &cull, level0, pos);
+			if(faceCount[f] > 0) {
+				/* Full re-specify orphans the old storage, so a draw still
+				   reading the previous body's instances never stalls us. */
+				glBindBuffer(GL_ARRAY_BUFFER, instanceVBO[f]);
+				glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*faceCount[f], pos, GL_STREAM_DRAW);
+			}
+		}
+		lastModel = model; lastViewProj = viewProj; lastCam = camPos; lastRadius = radius;
+	}
 
 	/* Patch skirts must render double-sided, so culling is off entirely for
 	   this pass and the depth buffer resolves the near/far hemispheres (the
@@ -320,13 +432,10 @@ void QuadTree_DrawSphere(mat4 model, float radius)
 	glDisable(GL_CULL_FACE);
 
 	for(int f = 0; f < 6; f++) {
-		int count = traverseFace(model, faceOrder[f], faceNegate[f], camPos, level0);
-
-		glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(mat4)*count, pos);
-
+		if(faceCount[f] == 0)
+			continue;
 		glBindVertexArray(faceVAO[f]);
-		glDrawArraysInstanced(GL_TRIANGLES, 0, QT_FACE_VERTS, count);
+		glDrawArraysInstanced(GL_TRIANGLES, 0, QT_FACE_VERTS, faceCount[f]);
 	}
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -340,5 +449,5 @@ void QuadTree_Shutdown(void)
 		glDeleteVertexArrays(1, &faceVAO[f]);
 		glDeleteBuffers(1, &faceVBO[f]);
 	}
-	glDeleteBuffers(1, &instanceVBO);
+	glDeleteBuffers(6, instanceVBO);
 }

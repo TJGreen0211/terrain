@@ -9,6 +9,7 @@ in vec3 fH;
 in vec3 vColor;
 in vec4 fLightSpace;
 in vec3 fSurfDir;
+in float fRadius;
 in mat3 fNormalMat;
 
 out vec4 FragColor;
@@ -105,38 +106,105 @@ vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 }
 
 // Terrain height field + lighting controls (tweak here)
-#define SURF_EPS        0.030   // angular step for the surface gradient
+#define TEXEL_ANG       (2.0*PI/2048.0) // heightmap texel angle at the equator, mip 0
 #define NORMAL_STRENGTH 0.62    // bump relief amount
-#define BEACH_OFF       0.06    // shoreline width above seaLevel
-#define TREE_OFF        0.20    // grass starts here above seaLevel
-#define PEAK_OFF        0.35    // rock/snow transition above seaLevel
-#define SNOW_BAND       0.10    // rock -> snow blend width
+#define SEA_CLIP        0.0005  // seafloor this close under radius 1 is hidden by the shell
+#define BEACH_OFF       0.012   // shoreline width above seaLevel
+#define WET_SAND        0.003   // darker wet sand just above the waterline
+#define LAKE_MIN        0.03    // climate A (lake depth) where lakes start
+#define VALLEY_LOD      3.0     // extra mips for the river-valley greening
+#define LAKE_LOD        2.0     // lakes must survive this many mips (no pit specks)
+#define COAST_LOD       4.0     // beaches need open sea within ~2^COAST_LOD texels
 
-float heightAt(vec3 d, float lodBase) {
+// Climate map baked with the height field (TerrainGen.c): R moisture
+// (wind-carried rain + rain shadow, stored at half scale for headroom),
+// G river strength, B alluvial deposits, A lake depth. The style uniforms
+// (palette, temperature/humidity response) come from g_planetStyle and are
+// free to change for alien worlds.
+uniform sampler2D climateMap;
+uniform float landRelief;
+uniform vec3 biomeColors[9];    // rows cold/temperate/hot x cols dry/medium/wet
+uniform vec3 rockColor;
+uniform vec3 snowColor;
+uniform vec3 sandColor;
+uniform vec3 saltColor;
+uniform vec3 inlandWaterColor;
+uniform float tempOffset;
+uniform float lapseRate;
+uniform float snowTemp;
+uniform float humidity;
+uniform float equatorLush;
+uniform float hadleyStrength;
+uniform float riverThreshold;
+uniform float rockSlope;
+
+// Equirect uv of a direction + the lod for that latitude (longitude texels
+// shrink by cos(lat), so the same footprint needs a coarser mip).
+vec2 mapUV(vec3 d, float lodBase, out float lod) {
 	float z = clamp(d.z, -1.0, 1.0);
-	vec2 uv = vec2((atan(d.y, d.x)/PI + 1.0)*0.5,
-	               (asin(z)/PI + 0.5));
 	float cosLat = max(sqrt(max(1.0 - z*z, 1e-4)), 0.02);
-	float lod = lodBase + log2(1.0/cosLat);
-	return textureLod(heightMap, uv, clamp(lod, 0.0, 11.0)).r;
+	lod = clamp(lodBase + log2(1.0/cosLat), 0.0, 11.0);
+	return vec2((atan(d.y, d.x)/PI + 1.0)*0.5, asin(z)/PI + 0.5);
 }
 
-vec3 heightRamp(float e) {
-	vec3 deep   = vec3(0.02, 0.09, 0.20);
-	vec3 shall  = vec3(0.05, 0.22, 0.38);
-	vec3 sand   = vec3(0.72, 0.64, 0.40);
-	vec3 grass  = vec3(0.16, 0.38, 0.15);
-	vec3 ridge  = vec3(0.42, 0.38, 0.34);
-	vec3 snow   = vec3(0.92, 0.93, 0.95);
-	float sea   = seaLevel;
-	float beach = seaLevel + BEACH_OFF;
-	float tree  = seaLevel + TREE_OFF;
-	float peak  = seaLevel + PEAK_OFF;
-	if (e < sea)   return mix(deep,  shall, smoothstep(0.0,   sea,   e));
-	if (e < beach) return mix(shall, sand,  smoothstep(sea,   beach, e));
-	if (e < tree)  return mix(sand,  grass, smoothstep(beach, tree,  e));
-	if (e < peak)  return mix(grass, ridge, smoothstep(tree,  peak,  e));
-	return mix(ridge, snow, smoothstep(peak, 1.0, e));
+float heightAt(vec3 d, float lodBase) {
+	float lod;
+	vec2 uv = mapUV(d, lodBase, lod);
+	return textureLod(heightMap, uv, lod).r;
+}
+
+vec3 oceanFloorColor(float e) {
+	vec3 deep  = vec3(0.02, 0.09, 0.20);
+	vec3 shall = vec3(0.05, 0.22, 0.38);
+	return mix(deep, shall, smoothstep(0.0, seaLevel, e));
+}
+
+// Cheap 3D value noise for colour variation (sampled on the unit sphere).
+float hash13(vec3 p) {
+	p = fract(p * 0.1031);
+	p += dot(p, p.zyx + 31.32);
+	return fract((p.x + p.y) * p.z);
+}
+float vnoise(vec3 p) {
+	vec3 i = floor(p), f = fract(p);
+	f = f*f*(3.0 - 2.0*f);
+	return mix(mix(mix(hash13(i),                  hash13(i + vec3(1,0,0)), f.x),
+	               mix(hash13(i + vec3(0,1,0)),    hash13(i + vec3(1,1,0)), f.x), f.y),
+	           mix(mix(hash13(i + vec3(0,0,1)),    hash13(i + vec3(1,0,1)), f.x),
+	               mix(hash13(i + vec3(0,1,1)),    hash13(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+// Noise octave at frequency f (cycles per radian), faded to its mean once
+// a pixel covers half a cycle, so it never aliases from orbit.
+float vnoiseLod(vec3 d, float f, float pixAng) {
+	float fade = 1.0 - smoothstep(0.25, 0.6, pixAng * f);
+	return mix(0.5, vnoise(d * f), fade);
+}
+
+// Whittaker-style biome grid: temperature (cold -> hot) x moisture
+// (dry -> wet), smoothly blended between the 9 palette entries.
+vec3 biomeAt(float t, float m) {
+	float tc = clamp(t, 0.0, 1.0) * 2.0;
+	float mc = clamp(m, 0.0, 1.0) * 2.0;
+	int ti = int(min(floor(tc), 1.0));
+	int mi = int(min(floor(mc), 1.0));
+	float tf = smoothstep(0.0, 1.0, tc - float(ti));
+	float mf = smoothstep(0.0, 1.0, mc - float(mi));
+	vec3 lo = mix(biomeColors[ti*3 + mi],     biomeColors[ti*3 + mi + 1],     mf);
+	vec3 hi = mix(biomeColors[(ti+1)*3 + mi], biomeColors[(ti+1)*3 + mi + 1], mf);
+	return mix(lo, hi, tf);
+}
+
+// Latitude rain belts (Hadley/Ferrel cells): wet equatorial ITCZ, dry
+// subtropical belt near 27 deg, wetter mid-latitude storm track, dry
+// poles. Multiplies the baked wind-carried rain, so rain shadows, dry
+// continental interiors and the regional anomaly still punch exceptions
+// through the lush equator (and wet windward coasts survive in the
+// subtropics). equatorLush scales the equatorial peak.
+float hadleyFactor(float absLatDeg) {
+	float itcz    = exp(-pow(absLatDeg / 14.0, 2.0));
+	float subtrop = exp(-pow((absLatDeg - 27.0) / 9.0, 2.0));
+	float midlat  = exp(-pow((absLatDeg - 55.0) / 12.0, 2.0));
+	return 0.65 + 0.75 * equatorLush * itcz - 0.35 * subtrop + 0.2 * midlat;
 }
 
 /*
@@ -203,28 +271,120 @@ void main()
 	vec3 camDir = lodCameraPos - fragPos;
 	float graz = max(abs(dot(normalize(fragPos), normalize(camDir))), 0.15);
 	float lodBase = log2(max(length(camDir)*lodK, 1e-4)) - log2(graz);
+	// Gradient step = one texel of the mip being sampled, so the bump
+	// resolves exactly the detail the lod shows: a fixed step was ~10
+	// texels wide and blurred every crease up close.
+	float eps = TEXEL_ANG * exp2(clamp(lodBase, 0.0, 11.0));
 	float h  = heightAt(dObj, lodBase);
-	float hT = heightAt(normalize(dObj + T * SURF_EPS), lodBase);
-	float hB = heightAt(normalize(dObj + B * SURF_EPS), lodBase);
+	float hT = heightAt(normalize(dObj + T * eps), lodBase)
+	         - heightAt(normalize(dObj - T * eps), lodBase);
+	float hB = heightAt(normalize(dObj + B * eps), lodBase)
+	         - heightAt(normalize(dObj - B * eps), lodBase);
 
 	float e = clamp(h, 0.0, 1.0);
-	vec4 color = vec4(heightRamp(e), 1.0);
-	vec3 albedo = color.rgb;
+	vec3 grad = (T * hT + B * hB) / (2.0 * eps);   // central differences
+	vec4 color = vec4(1.0);
+	vec3 albedo;
+	float rough, waterMask;
 
-	// Height-driven microfacet material: ocean = smooth-ish/low-F0, land = rough,
-	// snow = in between (same seaLevel-relative bands as heightRamp)
-	float oceanMask = 1.0 - smoothstep(seaLevel, seaLevel + BEACH_OFF, e);
-	float snowMask  = smoothstep(seaLevel + PEAK_OFF, seaLevel + PEAK_OFF + SNOW_BAND, e);
-	float rough = mix(0.72, 0.15, oceanMask);   // ocean is no longer a perfect mirror
-	rough = mix(rough, 0.45, snowMask);
+	if (e < seaLevel) {
+		// Seafloor that the coarse LOD triangles lift to (or above) the water
+		// shell: a triangle straddling the coast interpolates its land vertex
+		// across pixels the fine field calls sea, poking jagged strips through
+		// the water. The water shell (drawn first, same per-pixel mask) is
+		// right behind it, so dropping the fragment puts the coastline on the
+		// per-pixel mask at every LOD. The margin also clears the shallow
+		// floor that would z-fight the shell at radius 1.
+		if (fRadius > 1.0 - SEA_CLIP)
+			discard;
+		// Seafloor (under the water shell).
+		albedo = oceanFloorColor(e);
+		rough = 0.15;
+		waterMask = 1.0;
+	} else {
+		float lod;
+		vec2 uv = mapUV(dObj, lodBase, lod);
+		vec4 clim = textureLod(climateMap, uv, lod);
+		vec4 climWide = textureLod(climateMap, uv, min(lod + VALLEY_LOD, 11.0));
+
+		// Colour variation: continent-scale patches + finer mottling, faded
+		// by the pixel footprint.
+		float n1 = vnoiseLod(dObj, 40.0, eps);
+		float n2 = vnoiseLod(dObj, 160.0, eps);
+		float n3 = vnoiseLod(dObj, 640.0, eps);
+
+		// Temperature: latitude, altitude lapse, planet offset, a little noise.
+		float alt01 = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
+		float cosLatS = sqrt(max(1.0 - dObj.z*dObj.z, 0.0));
+		// Calibrated so sea-level ice starts near 72 deg and the equatorial
+	// snowline sits near 90 % of the relief. The altitude term is curved
+	// (alt^1.5): the eroded relief has broad high massifs, and a linear
+	// lapse would snow over whole ranges instead of just their peaks.
+	float temp = cosLatS * 1.2 - 0.2 - lapseRate * pow(alt01, 1.5) + tempOffset + (n1 - 0.5) * 0.08;
+
+		// Moisture: baked wind rain x latitude rain belts, wetter on
+		// alluvial plains and along big rivers/lakes.
+		float absLat = degrees(asin(min(abs(dObj.z), 1.0)));
+		float moist = 2.0 * clim.r * mix(1.0, hadleyFactor(absLat), hadleyStrength) * humidity;
+		moist += 0.2 * clim.b;
+		moist += 0.3 * smoothstep(riverThreshold - 0.15, riverThreshold + 0.05, climWide.g);
+		moist += 0.3 * smoothstep(LAKE_MIN, LAKE_MIN * 3.0, climWide.a);
+		moist = clamp(moist + (n2 - 0.5) * 0.12, 0.0, 1.0);
+
+		float tBiome = clamp((temp - 0.2) / 0.7, 0.0, 1.0);
+		albedo = biomeAt(tBiome, moist);
+		albedo *= 0.84 + 0.32 * (0.5 * n1 + 0.3 * n2 + 0.2 * n3);
+		rough = mix(0.62, 0.9, moist);   // desert smoother, forest canopy rough
+
+		// Slope: rise/run of the displaced surface; cliffs show bare rock.
+		float slope = length(grad) * landRelief / max(1.0 - seaLevel, 1e-3);
+		float steep = smoothstep(rockSlope, rockSlope * 1.6, slope);
+		float coldness = 1.0 - smoothstep(snowTemp - 0.06, snowTemp + 0.06, temp);
+
+		// Beach on gentle coasts only (steep coasts become cliffs): wet sand
+		// at the waterline, dry above, grey shingle when cold.
+		// The coarse mip averages in the nearby seafloor, so it only dips
+		// below sea level near an actual coast: low inland plains stay
+		// plains instead of turning into beaches.
+		float hNear = textureLod(heightMap, uv, min(lod + COAST_LOD, 11.0)).r;
+		float coastal = 1.0 - smoothstep(seaLevel, seaLevel + 0.01, hNear);
+		float beach = (1.0 - smoothstep(seaLevel + BEACH_OFF * 0.5, seaLevel + BEACH_OFF, e)) * (1.0 - steep) * coastal;
+		float wet = 1.0 - smoothstep(seaLevel, seaLevel + WET_SAND, e);
+		vec3 sandC = mix(sandColor, rockColor * 1.2, coldness * 0.7) * mix(1.0, 0.55, wet);
+		albedo = mix(albedo, sandC, beach);
+		rough = mix(rough, mix(0.75, 0.3, wet), beach);
+
+		vec3 rockC = rockColor * (0.8 + 0.4 * n3);
+		albedo = mix(albedo, rockC, steep);
+		rough = mix(rough, 0.7, steep);
+
+		// Lakes (flooded basins) where the climate is wet enough; dry
+		// basins become salt pans. Rivers from the drainage map.
+		// min() with a coarser mip drops one-texel erosion pits: only basins
+		// with real area stay flooded.
+		float lakeA = min(clim.a, textureLod(climateMap, uv, min(lod + LAKE_LOD, 11.0)).a * 2.0);
+		float lake = smoothstep(LAKE_MIN, LAKE_MIN * 2.0, lakeA);
+		float wetBasin = smoothstep(0.15, 0.3, moist);
+		albedo = mix(albedo, saltColor, lake * (1.0 - wetBasin));
+		rough = mix(rough, 0.5, lake * (1.0 - wetBasin));
+		float river = smoothstep(riverThreshold, riverThreshold + 0.10, clim.g) * (1.0 - steep * 0.5);
+		waterMask = max(lake * wetBasin, river);
+		albedo = mix(albedo, inlandWaterColor, waterMask);
+		rough = mix(rough, 0.06, waterMask);
+
+		// Snow/ice: cold enough and not too steep to hold it; freezes water.
+		float snow = coldness * (1.0 - smoothstep(rockSlope * 1.2, rockSlope * 2.0, slope) * (1.0 - waterMask));
+		albedo = mix(albedo, snowColor * (0.92 + 0.08 * n2), snow);
+		rough = mix(rough, 0.4, snow);
+		waterMask *= 1.0 - snow;
+	}
+	color.rgb = albedo;
 	float a2 = max(rough * rough, 0.0004);
-	vec3 F0 = mix(vec3(0.04), vec3(0.02), oceanMask);
-	F0 = mix(F0, vec3(0.03), snowMask);
+	vec3 F0 = mix(vec3(0.04), vec3(0.02), waterMask);
 
-	// Bump relief scaled by material: a smooth ocean keeps a coherent sun glint
-	// instead of scattering it into per-texel glitter; rough land keeps full relief.
-	float bump = mix(NORMAL_STRENGTH, NORMAL_STRENGTH * 0.25, oceanMask);
-	vec3 grad = T * ((hT - h) / SURF_EPS) + B * ((hB - h) / SURF_EPS);
+	// Bump relief scaled by material: water keeps a coherent sun glint
+	// instead of scattering it into per-texel glitter; land keeps full relief.
+	float bump = mix(NORMAL_STRENGTH, NORMAL_STRENGTH * 0.2, waterMask);
 	vec3 Nobj = normalize(dObj - bump * grad);
 	vec3 N = normalize(fNormalMat * Nobj);
 

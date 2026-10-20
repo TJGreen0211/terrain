@@ -3,6 +3,7 @@
 #include "Skybox.h"
 #include "Atmosphere.h"
 #include "LoadingScreen.h"
+#include "GUI.h"
 #include "TerrainGen.h"
 #include <stdio.h>
 //#include <unistd.h>
@@ -17,7 +18,7 @@ GLuint depthMap;
 /* Per-frame extras for the quadtree body passes (set once per frame, read by
    setBodyUniforms). */
 mat4 g_lightSpaceMatrix;
-float g_waveParams[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, normalStrength, tiling
+float g_waveParams[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, normalStrength, tiling, choppiness
 /* Baked planet height map (2048x1024 R16F + mips), sampled by quad.frag/
    water.frag instead of evaluating simplex noise per pixel.
 
@@ -29,9 +30,11 @@ float g_waveParams[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, norma
 GLuint planetHeightTex;
 #define LOD_K_NUMER (0.7853982f*1024.0f/3.1415926f)
 /* Geometric land relief as a fraction of the planet radius (quad.vert /
-   depth.vert displace the unit sphere by it; the ocean floor stays at 1.0
-   so the water shell covers it). */
+   depth.vert displace the unit sphere by it). Sea level is radius 1.0 for
+   both the planet and the water shell; the ocean floor is pushed below it by
+   OCEAN_RELIEF at full oceanDepth, so the shell needs no offset to clear it. */
 #define LAND_RELIEF 0.025f
+#define OCEAN_RELIEF 0.01f
 struct sphere planet;
 struct ring planetRing;
 struct quadCube qc, qc2;
@@ -66,6 +69,54 @@ GLuint initInstanceShader() {
 	createShader(&shader, "shaders/instance.vert",
 		"shaders/instance.frag");
 	return shader;
+}
+
+/* Camera sliders (bottom-left, blue = movement speed on top, orange =
+   scroll speed below), ported from OpenGLSolar. Log-mapped so the low end
+   stays usable: t in [0,1] -> min*(max/min)^t. Ranges keep the camera
+   defaults (MovementSpeed 200, CameraScrollSpeed 10) at the same relative
+   spot OpenGLSolar's do. */
+#define UI_SLIDER_MOVEMENT 0
+#define UI_SLIDER_SCROLL   1
+#define UI_SLIDER_COUNT    2
+
+#define CAMERA_MOVEMENT_MIN 5.0f
+#define CAMERA_MOVEMENT_MAX 2000.0f
+#define CAMERA_SCROLL_MIN 0.5f
+#define CAMERA_SCROLL_MAX 200.0f
+
+static float cameraSliderValue(float minV, float maxV, float t)
+{
+	return minV * powf(maxV / minV, t);
+}
+
+static float cameraSliderInitT(float minV, float maxV, float value)
+{
+	return logf(value / minV) / logf(maxV / minV);
+}
+
+void onCameraSliderChanged(int id, float t)
+{
+	if (id == UI_SLIDER_MOVEMENT)
+		MovementSpeed = cameraSliderValue(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, t);
+	else if (id == UI_SLIDER_SCROLL)
+		CameraScrollSpeed = cameraSliderValue(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, t);
+}
+
+/* Accent colours double as labels: blue = movement, orange = scroll. */
+static const float sliderAccentMovement[3] = { 0.45f, 0.65f, 1.0f };
+static const float sliderAccentScroll[3] = { 1.0f, 0.55f, 0.30f };
+
+void uiSetupCameraSliders()
+{
+	uiSliderSetChangedFn(onCameraSliderChanged);
+	/* t0 puts each handle at the current camera default. */
+	uiAddSlider(UI_SLIDER_MOVEMENT,
+		cameraSliderInitT(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, MovementSpeed),
+		sliderAccentMovement);
+	uiAddSlider(UI_SLIDER_SCROLL,
+		cameraSliderInitT(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, CameraScrollSpeed),
+		sliderAccentScroll);
 }
 
 GLuint initAtmosphereShader() {
@@ -226,6 +277,12 @@ mat4 getLookAtMatrix(vec4 lightPosition, vec3 lookAt) {
 	return multiplymat4(rxry, translatevec4(lightPosition));
 }
 
+/* Main camera projection * view, matching initMVP/setBodyUniforms; the
+   quadtree walk frustum-culls its nodes against it. */
+static mat4 getViewProjection(void) {
+	return multiplymat4(perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar), getViewMatrix());
+}
+
 void initMVP(int shader, mat4 m, mat4 v) {
 	mat4 p = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &p.m[0][0]);
@@ -240,7 +297,7 @@ void initMVP(int shader, mat4 m, mat4 v) {
    `position` shifts the cameraPos uniform (world camera for the water, the
    legacy sun-relative position for the planet). */
 void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec3 position, vec4 lightPosition,
-                     GLuint tex0, GLuint tex2, GLuint dxTex, GLuint dzTex, GLuint skyTex) {
+                     GLuint tex0, GLuint tex2, GLuint slopeTex, GLuint dispTex, GLuint jacobTex, GLuint skyTex) {
 	glUseProgram(shader);
 	mat4 positionMatrix = translatevec3(position);
 	vec4 camPosition = getCameraPosition(positionMatrix);
@@ -258,6 +315,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec3 position, vec4
 	glUniform1f(glGetUniformLocation(shader, "waveAmp"), g_waveParams[1]);
 	glUniform1f(glGetUniformLocation(shader, "waveNormalStrength"), g_waveParams[2]);
 	glUniform1f(glGetUniformLocation(shader, "waveTiling"), g_waveParams[3]);
+	glUniform1f(glGetUniformLocation(shader, "waveChoppy"), g_waveParams[4]);
 	glUniform1f(glGetUniformLocation(shader, "time"), glfwGetTime()/100.0);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, tex0);
@@ -271,11 +329,14 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec3 position, vec4
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
 	glUniform1i(glGetUniformLocation(shader, "detailNormal"), 2);
 	glActiveTexture(GL_TEXTURE3);
-	glBindTexture(GL_TEXTURE_2D, dxTex);
-	glUniform1i(glGetUniformLocation(shader, "waveDx"), 3);
+	glBindTexture(GL_TEXTURE_2D, slopeTex);
+	glUniform1i(glGetUniformLocation(shader, "waveSlope"), 3);
 	glActiveTexture(GL_TEXTURE4);
-	glBindTexture(GL_TEXTURE_2D, dzTex);
-	glUniform1i(glGetUniformLocation(shader, "waveDz"), 4);
+	glBindTexture(GL_TEXTURE_2D, dispTex);
+	glUniform1i(glGetUniformLocation(shader, "waveDisp"), 4);
+	glActiveTexture(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, jacobTex);
+	glUniform1i(glGetUniformLocation(shader, "waveJacobian"), 7);
 	glActiveTexture(GL_TEXTURE5);
 	glBindTexture(GL_TEXTURE_CUBE_MAP, skyTex);
 	glUniform1i(glGetUniformLocation(shader, "skybox"), 5);
@@ -291,6 +352,9 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec3 position, vec4
 	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
 	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
 	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
+	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
+	/* Climate map (unit 8) + surface style for quad.frag's biome shading. */
+	setPlanetSurfaceUniforms(shader, 8);
 	glActiveTexture(GL_TEXTURE0);
 }
 
@@ -526,7 +590,7 @@ void drawOrbit(GLuint shader, GLuint texture, float theta, vec3 position, vec4 l
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
-	QuadTree_DrawSphere(model, 100.0f);
+	QuadTree_DrawSphere(model, 100.0f, getViewProjection());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -542,6 +606,8 @@ void drawDepth(GLuint vao, GLuint shader, int vertices, vec4 lightPosition, mat4
 		glUniform1i(glGetUniformLocation(shader, "heightMap"), 7);
 		glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
 		glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
+		glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
+		glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
 		glActiveTexture(GL_TEXTURE0);
 	}
 	glBindVertexArray(vao);
@@ -683,6 +749,9 @@ int main(int argc, char *argv[])
 	GLuint instanceShader = initInstanceShader();
 	GLuint quadShader = initQuadShader();
 	GLuint planetShader = initPlanetShader();
+	attachGUIShaders();
+	uiInit();
+	uiSetupCameraSliders();
 	LoadingScreen_Step(); // all shader programs
 	/* The quadtree body LOD: six face grids + shared instance VBO, attribute
 	   layout wired once (all three body programs declare vPosition at 0 and
@@ -765,10 +834,11 @@ int main(int argc, char *argv[])
 	float lastFrame = 0.0;
 	vec3 translation = {0.0, 0.0, 0.0};
 	mat4 lightProjection = ortho(-4000.0, 4000.0, -4000.0, 4000.0, zNear, zFar);
-	g_waveParams[0] = 1.01f;
-	g_waveParams[1] = 0.8f;
-	g_waveParams[2] = 60.0f;
+	g_waveParams[0] = 1.0f;   // shell radius = sea level (planet coast is at 1.0)
+	g_waveParams[1] = 0.25f;  // ~0.0006 rms: well under the land relief
+	g_waveParams[2] = 1.0f;
 	g_waveParams[3] = 8.0f;
+	g_waveParams[4] = 1.0f;
 	//mat4 lightProjection = perspective(90.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 
 	/*char *vertCheck = "shaders/water.vert";
@@ -827,11 +897,12 @@ int main(int argc, char *argv[])
 		float fScale = 300.0;
 		float fScaleFactor = 1.25;//1.025;
 
-		/* Atmosphere (OpenGLSolar Earth params): shell 2.12% above the
-		   surface, Rayleigh tint C_R, solar brightness E. Shared by the dome
+		/* Atmosphere (OpenGLSolar Earth params): shell 4.24% above the
+		   surface (2x the original 2.12% so tall terrain stays inside),
+		   Rayleigh tint C_R, solar brightness E. Shared by the dome
 		   (in-scatter) and the planet/water passes (extinction). */
 		float atmoInner = fScale;
-		float atmoOuter = fScale * 1.0212f;
+		float atmoOuter = fScale * 1.0424f;
 		vec3 atmoC_R = { 0.3f, 0.7f, 1.0f };
 		float atmoE = 14.3f;
 
@@ -905,17 +976,17 @@ int main(int argc, char *argv[])
 		//reproduces the old traverseQuad calls verbatim, so do not "fix" it.
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
 		model = multiplymat4(scale(fScale), matR);
-		setBodyUniforms(quadShader, fScale, model, lightPositionXYZ, lightPosition,
-		                0, dxWaveTex, 0, 0, 0);
-		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
-		QuadTree_DrawSphere(model, fScale);
+		mat4 viewProj = getViewProjection();
 
 		//Water: same quadtree LOD as the planet, FFT-displaced sea-level
-		//shell that discards over land in-shader (waveHeight/Dx/Dz + tiled
-		//detail normals + skybox reflection in water.frag)
+		//shell that discards over land in-shader (waveHeight/Disp/Slope + tiled
+		//detail normals + skybox reflection in water.frag). Drawn BEFORE the
+		//planet: both are opaque, so the order does not change the image, but
+		//the ocean floor under the shell then fails early-Z instead of running
+		//the full quad.frag only to be overwritten.
 		setBodyUniforms(waterShader, fScale, model, translation, lightPosition,
 		                ocean.dyTexture, ocean.detailTexture,
-		                ocean.dxTexture, ocean.dzTexture, skyboxTexture);
+		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
 		setAtmosphereExtinction(waterShader, atmoInner, atmoOuter, atmoC_R);
 		/* Water.frag's back-face early-out is only safe from outside the
 		   shell; the surface view (camera inside) must still see it. */
@@ -923,7 +994,13 @@ int main(int argc, char *argv[])
 		float shellR2 = fScale*1.05f; shellR2 = shellR2*shellR2;
 		glUniform1f(glGetUniformLocation(waterShader, "outsideShell"),
 		            shellCam.x*shellCam.x + shellCam.y*shellCam.y + shellCam.z*shellCam.z > shellR2 ? 1.0f : 0.0f);
-		QuadTree_DrawSphere(model, fScale);
+		QuadTree_DrawSphere(model, fScale, viewProj);
+
+		//Planet: reuses the water pass's quadtree walk (same model/camera).
+		setBodyUniforms(quadShader, fScale, model, lightPositionXYZ, lightPosition,
+		                0, dxWaveTex, 0, 0, 0, 0);
+		setAtmosphereExtinction(quadShader, atmoInner, atmoOuter, atmoC_R);
+		QuadTree_DrawSphere(model, fScale, viewProj);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 		//TEST: flat animated wave grid above the planet (debug for FFT water)
@@ -946,6 +1023,15 @@ int main(int argc, char *argv[])
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
 		drawSunGlow(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
+
+		//Camera speed sliders: UI overlay, drawn over everything. Laid out
+		//every frame so they track window resizes.
+		{
+			int ww, wh;
+			glfwGetWindowSize(window, &ww, &wh);
+			uiLayoutSliders(ww, wh, UI_SLIDER_COUNT);
+		}
+		uiDrawAll();
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);

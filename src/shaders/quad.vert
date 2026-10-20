@@ -11,13 +11,15 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 lightPosition;
 // Baked height field (TerrainGen.c): the land is geometrically displaced
-// above the unit sphere; the ocean floor stays at radius 1 so the water
-// shell always covers it. lodK/lodCameraPos drive the vertex texture-fetch
+// above the unit sphere and the ocean floor below it, so sea level is
+// exactly radius 1 where the water shell sits. lodK/lodCameraPos drive the vertex texture-fetch
 // LOD, combined with the quadtree node's cell size so the geometry follows
 // the field at its own resolution and never crinkles finer than it can draw.
 uniform sampler2D heightMap;
 uniform float seaLevel;
 uniform float landRelief;
+uniform float oceanRelief;
+uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 
@@ -29,6 +31,10 @@ out vec3 fL;
 out vec2 fTexCoords;
 out vec3 vColor;
 out vec3 fSurfDir;
+// Interpolated geometric radius (sea level = 1): quad.frag compares it with
+// the per-pixel height to hide seafloor that coarse triangles lift above the
+// water shell.
+out float fRadius;
 out mat3 fNormalMat;
 
 const float PI = 3.14159265359;
@@ -52,9 +58,10 @@ void main()
 	float lod = clamp(max(lodCell, lodPix), 0.0, 11.0);
 	float h = textureLod(heightMap, huv, lod).r;
 
-	// Displace land only: a linear relief ramp from sea level to the field
-	// maximum, as a fraction of the planet radius (model scale).
-	float relief = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
+	// Linear relief ramps from sea level (radius 1): up to the field maximum
+	// on land, down to oceanDepth on the seafloor (fraction of planet radius).
+	float relief = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
+	             - oceanRelief * clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
 	float radius = 1.0 + relief;
 
 	// Boundary skirt: wall vertices (w = 1) sit just under the DISPLACED
@@ -68,6 +75,7 @@ void main()
 
 	vec3 n = d;
 	fSurfDir = d;
+	fRadius = radius;
 
 	// Normal matrix: this pipeline transforms as row vectors (p * model * view
 	// * projection) from row-major uploads, so the GLSL matrix is the

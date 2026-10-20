@@ -64,20 +64,58 @@ float phillips(vec2 k) {
 	return A * (exp(-1.0/ (k2 * L * L))/(k2*k2)) * (omegaK*omegaK*omegaK*omegaK) * exp(-k2*L*L*dampingVal*dampingVal);
 }
 
+// Side length (m) of the simulated ocean patch.
+#define PATCH_SIZE 1000.0f
+
 static float waveNumber(float n, int dim, float L) {
 	float idx = (n < (dim / 2.0f)) ? n : n - dim;
 	return 2.0f*M_PI*idx/L;
 }
 
-void initH0(waves *water) {
-	float L = 1000.0;
-	int dim = water->dimension;
+// Spectra are stored row-major: column M is texture u (east), row N is
+// texture v (north), so kx comes from M and kz from N.
+static vec2 waveVector(int N, int M, int dim) {
+	vec2 k = {waveNumber((float)M, dim, PATCH_SIZE), waveNumber((float)N, dim, PATCH_SIZE)};
+	return k;
+}
+
+/* Per-bin constants of the spectrum (wave vector, 1/|k|, dispersion
+   omega = sqrt(g|k|)), built once by initH0 instead of every frame. One ocean
+   exists, so file scope is enough. */
+static vec2 *s_waveK;
+static float *s_invK;
+static float *s_omega;
+
+static void initWaveTables(int dim) {
+	free(s_waveK); free(s_invK); free(s_omega);
+	s_waveK = malloc(dim*dim*sizeof(vec2));
+	s_invK = malloc(dim*dim*sizeof(float));
+	s_omega = malloc(dim*dim*sizeof(float));
 	for(int N = 0; N < dim; N++) {
 		for(int M = 0; M < dim; M++) {
-			vec2 k = {waveNumber((float)N, dim, L), waveNumber((float)M, dim, L)};
+			int offset = N*dim + M;
+			vec2 k = waveVector(N, M, dim);
+			float magnitude = lengthvec2(k);
+			if(magnitude < 0.0001) magnitude = 0.0001;
+			s_waveK[offset] = k;
+			s_invK[offset] = 1.0f/magnitude;
+			s_omega[offset] = sqrtf(9.81f*magnitude);
+		}
+	}
+}
+
+void initH0(waves *water) {
+	int dim = water->dimension;
+	initWaveTables(dim);
+	for(int N = 0; N < dim; N++) {
+		for(int M = 0; M < dim; M++) {
+			vec2 k = waveVector(N, M, dim);
 
 			vec4 grnd = gaussRand();
 			float h0 = 1/sqrt(2.0) * sqrt(phillips(k));
+			// Nyquist bins are their own mirror: i*k*h there is not Hermitian
+			// and would leak into the packed imaginary channels.
+			if(N == dim/2 || M == dim/2) h0 = 0.0;
 			int offset = N*dim + M;
 			water->tildeh0k[offset].real = grnd.x*h0; water->tildeh0k[offset].im = grnd.y*h0;
 		}
@@ -92,39 +130,46 @@ void initH0(waves *water) {
 	}
 }
 
+// a*sa + b*sb
+static complexType complexMad(complexType a, float sa, complexType b, float sb) {
+	complexType c = {a.real*sa + b.real*sb, a.im*sa + b.im*sb};
+	return c;
+}
+
 void calcH0(waves *water) {
-	float L = 1000.0;
 	float t = glfwGetTime();
 	int dim = water->dimension;
-	int offset = 0;
-	for(int N = 0; N < dim; N++) {
+	/* Bins are independent: rows split across cores (/openmp). */
+	int N;
+	#pragma omp parallel for schedule(static)
+	for(N = 0; N < dim; N++) {
 		for(int M = 0; M < dim; M++) {
-			vec2 k = {waveNumber((float)N, dim, L), waveNumber((float)M, dim, L)};
+			int offset = N*dim + M;
+			vec2 k = s_waveK[offset];
+			float w = s_omega[offset];
 
-			float magnitude = lengthvec2(k);
-			if(magnitude < 0.0001) magnitude = 0.0001;
-			float w = sqrt(9.81* magnitude);
-
-			float cosinus = cos(w*t);
-			float sinus = sin(w*t);
-
-			//float cosinus = cos(w);
-			//float sinus = sin(w);
+			float cosinus = cosf(w*t);
+			float sinus = sinf(w*t);
 
 			complexType expIWT = {cosinus, sinus};
 			complexType invExpIWT = {cosinus, -sinus};
 
-			water->dy[offset] = complexAdd(complexMult(water->tildeh0k[offset], expIWT), complexMult(water->conjTildeh0MK[offset], invExpIWT));
-			//printf("%d r: %f i: %f\n", offset, tildeh0k[offset].real, tildeh0k[offset].im);
-			water->dx[offset].real = 0.0; water->dx[offset].im = -k.x/magnitude;
-			water->dx[offset] = complexMult(water->dx[offset], water->dy[offset]);
-			water->dz[offset].real = 0.0; water->dz[offset].im = -k.y/magnitude;
-			water->dz[offset] = complexMult(water->dz[offset], water->dy[offset]);
+			complexType h = complexAdd(complexMult(water->tildeh0k[offset], expIWT), complexMult(water->conjTildeh0MK[offset], invExpIWT));
+			complexType ih = {-h.im, h.real};
+			float kx = k.x, kz = k.y, invK = s_invK[offset];
+
+			// Choppy displacement Dx <-> i kx/|k| h (Tessendorf's -i k/|k| h with
+			// lambda < 0, i.e. Gerstner's x - A sin: points move toward crests),
+			// dh/dx <-> i kx h, dDx/dx <-> -kx^2/|k| h. Each line is a + i*b of
+			// two such real spectra.
+			water->hDxz[offset]  = complexMad(h, 1.0f, ih, -kx*kz*invK);
+			water->disp[offset]  = complexMad(ih, kx*invK, h, -kz*invK);
+			water->slope[offset] = complexMad(ih, kx, h, -kz);
+			water->jacob[offset] = complexMad(h, -kx*kx*invK, ih, -kz*kz*invK);
 
 			//printf("[%f][%f] P(k): %f, P(-k): %f\n", N, M, phillips(k), phillips(kNegative));
 			//printf("gauss.x: %f, gauss.y %f\n", grnd.x, grnd.y);
 			//printf("dx: %f %f, dy: %f %f, dz: %f %f\n", dx.real, dx.im, dy.real, dy.im, dz.real, dz.im);
-			offset++;
 		}
 	}
 }
@@ -148,7 +193,8 @@ void complexBitReverse(complexType *c, int dim) {
 // Unnormalized inverse FFT; caller divides by dim*dim for the 2d case.
 void fft(int dim, complexType *c) {
 	complexBitReverse(c, dim);
-	int log2n = log(dim)/log(2);
+	int log2n = 0;
+	while((1 << log2n) < dim) log2n++;
 
 	float c1 = -1.0;
 	float c2 = 0.0;
@@ -177,46 +223,29 @@ void fft(int dim, complexType *c) {
 	}
 }
 
+/* Rows in place, then columns through a scratch copy. Every 1D transform is
+   independent, so both passes split across cores (/openmp); each thread
+   owns its scratch column. */
 void fft2d(int dim, complexType *c) {
-	complexType *row = malloc(dim*2*sizeof(float));
-	int index = 0;
-	int cpIndex = 0;
-	for(int j = 0; j < dim; j++) {
-		for(int i = 0; i < dim; i++) {
-			row[i].real = c[index].real;
-			row[i].im = c[index].im;
-			//printf("in: %d, real: %f, im: %f\n", index, row[i].real, row[i].im);
-			//printf("0in: %d, %f+%fj\n", i, row[i].real, row[i].im);
-			index++;
-		}
-		fft(dim, row);
-		for(int i = 0; i < dim; i++) {
-			c[cpIndex].real = row[i].real;
-			c[cpIndex].im = row[i].im;
-			//printf("out: %d, real: %f, im: %f\n", cpIndex, c[cpIndex].real, c[cpIndex].im);
-			//printf("0out: %d, %f+%fj\n", cpIndex, c[cpIndex].real, c[cpIndex].im);
-			cpIndex++;
-		}
-	}
+	int j;
+	#pragma omp parallel for schedule(static)
+	for(j = 0; j < dim; j++)
+		fft(dim, c + j*dim);
 
-	index = 0;
-	for(int i = 0; i < dim; i++) {
-		for(int j = 0; j < dim; j++) {
-			row[j].real = c[dim*j+i].real;
-			row[j].im = c[dim*j+i].im;
-			//printf("in: %d, real: %f, im: %f\n", dim*j+index, row[j].real, row[j].im);
-			//printf("1in: %d, %f+%fj\n", j, row[j].real, row[j].im);
+	#pragma omp parallel
+	{
+		complexType *col = malloc(dim*sizeof(complexType));
+		int i;
+		#pragma omp for schedule(static)
+		for(i = 0; i < dim; i++) {
+			for(int j = 0; j < dim; j++)
+				col[j] = c[dim*j+i];
+			fft(dim, col);
+			for(int j = 0; j < dim; j++)
+				c[dim*j+i] = col[j];
 		}
-
-		fft(dim, row);
-		for(int j = 0; j < dim; j++) {
-			c[dim*j+i].real = row[j].real;
-			c[dim*j+i].im = row[j].im;
-			//printf("in: %d, real: %f, im: %f\n", dim*j+i, row[j].real, row[j].im);
-			//printf("1out: %d, %f+%fj\n", j, c[(i+1)*(j+1)-1].real, c[(i+1)*(j+1)-1].im);
-		}
+		free(col);
 	}
-	free(row);
 }
 
 static float hash2(int x, int y) {
@@ -271,7 +300,10 @@ static GLuint createDetailNormalTexture(int size) {
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	/* Mipmapped: tiled 40x over the sphere, so toward the horizon it is
+	   heavily minified and would otherwise thrash the texture cache. */
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -281,11 +313,11 @@ static GLuint createDetailNormalTexture(int size) {
 	return tex;
 }
 
-static GLuint createWaveTexture(int dim) {
+static GLuint createWaveTexture(int dim, GLint internalFormat, GLenum format) {
 	GLuint tex;
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, dim, dim, 0, GL_RED, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, dim, dim, 0, format, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -297,19 +329,32 @@ static GLuint createWaveTexture(int dim) {
 void initializeWaves(waves *water, int dim) {
 	water->dimension = dim;
 	
-	water->dx = malloc(dim*dim*sizeof(complexType));
-	water->dy = malloc(dim*dim*sizeof(complexType));
-	water->dz = malloc(dim*dim*sizeof(complexType));
+	water->hDxz = malloc(dim*dim*sizeof(complexType));
+	water->disp = malloc(dim*dim*sizeof(complexType));
+	water->slope = malloc(dim*dim*sizeof(complexType));
+	water->jacob = malloc(dim*dim*sizeof(complexType));
 	water->tildeh0k = malloc(dim*dim*sizeof(complexType));
 	water->conjTildeh0MK = malloc(dim*dim*sizeof(complexType));
 
-	water->dxData = malloc(dim*dim*sizeof(float));
 	water->dyData = malloc(dim*dim*sizeof(float));
-	water->dzData = malloc(dim*dim*sizeof(float));
+	water->dispData = malloc(dim*dim*2*sizeof(float));
+	water->slopeData = malloc(dim*dim*2*sizeof(float));
+	water->jacobData = malloc(dim*dim*3*sizeof(float));
 
-	water->dxTexture = createWaveTexture(dim);
-	water->dyTexture = createWaveTexture(dim);
-	water->dzTexture = createWaveTexture(dim);
+	water->dyTexture = createWaveTexture(dim, GL_R32F, GL_RED);
+	water->dispTexture = createWaveTexture(dim, GL_RG32F, GL_RG);
+	water->slopeTexture = createWaveTexture(dim, GL_RG32F, GL_RG);
+	water->jacobTexture = createWaveTexture(dim, GL_RGB32F, GL_RGB);
+	/* Fragment-sampled maps get a mip chain (refilled every frame): at
+	   grazing views the ocean minifies them hard, and sampling level 0 there
+	   thrashes the texture cache and shimmers. */
+	GLuint mipped[2] = { water->slopeTexture, water->jacobTexture };
+	for(int i = 0; i < 2; i++) {
+		glBindTexture(GL_TEXTURE_2D, mipped[i]);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
 	water->detailTexture = createDetailNormalTexture(128);
 
 	initH0(water);
@@ -320,10 +365,10 @@ void initializeWaves(waves *water, int dim) {
 	{
 		int dim2 = dim*dim;
 		calcH0(water);
-		fft2d(dim, water->dy);
+		fft2d(dim, water->hDxz);
 		float sum = 0.0;
 		for(int i = 0; i < dim2; i++) {
-			float h = water->dy[i].real;
+			float h = water->hDxz[i].real;
 			sum += h*h;
 		}
 		float rms = sqrtf(sum/(float)dim2);
@@ -338,22 +383,40 @@ void generateWaves(waves *water) {
 	int dim2 = dim*dim;
 
 	calcH0(water);
-	fft2d(dim, water->dy);
-	fft2d(dim, water->dx);
-	fft2d(dim, water->dz);
+	fft2d(dim, water->hDxz);
+	fft2d(dim, water->disp);
+	fft2d(dim, water->slope);
+	fft2d(dim, water->jacob);
 
+	// Heights and displacements share one scale (sphere radii). Derivatives
+	// are taken per patch length (x PATCH_SIZE); water.vert/.frag divide by
+	// the patch's world size, which depends on waveTiling and latitude.
 	float scale = water->heightScale;
-	for(int i = 0; i < dim2; i++) {
-		water->dxData[i] = water->dx[i].real*scale;
-		water->dyData[i] = water->dy[i].real*scale;
-		water->dzData[i] = water->dz[i].real*scale;
+	float dscale = scale*PATCH_SIZE;
+	int i;
+	#pragma omp parallel for schedule(static)
+	for(i = 0; i < dim2; i++) {
+		water->dyData[i] = water->hDxz[i].real*scale;
+		water->dispData[2*i]   = water->disp[i].real*scale;
+		water->dispData[2*i+1] = water->disp[i].im*scale;
+		water->slopeData[2*i]   = water->slope[i].real*dscale;
+		water->slopeData[2*i+1] = water->slope[i].im*dscale;
+		water->jacobData[3*i]   = water->jacob[i].real*dscale;
+		water->jacobData[3*i+1] = water->jacob[i].im*dscale;
+		water->jacobData[3*i+2] = water->hDxz[i].im*dscale;
 	}
 
-	glBindTexture(GL_TEXTURE_2D, water->dxTexture);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RED, GL_FLOAT, water->dxData);
 	glBindTexture(GL_TEXTURE_2D, water->dyTexture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RED, GL_FLOAT, water->dyData);
-	glBindTexture(GL_TEXTURE_2D, water->dzTexture);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RED, GL_FLOAT, water->dzData);
+	glBindTexture(GL_TEXTURE_2D, water->dispTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RG, GL_FLOAT, water->dispData);
+	/* The two maps water.frag samples are mipmapped (see initializeWaves);
+	   height/displacement are only read by water.vert at the base level. */
+	glBindTexture(GL_TEXTURE_2D, water->slopeTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RG, GL_FLOAT, water->slopeData);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, water->jacobTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dim, dim, GL_RGB, GL_FLOAT, water->jacobData);
+	glGenerateMipmap(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, 0);
 }

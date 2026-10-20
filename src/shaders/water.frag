@@ -2,16 +2,19 @@
 
 in vec3 fSurfDir;
 in vec3 fragPos;
-in mat3 fNormalMat;
 in float fWave;
 
 out vec4 FragColor;
 
+uniform mat4 model;
 uniform mat4 lightSpace;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
-uniform sampler2D waveDx;
-uniform sampler2D waveDz;
+// FFT ocean (Water.c): slopes and displacement derivatives per patch length.
+uniform sampler2D waveSlope;     // dh/dx, dh/dz
+uniform sampler2D waveJacobian;  // dDx/dx, dDz/dz, dDx/dz
+uniform float waveAmp;
+uniform float waveChoppy;
 uniform sampler2D detailNormal;
 uniform samplerCube skybox;
 uniform sampler2D depthMap;
@@ -112,18 +115,18 @@ vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 }
 
 float shadowCalculation(vec4 fLight) {
-	vec3 fragToLight = fragPos - lightPosition;
+	// 2x2 PCF at half-texel offsets (was 3x3): bilinear filtering of the
+	// depth map already blends neighbouring texels, so four taps keep the
+	// soft edge at under half the fetches.
+	float currentDepth = length(fragPos - lightPosition)/7000.0 - 0.02;
+	vec2 base = fLight.xy * 0.5 + 0.5;
+	vec2 h = 0.5 / vec2(textureSize(depthMap, 0));
 	float shadow = 0.0;
-	vec2 texelSize = 1.0 / textureSize(depthMap, 0);
-	for(int x = -1; x <= 1; ++x) {
-		for(int y = -1; y <= 1; ++y) {
-			float pcfDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5) + vec2(x, y) * texelSize).r;
-			float currentDepth = length(fragToLight)/7000.0;
-			shadow += currentDepth - 0.02 > pcfDepth ? 1.0 : 0.0;
-		}
-	}
-	shadow /= 9.0;
-	return shadow;
+	shadow += currentDepth > texture(depthMap, base + vec2(-h.x, -h.y)).r ? 1.0 : 0.0;
+	shadow += currentDepth > texture(depthMap, base + vec2( h.x, -h.y)).r ? 1.0 : 0.0;
+	shadow += currentDepth > texture(depthMap, base + vec2(-h.x,  h.y)).r ? 1.0 : 0.0;
+	shadow += currentDepth > texture(depthMap, base + vec2( h.x,  h.y)).r ? 1.0 : 0.0;
+	return shadow * 0.25;
 }
 
 // Seascape (Alexander Alekseev aka TDM) sea palette and lighting terms.
@@ -145,6 +148,10 @@ void main()
 	// (pure unit-sphere geometry), so the water shell discards where the
 	// planet shows land, letting continents stand through the ocean.
 	vec3 dObj = normalize(fSurfDir);
+	// Screen-space derivatives must be taken while the whole 2x2 quad is
+	// still alive, i.e. before the discards below.
+	vec3 dDirX = dFdx(dObj);
+	vec3 dDirY = dFdy(dObj);
 
 	// Cheap early-out: the shell is drawn double-sided (patch skirts need
 	// culling off), so its back-facing far-hemisphere fragments would run
@@ -173,20 +180,49 @@ void main()
 
 	vec2 duv = huv;
 	vec2 uv = duv * waveTiling;
-	float gx = texture(waveDx, uv).r;
-	float gz = texture(waveDz, uv).r;
+
+	// Long/lat UV gradients for the mipmapped wave/detail maps, chained
+	// analytically from the direction's derivatives (taken before any
+	// discard): no 1 -> 0 jump at the atan seam to pick the smallest mip.
+	float rxy2 = max(dObj.x*dObj.x + dObj.y*dObj.y, 1e-6);
+	vec2 dx = vec2((dObj.x*dDirX.y - dObj.y*dDirX.x) / (2.0*PI*rxy2),
+	               dDirX.z / (PI*sqrt(rxy2)));
+	vec2 dy = vec2((dObj.x*dDirY.y - dObj.y*dDirY.x) / (2.0*PI*rxy2),
+	               dDirY.z / (PI*sqrt(rxy2)));
+
+	// World size (unit-sphere radii) of one wave patch along east/north on
+	// the long/lat map; turns the per-patch derivatives into world slopes.
+	vec2 patchLen = vec2(2.0*PI*cosLat, PI) / waveTiling;
+	vec2 sl = textureGrad(waveSlope, uv, dx*waveTiling, dy*waveTiling).rg * waveAmp / patchLen;
+	vec3 jt = textureGrad(waveJacobian, uv, dx*waveTiling, dy*waveTiling).rgb * (waveAmp * waveChoppy);
+	float jxx = jt.r / patchLen.x;
+	float jzz = jt.g / patchLen.y;
+	float jxz = jt.b / patchLen.y;   // dDx/dz
+	float jzx = jt.b / patchLen.x;   // dDz/dx (same spectrum, east scale)
+	// Jacobian of the choppy displacement: < 1 where crests pinch, < 0 folds.
+	float J = (1.0 + jxx) * (1.0 + jzz) - jxz * jzx;
+
+	// Normal of the displaced surface = cross of its tangents
+	// (1+jxx, jzx, sl.x) x (jxz, 1+jzz, sl.y) in (east, north, up),
+	// rescaled to unit up so it reads as a slope.
+	vec2 fftSlope = -vec2(jzx*sl.y - sl.x*(1.0 + jzz),
+	                      sl.x*jxz - (1.0 + jxx)*sl.y) / max(J, 0.05);
 
 	// FFT swell slope + two scrolling tiled detail-normal layers for
 	// high-frequency sparkle (the two-scale method).
-	vec2 d1 = (texture(detailNormal, duv*(waveTiling*2.0) + vec2(0.30, 0.17)*time).rg - 0.5) * 2.0;
-	vec2 d2 = (texture(detailNormal, duv*(waveTiling*5.0) - vec2(0.19, 0.31)*time).rg - 0.5) * 2.0;
-	vec2 slope = waveNormalStrength * vec2(gx, gz) + d1 * 0.35 + d2 * 0.2;
+	vec2 d1 = (textureGrad(detailNormal, duv*(waveTiling*2.0) + vec2(0.30, 0.17)*time,
+	                       dx*(waveTiling*2.0), dy*(waveTiling*2.0)).rg - 0.5) * 2.0;
+	vec2 d2 = (textureGrad(detailNormal, duv*(waveTiling*5.0) - vec2(0.19, 0.31)*time,
+	                       dx*(waveTiling*5.0), dy*(waveTiling*5.0)).rg - 0.5) * 2.0;
+	vec2 slope = waveNormalStrength * fftSlope + d1 * 0.35 + d2 * 0.2;
 
 	// Tangent basis of the equirectangular (long/lat) wave map on the sphere.
 	vec3 T = normalize(vec3(-dObj.y, dObj.x, 1e-4));
 	vec3 B = normalize(cross(dObj, T));
 	vec3 Nobj = normalize(dObj - (slope.x * T + slope.y * B));
-	vec3 N = normalize(fNormalMat * Nobj);
+	// model is uniform scale * rotation, so inverse(mat3(model)) * n is
+	// n * mat3(model) up to a scale the normalize removes.
+	vec3 N = normalize(Nobj * mat3(model));
 
 	vec3 V = normalize(cameraPos - fragPos);
 	vec3 eye = -V;
@@ -237,11 +273,10 @@ void main()
 	// Sun glint (Seascape specular, softened with distance).
 	color += specular(N, L, eye, 6000.0 * inversesqrt(dot(dist, dist))) * sun;
 
-	// Foam: a thin shore band where water is shallow + whitecaps on the
-	// steepest wave faces.
+	// Foam: a thin shore band where water is shallow + whitecaps where the
+	// choppy displacement compresses the surface (low Jacobian).
 	float shore = 1.0 - smoothstep(0.0, 0.02, depth);
-	float steep = (abs(gx) + abs(gz)) * 60.0;
-	float whitecaps = smoothstep(1.2, 2.4, steep) * (0.25 + 0.75 * depthT);
+	float whitecaps = (1.0 - smoothstep(0.3, 0.8, J)) * (0.25 + 0.75 * depthT);
 	float foam = clamp(shore * 0.9 + whitecaps, 0.0, 1.0);
 	vec3 foamCol = vec3(0.82, 0.87, 0.90) * (0.30 + 0.85 * max(dot(N, L), 0.0)) * mix(0.25, 1.0, sun);
 	color = mix(color, foamCol, foam);

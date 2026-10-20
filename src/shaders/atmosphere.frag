@@ -103,15 +103,24 @@ vec3 inScatter(vec3 o, vec3 dir, vec2 e, vec3 l, float scaleH, float scaleL) {
 	vec3 p = o + dir * e.x;
 	vec3 v = p + dir * (len * 0.5);
 
+	// Camera-to-sample optical depth is accumulated along the view ray from
+	// the in-scatter samples themselves (midpoint rule: everything before
+	// this sample plus half its own step) instead of re-marching p -> v with
+	// numOutScatter sub-samples at every step. Only the sample-to-sun leg
+	// still needs its own march.
 	vec3 sum = vec3(0.0);
+	float viewOptic = 0.0;
+	float segL = len * scaleL;
 	for(int i = 0; i < numInScatter; i++) {
 		vec2 f = rayIntersection(v, l, fOuterRadius);
 		vec3 u = v + l * f.y;
-		float n = (optic(p, v, scaleH, scaleL) + optic(v, u, scaleH, scaleL))*(PI * 4.0);
-		sum += density(v, scaleH)* exp(-n * ( K_R * C_R + K_M ));
+		float dv = density(v, scaleH);
+		float n = (viewOptic + 0.5 * dv * segL + optic(v, u, scaleH, scaleL))*(PI * 4.0);
+		sum += dv * exp(-n * ( K_R * C_R + K_M ));
+		viewOptic += dv * segL;
 		v += step;
 	}
-	sum *= len * scaleL;
+	sum *= segL;
 	float c = dot(dir, -l);
 	float cc = c * c;
 	return sum * ( K_R * C_R * rayleighPhase( cc ) + K_M * miePhase( G_M, c, cc ) ) * E;
