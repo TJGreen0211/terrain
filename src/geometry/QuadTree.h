@@ -34,6 +34,11 @@ void QuadTree_InitGL(GLuint shader);
    detail. Back-to-back calls with identical inputs reuse the last walk. */
 void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj);
 
+/* Shadow-map caster pass for the same body: identical camera-centred LOD
+   (caster mesh == drawn mesh), culled against the light's projection * view
+   instead of the camera frustum and without the camera horizon cull. */
+void QuadTree_DrawShadowCasters(mat4 model, float radius, mat4 lightViewProj);
+
 void QuadTree_Shutdown(void);
 
 #endif

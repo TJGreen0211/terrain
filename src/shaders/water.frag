@@ -17,7 +17,8 @@ uniform float waveAmp;
 uniform float waveChoppy;
 uniform sampler2D detailNormal;
 uniform samplerCube skybox;
-uniform sampler2D depthMap;
+uniform sampler2DShadow depthMap;   // see quad.frag sunVisibility
+uniform float shadowTexel;
 uniform float waveNormalStrength;
 uniform float waveTiling;
 uniform float time;
@@ -123,19 +124,20 @@ vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 	return color * exp(-(K_R * C_R + K_M) * tau);
 }
 
-float shadowCalculation(vec4 fLight) {
-	// 2x2 PCF at half-texel offsets (was 3x3): bilinear filtering of the
-	// depth map already blends neighbouring texels, so four taps keep the
-	// soft edge at under half the fetches.
-	float currentDepth = length(fragPos - lightPosition)/7000.0 - 0.02;
-	vec2 base = fLight.xy * 0.5 + 0.5;
-	vec2 h = 0.5 / vec2(textureSize(depthMap, 0));
-	float shadow = 0.0;
-	shadow += currentDepth > texture(depthMap, base + vec2(-h.x, -h.y)).r ? 1.0 : 0.0;
-	shadow += currentDepth > texture(depthMap, base + vec2( h.x, -h.y)).r ? 1.0 : 0.0;
-	shadow += currentDepth > texture(depthMap, base + vec2(-h.x,  h.y)).r ? 1.0 : 0.0;
-	shadow += currentDepth > texture(depthMap, base + vec2( h.x,  h.y)).r ? 1.0 : 0.0;
-	return shadow * 0.25;
+// Sun visibility from the shadow map (same lookup as quad.frag): 1 = lit.
+float sunVisibility(vec3 p, vec3 n, vec3 l) {
+	float ndl = clamp(dot(n, l), 0.0, 1.0);
+	p += n * shadowTexel * (1.0 + 2.0 * (1.0 - ndl)) + l * shadowTexel;
+	vec4 c = vec4(p, 1.0) * lightSpace;
+	vec3 s = c.xyz / c.w * 0.5 + 0.5;
+	if (s.z >= 1.0)
+		return 1.0;
+	vec2 texel = 1.0 / vec2(textureSize(depthMap, 0));
+	float lit = 0.0;
+	for (int x = -1; x <= 1; ++x)
+		for (int y = -1; y <= 1; ++y)
+			lit += texture(depthMap, vec3(s.xy + vec2(x, y) * texel, s.z));
+	return lit / 9.0;
 }
 
 // Seascape (Alexander Alekseev aka TDM) sea palette and lighting terms.
@@ -243,8 +245,11 @@ void main()
 	vec3 L = normalize(lightPosition - fragPos);
 	vec3 dist = fragPos - cameraPos;
 
-	float shadow = shadowCalculation(vec4(fragPos, 1.0) * lightSpace);
-	float sun = 1.0 - shadow * 0.85;
+	// Cast shadows, faded out below the geometric terminator where the
+	// planet body self-occludes (matches quad.frag so the coast is seamless).
+	vec3 upGeo = normalize(localPos);
+	float shadowWeight = smoothstep(-0.06, 0.0, dot(upGeo, L));
+	float sun = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
 
 	// Fresnel sky reflection (Schlick, water F0 = 0.02). The reflectance is
 	// gated by sky visibility: where the reflection ray misses the sky, the

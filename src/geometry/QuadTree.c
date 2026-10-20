@@ -351,7 +351,7 @@ static int traverseFace(mat4 model, const int *order, float negate, const qtCull
 	return emitted;
 }
 
-static void buildCull(qtCull *c, mat4 model, mat4 viewProj, vec3 camPos)
+static void buildCull(qtCull *c, mat4 model, mat4 viewProj, vec3 camPos, int useHorizon)
 {
 	c->center.x = model.m[0][3]; c->center.y = model.m[1][3]; c->center.z = model.m[2][3];
 	/* Uniform scale: length of the model's first basis column. */
@@ -363,7 +363,7 @@ static void buildCull(qtCull *c, mat4 model, mat4 viewProj, vec3 camPos)
 	   by a further acos(1/(1 + relief)). Inside the sphere: no horizon. */
 	vec3 rel = { camPos.x - c->center.x, camPos.y - c->center.y, camPos.z - c->center.z };
 	float d = sqrtf(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
-	if(d > c->radius) {
+	if(useHorizon && d > c->radius) {
 		c->camDir.x = rel.x/d; c->camDir.y = rel.y/d; c->camDir.z = rel.z/d;
 		c->horizon = acosf(c->radius/d) + acosf(1.0f/(1.0f + QT_CULL_RELIEF));
 	}
@@ -387,42 +387,36 @@ static void buildCull(qtCull *c, mat4 model, mat4 viewProj, vec3 camPos)
 	}
 }
 
-void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj)
-{
-	/* Last walk's inputs: the planet and water passes draw the same body
-	   from the same camera back to back, so the second pass reuses the
-	   instance buffers the first one uploaded. The camera is always the
-	   origin, so a moved camera shows up as a changed (camera-relative)
-	   model matrix. */
-	static mat4 lastModel, lastViewProj;
-	static float lastRadius = -1.0f;
-	static int faceCount[6];
+/* Last walk's inputs: the planet and water passes draw the same body from
+   the same camera back to back, so the second pass reuses the instance
+   buffers the first one uploaded. The camera is always the origin, so a
+   moved camera shows up as a changed (camera-relative) model matrix. */
+static mat4 lastModel, lastViewProj;
+static float lastRadius = -1.0f;
+static int faceCount[6];
 
+static void walkFaces(mat4 model, float radius, mat4 viewProj, int useHorizon)
+{
 	/* Floating origin: the model matrices handed to this pass are already
 	   camera-relative, so the camera sits at the origin of the same space
 	   and the LOD walk compares node centres against (0,0,0). */
 	vec3 camPos = { 0.0f, 0.0f, 0.0f };
-
-	int cached = radius == lastRadius
-	          && memcmp(&model, &lastModel, sizeof(mat4)) == 0
-	          && memcmp(&viewProj, &lastViewProj, sizeof(mat4)) == 0;
-
-	if(!cached) {
-		qtCull cull;
-		buildCull(&cull, model, viewProj, camPos);
-		float level0 = radius * QT_LEVEL_PER_RADIUS;
-		for(int f = 0; f < 6; f++) {
-			faceCount[f] = traverseFace(model, faceOrder[f], faceNegate[f], &cull, level0, pos);
-			if(faceCount[f] > 0) {
-				/* Full re-specify orphans the old storage, so a draw still
-				   reading the previous body's instances never stalls us. */
-				glBindBuffer(GL_ARRAY_BUFFER, instanceVBO[f]);
-				glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*faceCount[f], pos, GL_STREAM_DRAW);
-			}
+	qtCull cull;
+	buildCull(&cull, model, viewProj, camPos, useHorizon);
+	float level0 = radius * QT_LEVEL_PER_RADIUS;
+	for(int f = 0; f < 6; f++) {
+		faceCount[f] = traverseFace(model, faceOrder[f], faceNegate[f], &cull, level0, pos);
+		if(faceCount[f] > 0) {
+			/* Full re-specify orphans the old storage, so a draw still
+			   reading the previous body's instances never stalls us. */
+			glBindBuffer(GL_ARRAY_BUFFER, instanceVBO[f]);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(mat4)*faceCount[f], pos, GL_STREAM_DRAW);
 		}
-		lastModel = model; lastViewProj = viewProj; lastRadius = radius;
 	}
+}
 
+static void drawFaces(void)
+{
 	/* Patch skirts must render double-sided, so culling is off entirely for
 	   this pass and the depth buffer resolves the near/far hemispheres (the
 	   planets pass is opaque). Wireframe therefore also shows the far
@@ -440,6 +434,32 @@ void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
+}
+
+void QuadTree_DrawShadowCasters(mat4 model, float radius, mat4 lightViewProj)
+{
+	/* Same camera-centred LOD as the main pass (so caster and receiver
+	   meshes match), culled against the light frustum, and without the
+	   camera horizon cull: terrain past the horizon can still shadow what
+	   the camera sees. It overwrites the instance buffers, so the next
+	   QuadTree_DrawSphere must walk again. */
+	walkFaces(model, radius, lightViewProj, 0);
+	lastRadius = -1.0f;
+	drawFaces();
+}
+
+void QuadTree_DrawSphere(mat4 model, float radius, mat4 viewProj)
+{
+	int cached = radius == lastRadius
+	          && memcmp(&model, &lastModel, sizeof(mat4)) == 0
+	          && memcmp(&viewProj, &lastViewProj, sizeof(mat4)) == 0;
+
+	if(!cached) {
+		walkFaces(model, radius, viewProj, 1);
+		lastModel = model; lastViewProj = viewProj; lastRadius = radius;
+	}
+
+	drawFaces();
 }
 
 void QuadTree_Shutdown(void)

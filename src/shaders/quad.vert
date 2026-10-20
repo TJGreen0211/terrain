@@ -24,7 +24,6 @@ uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 
-out vec4 fLightSpace;
 out vec3 fragPos;
 out vec3 fE;
 out vec3 fN;
@@ -94,9 +93,6 @@ void main()
 	fN = normalize(n*normalMatrix);
 	fL = -normalize(lightDir);
 
-	// fPosition already carries the instance transform, so applying
-	// vInstanceMatrix again would double-transform the shadow lookup.
-	fLightSpace = fPosition*model;
 	fragPos = vec3(fPosition*model).xyz;
 	fTexCoords = (fPosition.xy+1.0)/2.0;//vTexCoords*mat2(vInstanceMatrix);
 

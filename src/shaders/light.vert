@@ -8,7 +8,6 @@ layout (location = 4) in mat4 vInstanceMatrix;
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 lightSpace;
 uniform vec3 lightPosition;
 // 1 = body drawn as a quadtree LOD instance (moon): transform the flat
 // face-grid vertex by the instance matrix and project it onto the unit
@@ -17,7 +16,6 @@ uniform vec3 lightPosition;
 // moon.jpg frames the sphere identically. 0 = sun billboard / ship paths.
 uniform int instanced;
 
-out vec4 fLightSpace;
 out vec3 fragPos;
 out vec3 fE;
 out vec3 fN;
@@ -42,7 +40,6 @@ void main()
 	fN = (instanced == 1) ? normalize(p*normalMatrix) : normalize(vNormal*normalMatrix);
 	fL = -normalize(lightDir);
 
-	fLightSpace = world*lightSpace;
 	fragPos = world.xyz;
 	fTexCoords = (instanced == 1)
 		? vec2((atan(p.y, p.x)/3.1415926 + 1.0)*0.5,

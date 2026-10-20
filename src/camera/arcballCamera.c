@@ -1,66 +1,30 @@
 #include "arcballCamera.h"
 #include <math.h>
 
-const float toRadians = (float)(M_PI / 180.0f);
+static const float toRadians = (float)(M_PI / 180.0f);
 
-#define ARCBALL_RADIUS 1.0f
-
-/* Orbit radius: how far the camera sits from the pivot the scene rotates
-   around. Tuned for the terrain scene (planet r~300 at the origin, sun at
-   ~5657). Scroll dollies this between 0 (camera at the pivot) and the max. */
-float CameraDistance = 900.0f;
+/* Orbit radius: how far the camera sits behind the pivot it orbits. Spawns
+   at 0 (the camera sits on the pivot; dragging turns it in place) and scroll
+   dollies it out to the max, at which point dragging orbits the pivot. */
+float CameraDistance = 0.0f;
 const float CameraDistanceMax = 6000.0f;
 GLfloat MovementSpeed = 200.0f;
 GLfloat CameraScrollSpeed = 10.0f;   // fine: lets you dolly all the way through the atmosphere shell
 
-/* Quaternion per the arcball article: cosine is the cosine of half the
-   rotation angle, axis is the unit rotation axis scaled by the sine of half
-   the angle, so q = [cosine, axis] = cos(theta/2) + axis*sin(theta/2). */
-typedef struct Quaternion
-{
-    float cosine;
-    vec3 axis;
-} Quaternion;
-
-typedef struct Arcball
-{
-    vec3 startPos;
-    vec3 currentPos;
-    vec3 startPosUnitVector;
-    vec3 currentPosUnitVector;
-    Quaternion currentQuaternion;
-    Quaternion lastQuaternion;
-    float cosValue;
-    float cosValue_2;
-    float theta;
-    float angle;
-    vec3 rotationalAxis;
-    vec3 rotationalAxis_2;
-} Arcball;
-
-/* lastQuaternion starts at the identity quaternion; dragging composes onto it
-   relatively. (The article seeds it with [0,(1,0,0)], a 180 deg x-flip that
-   only made sense for that default scene orientation.) */
-static Arcball arcball = {
-    {0.0f, 0.0f, 0.0f},
-    {0.0f, 0.0f, 0.0f},
-    {0.0f, 0.0f, 0.0f},
-    {0.0f, 0.0f, 0.0f},
-    {0.0f, {1.0f, 0.0f, 0.0f}},
-    {1.0f, {0.0f, 0.0f, 0.0f}},
-    0.0f,
-    1.0f,
-    0.0f,
-    0.0f,
-    {1.0f, 0.0f, 0.0f},
-    {0.0f, 0.0f, 0.0f}
-};
-
-/* Point the camera orbits / looks at. Defaults to the planet at the origin.
-   An absolute world coordinate in double: WASD accumulation never quantizes
-   against the scene scale (camera-relative rendering, see getViewMatrix). */
-static dvec3 Pivot = { 0.0, 0.0, 0.0 };
+/* The whole orbit orientation is one unit quaternion: the world -> camera
+   rotation. A drag never accumulates per frame; it recomposes from the
+   orientation latched at the press, q = q_drag * q_start, so returning the
+   cursor to where the drag began returns the view to where it began. */
+static quaternion orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+static quaternion dragStartOrientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+static vec3 dragStartPos = { 0.0f, 0.0f, 1.0f };
 static int dragging = 0;
+
+/* Point the camera orbits / looks at: an absolute world coordinate in
+   double, so WASD accumulation never quantizes against the scene scale
+   (camera-relative rendering, see getViewMatrix). Starts where the camera
+   used to spawn (900 in front of the planet) since the distance starts at 0. */
+static dvec3 Pivot = { 0.0, 0.0, 900.0 };
 
 /* Sub-solar surface preset. When active the camera stands just above the
    planet surface (radius 300) at the sub-solar point — the spot where the fixed
@@ -73,105 +37,86 @@ static int surfaceView = 0;
 #define SURFACE_TILT 24.0f
 static float surfAlt = SURFACE_RAD;
 
-vec3 Front = {0.0f, 0.0f, -1.0f};
-vec3 Up = {0.0f, 1.0f, 0.0f};
-vec3 Right = {1.0f, 0.0f, 0.0f};
+static vec3 Front = {0.0f, 0.0f, -1.0f};
+static vec3 Up = {0.0f, 1.0f, 0.0f};
+static vec3 Right = {1.0f, 0.0f, 0.0f};
 
 void setCameraPivot(dvec3 pivot)
 {
     Pivot = pivot;
 }
 
-static float zAxis(float x, float y)
+static quaternion normalizeOrIdentity(quaternion q)
 {
-    float length = sqrtf(x * x + y * y);
-    if (length <= ARCBALL_RADIUS)
-        return (float)sqrtf(ARCBALL_RADIUS * ARCBALL_RADIUS - x * x - y * y);
-    return 0.0f;
+    float len = quatLength(q);
+    if (len < 1e-6f)
+    {
+        quaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
+        return identity;
+    }
+    return quatNormalize(q);
 }
 
-static void projectCursorToSphere(double xPos, double yPos, vec3 *out)
+/* Shoemake arcball: the cursor maps onto a unit sphere filling the smaller
+   window dimension (so the ball stays round on a wide window). Points off the
+   ball snap to its rim, so dragging around the outside rolls about the view
+   axis. Width/height are the window's current size in cursor coordinates. */
+static vec3 projectCursorToSphere(double xPos, double yPos, int width, int height)
 {
-    float windowWidth = getWindowWidth();
-    float windowHeight = getWindowHeight();
-    out->x = (((float)xPos - (windowWidth / 2.0f)) / (windowWidth / 2.0f)) * ARCBALL_RADIUS;
-    out->y = (((windowHeight / 2.0f) - (float)yPos) / (windowHeight / 2.0f)) * ARCBALL_RADIUS;
-    out->z = zAxis(out->x, out->y);
-}
+    float halfW = (float)width * 0.5f;
+    float halfH = (float)height * 0.5f;
+    float radius = (halfW < halfH ? halfW : halfH);
+    if (radius < 1.0f)
+        radius = 1.0f;
 
-static void arcballRotation(void)
-{
-    arcball.startPosUnitVector = normalizevec3(arcball.startPos);
-    arcball.currentPosUnitVector = normalizevec3(arcball.currentPos);
-    arcball.currentQuaternion.axis = crossvec3(arcball.startPos, arcball.currentPos);
-    arcball.currentQuaternion.axis = normalizevec3(arcball.currentQuaternion.axis);
-
-    arcball.cosValue = dotvec3(arcball.startPosUnitVector, arcball.currentPosUnitVector);
-    if (arcball.cosValue > 1.0f)
-        arcball.cosValue = 1.0f;
-    if (arcball.cosValue < -1.0f)
-        arcball.cosValue = -1.0f;
-    arcball.theta = acosf(arcball.cosValue) * (180.0f / (float)M_PI);
-
-    float halfAngle = (arcball.theta / 2.0f) * toRadians;
-    arcball.currentQuaternion.cosine = cosf(halfAngle);
-    arcball.currentQuaternion.axis = scalarMultvec3(arcball.currentQuaternion.axis, sinf(halfAngle));
-
-    /* q' = q_current * q_last */
-    arcball.cosValue_2 = (arcball.currentQuaternion.cosine * arcball.lastQuaternion.cosine)
-        - dotvec3(arcball.currentQuaternion.axis, arcball.lastQuaternion.axis);
-    if (arcball.cosValue_2 > 1.0f)
-        arcball.cosValue_2 = 1.0f;
-    if (arcball.cosValue_2 < -1.0f)
-        arcball.cosValue_2 = -1.0f;
-
-    vec3 temporaryVector;
-    temporaryVector = crossvec3(arcball.currentQuaternion.axis, arcball.lastQuaternion.axis);
-
-    arcball.rotationalAxis_2.x = (arcball.currentQuaternion.cosine * arcball.lastQuaternion.axis.x)
-        + (arcball.lastQuaternion.cosine * arcball.currentQuaternion.axis.x) + temporaryVector.x;
-    arcball.rotationalAxis_2.y = (arcball.currentQuaternion.cosine * arcball.lastQuaternion.axis.y)
-        + (arcball.lastQuaternion.cosine * arcball.currentQuaternion.axis.y) + temporaryVector.y;
-    arcball.rotationalAxis_2.z = (arcball.currentQuaternion.cosine * arcball.lastQuaternion.axis.z)
-        + (arcball.lastQuaternion.cosine * arcball.currentQuaternion.axis.z) + temporaryVector.z;
-
-    arcball.angle = (acosf(arcball.cosValue_2) * (180.0f / (float)M_PI)) * 2.0f;
-
-    float halfScale = sinf((arcball.angle / 2.0f) * toRadians);
-    if (fabsf(halfScale) > 0.000001f)
-        arcball.rotationalAxis = dividevec3(arcball.rotationalAxis_2, halfScale);
+    vec3 p;
+    p.x = ((float)xPos - halfW) / radius;
+    p.y = (halfH - (float)yPos) / radius;
+    float d2 = p.x * p.x + p.y * p.y;
+    if (d2 <= 1.0f)
+    {
+        p.z = sqrtf(1.0f - d2);
+    }
     else
     {
-        arcball.rotationalAxis.x = 1.0f;
-        arcball.rotationalAxis.y = 0.0f;
-        arcball.rotationalAxis.z = 0.0f;
+        float inv = 1.0f / sqrtf(d2);
+        p.x *= inv;
+        p.y *= inv;
+        p.z = 0.0f;
     }
+    return p;
+}
+
+/* The shortest rotation taking unit vector a onto unit vector b, built
+   straight from the half-angle identity (no acos/sin round trip):
+   q = normalize(1 + a.b, a x b). */
+static quaternion rotationBetween(vec3 a, vec3 b)
+{
+    vec3 axis = crossvec3(a, b);
+    quaternion q = { 1.0f + dotvec3(a, b), axis.x, axis.y, axis.z };
+    return normalizeOrIdentity(q);
 }
 
 static int  surfaceViewActive(void);
 static dvec3 surfaceEye(void);
 static mat4 surfaceViewRotation(void);
 
+/* Rotation matrix of the unit orientation quaternion, in the same row layout
+   as rotateX/rotateY (m[row][col], applied to column vectors). */
 mat4 getViewRotation()
 {
     if (surfaceViewActive()) return surfaceViewRotation();
+    quaternion q = orientation;
     mat4 r = identityMatrix();
-    float angle = arcball.angle * toRadians;
-    float c = cosf(angle);
-    float s = sinf(angle);
-    float t = 1.0f - c;
-    vec3 axis = normalizevec3(arcball.rotationalAxis);
-
-    /* Rodrigues rotation matrix, same layout as rotateX/rotateY. */
-    r.m[0][0] = c + t * axis.x * axis.x;
-    r.m[0][1] = t * axis.x * axis.y - s * axis.z;
-    r.m[0][2] = t * axis.x * axis.z + s * axis.y;
-    r.m[1][0] = t * axis.x * axis.y + s * axis.z;
-    r.m[1][1] = c + t * axis.y * axis.y;
-    r.m[1][2] = t * axis.y * axis.z - s * axis.x;
-    r.m[2][0] = t * axis.x * axis.z - s * axis.y;
-    r.m[2][1] = t * axis.y * axis.z + s * axis.x;
-    r.m[2][2] = c + t * axis.z * axis.z;
+    r.m[0][0] = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+    r.m[0][1] = 2.0f * (q.x * q.y - q.w * q.z);
+    r.m[0][2] = 2.0f * (q.x * q.z + q.w * q.y);
+    r.m[1][0] = 2.0f * (q.x * q.y + q.w * q.z);
+    r.m[1][1] = 1.0f - 2.0f * (q.x * q.x + q.z * q.z);
+    r.m[1][2] = 2.0f * (q.y * q.z - q.w * q.x);
+    r.m[2][0] = 2.0f * (q.x * q.z - q.w * q.y);
+    r.m[2][1] = 2.0f * (q.y * q.z + q.w * q.x);
+    r.m[2][2] = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
     return r;
 }
 
@@ -254,6 +199,9 @@ static mat4 surfaceViewRotation(void)
 void toggleSurfaceCamera(void)
 {
     surfaceView = !surfaceView;
+    /* The surface pose ignores the arcball, so a drag in flight would resume
+       against a stale start point when toggling back. */
+    dragging = 0;
     if (surfaceView && surfAlt < SURFACE_RAD) surfAlt = SURFACE_RAD;
 }
 
@@ -301,66 +249,70 @@ void updateCameraVectors()
     Up = up;
 }
 
-void processKeyboard(enum Camera_Movement direction, GLfloat deltaTime, GLfloat deltaSpeed)
+/* Pans the pivot (and the camera with it) along the view: forward/right are
+   the summed key axes in [-1, 1]. The combined direction is normalized so a
+   diagonal (W+D) is no faster than a single key. */
+void processKeyboard(float forward, float right, GLfloat deltaTime)
 {
     if (surfaceViewActive()) return;   // WASD is orbit-pan; ignore in surface mode
-    GLfloat velocity = MovementSpeed * deltaTime + deltaSpeed;
+    if (forward == 0.0f && right == 0.0f) return;
     updateCameraVectors();
 
-    if (direction == FORWARD)
-        Pivot = daddvec3(Pivot, (dvec3){Front.x * velocity, Front.y * velocity, Front.z * velocity});
-    if (direction == BACKWARD)
-        Pivot = dsubvec3(Pivot, (dvec3){Front.x * velocity, Front.y * velocity, Front.z * velocity});
-    if (direction == LEFT)
-        Pivot = dsubvec3(Pivot, (dvec3){Right.x * velocity, Right.y * velocity, Right.z * velocity});
-    if (direction == RIGHT)
-        Pivot = daddvec3(Pivot, (dvec3){Right.x * velocity, Right.y * velocity, Right.z * velocity});
+    vec3 dir;
+    dir.x = Front.x * forward + Right.x * right;
+    dir.y = Front.y * forward + Right.y * right;
+    dir.z = Front.z * forward + Right.z * right;
+    dir = normalizevec3(dir);
+
+    double velocity = (double)MovementSpeed * deltaTime;
+    Pivot = daddvec3(Pivot, (dvec3){dir.x * velocity, dir.y * velocity, dir.z * velocity});
 }
 
-/* terrain's mouse_callback has no discrete press/release event; it reports the
-   button state as resetFlag (0 while the button is down, 1 after release).
-   Map that onto the arcball's press / move / release by tracking `dragging`. */
-void processMouseMovement(float xpos, float ypos, int resetFlag)
+/* Press: latch the cursor's point on the ball and the orientation it grabs. */
+void arcballBegin(double xpos, double ypos, int width, int height)
 {
-    projectCursorToSphere(xpos, ypos, &arcball.currentPos);
+    if (surfaceViewActive()) return;
+    dragStartPos = projectCursorToSphere(xpos, ypos, width, height);
+    dragStartOrientation = orientation;
+    dragging = 1;
+}
 
-    if (resetFlag == 0)
-    {
-        if (!dragging)
-        {
-            arcball.startPos = arcball.currentPos;
-            dragging = 1;
-            return;
-        }
-        arcballRotation();
-    }
-    else
-    {
-        if (dragging)
-        {
-            arcball.lastQuaternion.cosine = arcball.cosValue_2;
-            arcball.lastQuaternion.axis = arcball.rotationalAxis_2;
-            dragging = 0;
-        }
-    }
+/* Move: rotate the scene so the grabbed point follows the cursor across the
+   ball, always relative to the press, never to the previous frame. */
+void arcballDrag(double xpos, double ypos, int width, int height)
+{
+    if (!dragging || surfaceViewActive()) return;
+    vec3 current = projectCursorToSphere(xpos, ypos, width, height);
+    quaternion drag = rotationBetween(dragStartPos, current);
+    orientation = normalizeOrIdentity(quatMultiply(drag, dragStartOrientation));
+}
+
+/* Release: the orientation already holds the final drag, nothing to commit. */
+void arcballEnd(void)
+{
+    dragging = 0;
+}
+
+int arcballDragging(void)
+{
+    return dragging;
 }
 
 /* Scroll in (yoffset < 0) shrinks the orbit radius to 0, out grows it to max.
    In surface mode the same scroll dollies the camera altitude through the
    atmosphere shell (300 -> 445) instead of the orbit radius. */
-float processMouseScroll(float yoffset)
+void processMouseScroll(float yoffset)
 {
     if (surfaceViewActive())
     {
         surfAlt += yoffset * CameraScrollSpeed;
         if (surfAlt < SURFACE_RAD) surfAlt = SURFACE_RAD;
         if (surfAlt > 445.0f) surfAlt = 445.0f;
-        return 1.0f;
+        return;
     }
     CameraDistance += yoffset * CameraScrollSpeed;
     if (CameraDistance < 0.0f)
         CameraDistance = 0.0f;
     if (CameraDistance > CameraDistanceMax)
         CameraDistance = CameraDistanceMax;
-    return 1.0f;
 }

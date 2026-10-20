@@ -15,9 +15,22 @@
 
 float zNear = 0.5, zFar = 100000.0;
 GLuint depthMap;
+/* Sun shadow map: a square depth texture rendered from the sun's position
+   (it is a point light, so the light projection is a perspective frustum
+   from the sun just wide enough to enclose the planet). Its resolution is
+   independent of the window. */
+#define SHADOW_MAP_SIZE 4096
+/* Shadow-casting moon (moonWorldPosition / drawOrbit): orbit radius and
+   body radius in world units. The light frustum's depth range must reach
+   the moon on both sides of the planet. */
+#define MOON_ORBIT  2000.0
+#define MOON_RADIUS 100.0
 /* Per-frame extras for the quadtree body passes (set once per frame, read by
-   setBodyUniforms). */
+   setBodyUniforms / bindShadowMap). lightSpace maps CAMERA-RELATIVE
+   positions to the shadow map's clip space; shadowTexel is the world size of
+   one shadow texel at the planet (scales the receiver bias). */
 mat4 g_lightSpaceMatrix;
+float g_shadowTexel = 1.0f;
 float g_waveParams[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, normalStrength, tiling, choppiness
 /* Baked planet height map (2048x1024 R16F + mips), sampled by quad.frag/
    water.frag instead of evaluating simplex noise per pixel.
@@ -198,7 +211,21 @@ GLuint initDepthbuffer() {
 	GLuint fbo;
 	glGenFramebuffers(1, &fbo);
 	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	depthMap = generateTextureAttachment(1, 0, getWindowWidth(), getWindowHeight());
+	/* 32-bit float depth, sampled through sampler2DShadow: LINEAR filtering
+	   with a compare mode makes every texture() a bilinear 2x2 PCF. Outside
+	   the map the border depth is the far plane, i.e. lit. */
+	glGenTextures(1, &depthMap);
+	glBindTexture(GL_TEXTURE_2D, depthMap);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	float border[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	glBindTexture(GL_TEXTURE_2D, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
 	GLuint status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	  if(status != GL_FRAMEBUFFER_COMPLETE)
@@ -277,25 +304,45 @@ vec4 getPositionModelspace(mat4 position, mat4 model) {
 	return positionModelspace;
 }
 
-mat4 getLookAtMatrix(vec4 lightPosition, vec3 lookAt) {
-	mat4 rxry;
-	vec3 d = {lightPosition.x - lookAt.x, lightPosition.y - lookAt.y, lightPosition.z - lookAt.z};
-	d = normalizevec3(d);
-	float rad = 180.0 / M_PI;
-	float lightYaw = asin(-d.y) * rad;
-	float lightPitch = atan2(d.x, -d.z) * rad;
-	//printf("Yaw: %f, Pitch: %f\n", lightYaw, lightPitch);
-	/*if(lookAt.x == 1.0 || lookAt.z == -1.0) {
-		//printf("%f, %f, %f\n", lookAt.x, lookAt.y, lookAt.z);
-		//rxry = multiplymat4(rotateZ(180.0), multiplymat4(rotateX(lightYaw), rotateY(lightPitch)));
-		rxry = multiplymat4(rotateY(lightPitch), multiplymat4(rotateZ(180.0), rotateX(lightYaw)));
+/* Light view for the shadow map, built for CAMERA-RELATIVE positions:
+   a right-handed look-at from the sun toward the planet centre. The basis
+   comes from the world-space direction (camera independent) and the
+   translation is dotted against the camera-relative eye in double, so the
+   matrix stays exact however far the camera is from the world origin. */
+static mat4 getLightViewMatrix(dvec3 lightWorld, dvec3 targetWorld) {
+	double f[3] = { targetWorld.x - lightWorld.x, targetWorld.y - lightWorld.y, targetWorld.z - lightWorld.z };
+	double fl = sqrt(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]);
+	f[0] /= fl; f[1] /= fl; f[2] /= fl;
+	/* Any up vector not parallel to the light direction works. */
+	double up[3] = { 0.0, 1.0, 0.0 };
+	if (fabs(f[1]) > 0.99) { up[0] = 1.0; up[1] = 0.0; }
+	double r[3] = { f[1]*up[2] - f[2]*up[1], f[2]*up[0] - f[0]*up[2], f[0]*up[1] - f[1]*up[0] };
+	double rl = sqrt(r[0]*r[0] + r[1]*r[1] + r[2]*r[2]);
+	r[0] /= rl; r[1] /= rl; r[2] /= rl;
+	double u[3] = { r[1]*f[2] - r[2]*f[1], r[2]*f[0] - r[0]*f[2], r[0]*f[1] - r[1]*f[0] };
+	dvec3 e = dsubvec3(lightWorld, g_cam);
+
+	mat4 v = scale(1.0);   /* identity */
+	for (int k = 0; k < 3; k++) {
+		v.m[0][k] = (float)r[k];
+		v.m[1][k] = (float)u[k];
+		v.m[2][k] = (float)-f[k];
 	}
-	else {
-	vec3 s = {-1.0, 1.0, 1.0};
-		rxry = multiplymat4( scalevec3(s), multiplymat4(rotateX(lightYaw), rotateY(lightPitch)));
-	}*/
-	rxry = multiplymat4(rotateX(lightYaw), rotateY(lightPitch));
-	return multiplymat4(rxry, translatevec4(lightPosition));
+	v.m[0][3] = (float)-(r[0]*e.x + r[1]*e.y + r[2]*e.z);
+	v.m[1][3] = (float)-(u[0]*e.x + u[1]*e.y + u[2]*e.z);
+	v.m[2][3] = (float)(f[0]*e.x + f[1]*e.y + f[2]*e.z);
+	return v;
+}
+
+/* Shadow map binding shared by every receiver program (planet, water, moon,
+   ship): sampler unit, light-space matrix and texel size. */
+static void bindShadowMap(GLuint shader, int unit) {
+	glActiveTexture(GL_TEXTURE0 + unit);
+	glBindTexture(GL_TEXTURE_2D, depthMap);
+	glUniform1i(glGetUniformLocation(shader, "depthMap"), unit);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
+	glUniform1f(glGetUniformLocation(shader, "shadowTexel"), g_shadowTexel);
+	glActiveTexture(GL_TEXTURE0);
 }
 
 /* Main camera projection * view, matching initMVP/setBodyUniforms; the
@@ -332,7 +379,6 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glUniform3f(glGetUniformLocation(shader, "cameraPos"), 0.0f, 0.0f, 0.0f);
 	glUniform3f(glGetUniformLocation(shader, "bodyCenter"), m.m[0][3], m.m[1][3], m.m[2][3]);
 	glUniform3f(glGetUniformLocation(shader, "lightPosition"), lightPosition.x, lightPosition.y, lightPosition.z);
-	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
 	glUniform1f(glGetUniformLocation(shader, "oceanOffset"), g_waveParams[0]);
 	glUniform1f(glGetUniformLocation(shader, "waveAmp"), g_waveParams[1]);
 	glUniform1f(glGetUniformLocation(shader, "waveNormalStrength"), g_waveParams[2]);
@@ -343,9 +389,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glBindTexture(GL_TEXTURE_2D, tex0);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
 	glUniform1i(glGetUniformLocation(shader, "waveHeight"), 0);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, depthMap);
-	glUniform1i(glGetUniformLocation(shader, "depthMap"), 1);
+	bindShadowMap(shader, 1);
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, tex2);
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
@@ -489,14 +533,12 @@ void draw(GLuint vao, GLuint shader, int vertices, GLuint texture, GLuint normal
 	// is exactly the origin.
 	glUniform3f(glGetUniformLocation(shader, "cameraPos"), 0.0f, 0.0f, 0.0f);
 	glUniform3f(glGetUniformLocation(shader, "lightPosition"), lightPosition.x, lightPosition.y, lightPosition.z);
-	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &lightSpaceMatrix.m[0][0]);
 	glUniform1f(glGetUniformLocation(shader, "time"), glfwGetTime()/100.0);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, depthMap);
-	glUniform1i(glGetUniformLocation(shader, "depthMap"), 1);
+	(void)lightSpaceMatrix;   /* g_lightSpaceMatrix, via bindShadowMap */
+	bindShadowMap(shader, 1);
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, normal);
 	glUniform1i(glGetUniformLocation(shader, "noiseTexture"), 2);
@@ -581,8 +623,10 @@ dvec3 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
+	/* light.frag always samples the shadow map; the marker sits in front of
+	   the light frustum's near plane, so it always reads as lit. */
+	bindShadowMap(shader, 1);
 	glDrawArrays(GL_TRIANGLES, 0, vertices);
-	glBindVertexArray(0);
 	glBindVertexArray(0);
 
 	return world;
@@ -597,9 +641,9 @@ dvec3 rotateLight(GLuint vao, GLuint shader, int vertices, GLuint texture, float
 static dvec3 moonWorldPosition(float theta, dvec3 position)
 {
 	dvec3 translation;
-	translation.x = (2000.0) * cos(theta/100.0);
+	translation.x = MOON_ORBIT * cos(theta/100.0);
 	translation.y = 0.0;
-	translation.z = (2000.0) * sin(theta/100.0);
+	translation.z = MOON_ORBIT * sin(theta/100.0);
 	return daddvec3(position, translation);
 }
 
@@ -607,7 +651,7 @@ void drawOrbit(GLuint shader, GLuint texture, float theta, dvec3 position, vec4 
 {
 	glUseProgram(shader);
 
-	mat4 model = multiplymat4(multiplymat4(camRelTranslate(moonWorldPosition(theta, position)), scale(100.0)),rotateX(90.0));
+	mat4 model = multiplymat4(multiplymat4(camRelTranslate(moonWorldPosition(theta, position)), scale(MOON_RADIUS)),rotateX(90.0));
 	initMVP(shader, model, getViewMatrix());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 
@@ -617,32 +661,48 @@ void drawOrbit(GLuint shader, GLuint texture, float theta, dvec3 position, vec4 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
-	QuadTree_DrawSphere(model, 100.0f, getViewProjection());
+	/* Receives the planet's shadow when it passes behind it. */
+	bindShadowMap(shader, 1);
+	QuadTree_DrawSphere(model, (float)MOON_RADIUS, getViewProjection());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
-/* Shadow casters. displace=1 only for the planet grid: the same baked height
-   field displaces its shadow silhouette (quad.vert applies the identical
-   relief); moon/ring geometry must stay undisplaced. */
-void drawDepth(GLuint vao, GLuint shader, int vertices, vec4 lightPosition, mat4 m, mat4 l, int displace) {
+/* Shadow casters, rendered into the bound shadow FBO with g_lightSpaceMatrix.
+   drawDepth: a plain (undisplaced) mesh, e.g. the moon sphere.
+   drawPlanetDepth: the planet through the same quadtree LOD walk, height
+   displacement and skirts as the quad.vert main pass, so the terrain casts
+   from exactly the surface that receives (no mismatch acne). */
+void drawDepth(GLuint vao, GLuint shader, int vertices, mat4 m) {
 	glUseProgram(shader);
-	glUniform1f(glGetUniformLocation(shader, "displace"), displace ? 1.0f : 0.0f);
-	if (displace) {
-		glActiveTexture(GL_TEXTURE7);
-		glBindTexture(GL_TEXTURE_2D, planetHeightTex);
-		glUniform1i(glGetUniformLocation(shader, "heightMap"), 7);
-		glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
-		glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
-		glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
-		glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
-		glActiveTexture(GL_TEXTURE0);
-	}
+	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
+	glUniform1f(glGetUniformLocation(shader, "displace"), 0.0f);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
 	glBindVertexArray(vao);
-	initMVP(shader, m, l);
-	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &l.m[0][0]);
-	glUniform3f(glGetUniformLocation(shader, "lightPosition"), lightPosition.x, lightPosition.y, lightPosition.z);
 	glDrawArrays(GL_TRIANGLES, 0, vertices);
 	glBindVertexArray(0);
+}
+
+void drawPlanetDepth(GLuint shader, mat4 m, float lodRadius) {
+	glUseProgram(shader);
+	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
+	glUniform1f(glGetUniformLocation(shader, "displace"), 1.0f);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
+	glActiveTexture(GL_TEXTURE6);
+	glBindTexture(GL_TEXTURE_2D, planetHeightTex);
+	glUniform1i(glGetUniformLocation(shader, "heightMap"), 6);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
+	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
+	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
+	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
+	/* Same vertex lod inputs as setBodyUniforms, so the displaced caster
+	   matches the drawn surface vertex for vertex. */
+	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
+	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
+	QuadTree_DrawShadowCasters(m, lodRadius, g_lightSpaceMatrix);
+	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
 float getDeltaTime(float lastFrame) {
@@ -729,7 +789,6 @@ int checkShaderChange(GLuint shader, char *vert, char *frag, time_t vertTime, ti
 int main(int argc, char *argv[])
 {
 	struct obj object, ship;
-	mat4 lightView;
 	float theta = 0.0;
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	{
@@ -861,13 +920,11 @@ int main(int argc, char *argv[])
 	float lastFrame = 0.0;
 	/* World position of the planet centre (the scene origin). */
 	dvec3 translation = {0.0, 0.0, 0.0};
-	mat4 lightProjection = ortho(-4000.0, 4000.0, -4000.0, 4000.0, zNear, zFar);
 	g_waveParams[0] = 1.0f;   // shell radius = sea level (planet coast is at 1.0)
 	g_waveParams[1] = 0.25f;  // ~0.0006 rms: well under the land relief
 	g_waveParams[2] = 1.0f;
 	g_waveParams[3] = 8.0f;
 	g_waveParams[4] = 1.0f;
-	//mat4 lightProjection = perspective(90.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
 
 	/*char *vertCheck = "shaders/water.vert";
 	char *fragCheck = "shaders/water.frag";
@@ -943,33 +1000,49 @@ int main(int argc, char *argv[])
 
 		//Light calculations per frame
 		dvec3 lightWorld = rotateLight(quadCubeVAO, ringShader, qc.vertexNumber, sunNoiseTexture, theta, translation);
-		/* Shading uses the camera-relative light; the shadow light view is
-		   built from the world values exactly as before. */
+		/* Shading and shadows both use the camera-relative light. */
 		vec3 lightPositionXYZ = toCamRel(lightWorld);
 		vec4 lightPosition = {lightPositionXYZ.x, lightPositionXYZ.y, lightPositionXYZ.z, 1.0};
-		vec4 lightWorld4 = {(float)lightWorld.x, (float)lightWorld.y, (float)lightWorld.z, 1.0};
-		lightView = getLookAtMatrix(lightWorld4, dvec3tovec3(translation));
-		/* The light-space matrix maps camera-relative positions: the world
-		   transform composed with translate(+cam) in double, so
-		   lightSpace * (world - cam) lands where lightSpace_world * world
-		   did, for both the depth pass and the scene lookups. */
-		mat4 lightSpaceWorld = multiplymat4(lightProjection, lightView);
-		mat4 lightSpaceMatrix = dmat4tomat4(dmultiplymat4(dmat4frommat4(lightSpaceWorld), dtranslatevec3(g_cam)));
-		g_lightSpaceMatrix = lightSpaceMatrix;
 
+		/* Planet orientation, shared by the shadow casters and the main pass. */
+		mat4 matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
+		mat4 planetModel = multiplymat4(camRelTranslate(translation), multiplymat4(scale(fScale), matR));
+
+		/* Shadow frustum: a perspective from the sun (a point light, matching
+		   the per-pixel light direction the shaders use) whose cone is tangent
+		   to the planet's bounding sphere (land relief + margin), so all
+		   SHADOW_MAP_SIZE^2 texels land on the planet. Depth spans the moon's
+		   orbit on either side so it can both eclipse the planet and be
+		   eclipsed by it. */
+		{
+			double sunDist = dlengthvec3(dsubvec3(lightWorld, translation));
+			double boundR = fScale * (1.0 + LAND_RELIEF) * 1.02;
+			double halfAngle = asin(fmin(boundR / sunDist, 0.99));
+			double reach = MOON_ORBIT + MOON_RADIUS * 1.5;
+			float nearP = (float)fmax(sunDist - reach, 1.0);
+			float farP = (float)(sunDist + reach);
+			mat4 lightProjection = perspective((float)(2.0 * halfAngle * 180.0 / M_PI), 1.0f, nearP, farP);
+			mat4 lightView = getLightViewMatrix(lightWorld, translation);
+			g_lightSpaceMatrix = multiplymat4(lightProjection, lightView);
+			g_shadowTexel = (float)(2.0 * sunDist * tan(halfAngle) / SHADOW_MAP_SIZE);
+		}
+		mat4 lightSpaceMatrix = g_lightSpaceMatrix;
+
+		/* Shadow pass. The ring is not a caster: it is not drawn in the main
+		   pass either, and the invisible ring was shadowing the planet. A
+		   slope-scaled polygon offset handles the remaining grazing acne
+		   together with the receiver offsets in sunVisibility. */
 		glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
+			glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 			glClear(GL_DEPTH_BUFFER_BIT);
-			model = multiplymat4(multiplymat4(camRelTranslate(moonWorldPosition(theta, translation)), scale(100.0)),rotateX(90.0));
-			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix, 0);
-			model = multiplymat4(multiplymat4(camRelTranslate(translation), rotateX(80.0)), scale(fScale*1.5));
-			glDisable(GL_CULL_FACE);
-			drawDepth(ringVAO, depthShader, planetRing.vertexNumber, lightPosition, model, lightSpaceMatrix, 0);
-			glEnable(GL_CULL_FACE);
-			model = multiplymat4(camRelTranslate(translation), scale(fScale));
-			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, lightPosition, model, lightSpaceMatrix, 1);
-			//model = multiplymat4(translate(25.0, 0.0, -90.0), scale(10.0));
-			//drawDepth(quadVAO, depthShader, 6, lightPosition, model, lightSpaceMatrix);
+			glEnable(GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset(1.5f, 2.0f);
+			model = multiplymat4(multiplymat4(camRelTranslate(moonWorldPosition(theta, translation)), scale(MOON_RADIUS)),rotateX(90.0));
+			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model);
+			drawPlanetDepth(depthShader, planetModel, fScale);
+			glDisable(GL_POLYGON_OFFSET_FILL);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
 		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 		glClearColor(0.1, 0.0, 0.2, 1.0);
@@ -985,7 +1058,6 @@ int main(int argc, char *argv[])
 		model = multiplymat4(multiplymat4(camRelTranslate(translation), rotateX(80.0)), scale(fScale*1.5));
 		//draw(ringVAO, ringShader, planetRing.vertexNumber, ringTex, planetNorm, model, translation, lightPosition, lightSpaceMatrix);
 		//Planet
-		mat4 matR = multiplymat4(rotateY(theta/5.0), rotateX(45.0));
 		model = multiplymat4(camRelTranslate(translation), scale(fScale));
 		mat4 m = multiplymat4(model,matR);
 		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, dxWaveTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
@@ -1007,7 +1079,7 @@ int main(int argc, char *argv[])
 		//Quadtree planet: LOD sphere built from six instanced face grids,
 		//centred camera-relative (the walk runs with the camera at the origin).
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
-		model = multiplymat4(camRelTranslate(translation), multiplymat4(scale(fScale), matR));
+		model = planetModel;
 		mat4 viewProj = getViewProjection();
 
 		//Planet (land + seafloor): drawn first so the translucent water can

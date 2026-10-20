@@ -1,12 +1,7 @@
 #version 410
 
-uniform vec3 lightPosition;
-in vec4 fragPos;
-
+// Depth-only: the rasterized light-space depth is the shadow map value.
+// Not writing gl_FragDepth keeps early-Z and the polygon offset working.
 void main()
-{   
-	float farPlane = 7000.0;
-	float lightDistance = length(fragPos.xyz - lightPosition.xyz);
-	lightDistance = lightDistance / farPlane;
-	gl_FragDepth = lightDistance;
+{
 }

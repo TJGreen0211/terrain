@@ -7,7 +7,6 @@ in vec3 fN;
 in vec3 fL;
 in vec3 fH;
 in vec3 vColor;
-in vec4 fLightSpace;
 in vec3 fSurfDir;
 in float fRadius;
 in mat3 fNormalMat;
@@ -17,7 +16,13 @@ out vec4 FragColor;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
-uniform sampler2D depthMap;
+// Shadow map (Main.c initDepthbuffer): hardware depth compare, rendered
+// from the sun's position with lightSpace = projection * view applied to
+// camera-relative positions. shadowTexel is one texel's world size at the
+// planet, used to scale the receiver offsets.
+uniform sampler2DShadow depthMap;
+uniform mat4 lightSpace;
+uniform float shadowTexel;
 // Camera-relative rendering: fragPos, lightPosition and bodyCenter (the
 // planet centre) are all relative to the camera, which sits at the origin
 // (cameraPos = lodCameraPos = 0). Planet-local positions are fragPos -
@@ -215,49 +220,25 @@ float hadleyFactor(float absLatDeg) {
 	return 0.65 + 0.75 * equatorLush * itcz - 0.35 * subtrop + 0.2 * midlat;
 }
 
-/*
-fLight.xyz = fLight.xyz * 0.5 + 0.5;
-float closestDepth = texture(depthMap, fLight.xy).r;
-float currentDepth = fLight.z;
-float shadow = 0.0;
-vec2 texelSize = 1.0 / textureSize(depthMap, 0);
-for(int x = -1; x <= 1; ++x) {
-	for(int y = -1; y <= 1; ++y) {
-		float pcfDepth = texture(depthMap, fLight.xy + vec2(x, y) * texelSize).r;
-		shadow += currentDepth - 0.0001 > pcfDepth ? 1.0 : 0.0;
-	}
-}
-shadow /= 9.0;
-
-if(fLight.z > 1.0)
-	shadow = 0.0;
-return shadow;
-*/
-
-float shadowCalculation(vec4 fLight) {
-	vec3 fragToLight = fragPos - lightPosition;
-	//fragToLight = fLight.xyz * 0.5 + 0.5;
-	//fragToLight = fragToLight/700.0;
-	float closestDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5)).r;
-	float currentDepth = length(fragToLight)/7000.0;
-	//closestDepth *= 700.0;
-
-	float shadow = 0.0;
-	vec2 texelSize = 1.0 / textureSize(depthMap, 0);
-	for(int x = -1; x <= 1; ++x) {
-		for(int y = -1; y <= 1; ++y) {
-			float pcfDepth = texture(depthMap, vec2(fLight.xyz * 0.5 + 0.5) + vec2(x, y) * texelSize).r;
-			shadow += currentDepth - 0.02 > pcfDepth ? 1.0 : 0.0;
-		}
-	}
-	shadow /= 9.0;
-
-
-	//shadow = currentDepth - 0.02 > closestDepth ? 1.0 : 0.0;
-	//if(fragToLight.z > 1.0)
-	//	shadow = 0.0;
-
-	return shadow;
+// Sun visibility from the shadow map: 1 = lit, 0 = fully shadowed.
+// p is the camera-relative position, n the geometric normal and l the unit
+// direction to the sun. The receiver is pushed out along the normal (more at
+// grazing light, where acne starts) and toward the sun by about a texel, so
+// it never tests against its own rasterized depth. 3x3 hardware-filtered
+// taps one texel apart give a smooth ~4-texel penumbra.
+float sunVisibility(vec3 p, vec3 n, vec3 l) {
+	float ndl = clamp(dot(n, l), 0.0, 1.0);
+	p += n * shadowTexel * (1.0 + 2.0 * (1.0 - ndl)) + l * shadowTexel;
+	vec4 c = vec4(p, 1.0) * lightSpace;
+	vec3 s = c.xyz / c.w * 0.5 + 0.5;
+	if (s.z >= 1.0)
+		return 1.0;
+	vec2 texel = 1.0 / vec2(textureSize(depthMap, 0));
+	float lit = 0.0;
+	for (int x = -1; x <= 1; ++x)
+		for (int y = -1; y <= 1; ++y)
+			lit += texture(depthMap, vec3(s.xy + vec2(x, y) * texel, s.z));
+	return lit / 9.0;
 }
 
 void main()
@@ -442,7 +423,14 @@ void main()
 			float G1V = NdotV / (NdotV * (1.0 - k) + k);
 			spec = (D * G1L * G1V * F) / (4.0 * NdotV + 1e-4);
 		}
-		lit += (diff + spec) * sunRadiance;
+		// Cast shadows (terrain, moon). Below the geometric terminator the
+		// planet body itself occludes the sun in the shadow map; fade the
+		// test out there so the wrap-lit twilight band stays soft instead
+		// of being cut off by a hard self-shadow edge.
+		vec3 upGeo = normalize(fragPos - bodyCenter);
+		float shadowWeight = smoothstep(-0.06, 0.0, dot(upGeo, L));
+		float vis = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
+		lit += (diff + spec) * sunRadiance * vis;
 	}
 
 	// Surface extinction only (linear radiance, before the tone map); the

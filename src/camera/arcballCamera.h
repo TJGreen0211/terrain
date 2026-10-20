@@ -12,13 +12,6 @@
 #include "Window.h"
 #include "LinearAlg.h"
 
-enum Camera_Movement {
-	FORWARD,
-	BACKWARD,
-	LEFT,
-	RIGHT
-};
-
 extern float CameraDistance;
 extern const float CameraDistanceMax;
 extern GLfloat MovementSpeed;
@@ -36,8 +29,14 @@ mat4 getViewRotation();
 void updateCameraVectors();
 void toggleSurfaceCamera(void);   // G: lock to a surface/tangent view
 int isSurfaceCamera(void);
-void processKeyboard(enum Camera_Movement direction, GLfloat deltaTime , GLfloat deltaSpeed);
-void processMouseMovement(float xpos, float ypos, int resetFlag);
-float processMouseScroll(float yoffset);
+/* forward/right: summed WASD axes in [-1, 1] (W/D positive). */
+void processKeyboard(float forward, float right, GLfloat deltaTime);
+/* Arcball drag, driven by the real button press/release events. Cursor
+   position and window size are both in GLFW screen coordinates. */
+void arcballBegin(double xpos, double ypos, int width, int height);
+void arcballDrag(double xpos, double ypos, int width, int height);
+void arcballEnd(void);
+int arcballDragging(void);
+void processMouseScroll(float yoffset);
 
 #endif
