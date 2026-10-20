@@ -24,7 +24,9 @@ GLFWwindow *setupGLFW() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_SAMPLES, 4);
+	/* No multisampling on the window itself: the scene renders into its own
+	   4x MSAA float-depth target (Main.c) and is resolved into this one. */
+	glfwWindowHint(GLFW_SAMPLES, 0);
 	
 	/* Initial size: the primary monitor's mode (the only video-mode query). */
 	const GLFWvidmode *mode = glfwGetVideoMode(glfwGetPrimaryMonitor());

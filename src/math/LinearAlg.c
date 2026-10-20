@@ -582,6 +582,26 @@ mat4 perspective(float fovy, float aspect, float zNear, float zFar)
 	return c;
 }
 
+/* Reversed-Z perspective with an infinite far plane, for a [0,1] clip depth
+   range (glClipControl GL_ZERO_TO_ONE): clip z = zNear, w = -z_eye, so depth
+   = zNear / distance, 1 at the near plane falling to 0 at infinity. With a
+   float depth buffer the relative depth precision is ~2^-23 at every
+   distance (depth test GL_GREATER, clear to 0). */
+mat4 perspectiveReversedInf(float fovy, float aspect, float zNear)
+{
+	float top = tan(fovy*(3.14159265358979323846 / 180.0)/2) * zNear;
+	float right = top * aspect;
+
+	mat4 c = ZERO_MATRIX;
+	c.m[0][0] = zNear/right;
+	c.m[1][1] = zNear/top;
+	c.m[2][2] = 0.0;
+	c.m[2][3] = zNear;
+	c.m[3][2] = -1.0;
+	c.m[3][3] = 0.0;
+	return c;
+}
+
 mat4 frustum(float left, float right, float bottom, float top, float zNear, float zFar)
 {
 	mat4 c = ZERO_MATRIX;

@@ -1,11 +1,13 @@
 #version 410
 #extension GL_ARB_conservative_depth : enable
 
-// The seafloor branch only ever pushes gl_FragDepth farther away, so declare
-// it depth_greater: the GPU can keep early/hierarchical-Z rejection for this
-// (expensive) shader instead of running it for every overlapping fragment.
+// The seafloor branch only ever pushes gl_FragDepth farther away, which in
+// the reversed-Z main pass (Main.c setReversedDepth) means a smaller value,
+// so declare it depth_less: the GPU can keep early/hierarchical-Z rejection
+// for this (expensive) shader instead of running it for every overlapping
+// fragment.
 #ifdef GL_ARB_conservative_depth
-layout(depth_greater) out float gl_FragDepth;
+layout(depth_less) out float gl_FragDepth;
 #endif
 
 in vec2 fTexCoords;
@@ -47,8 +49,10 @@ uniform float lodK;
 // ramp and the material bands all key off this single value, and water.frag
 // gets the identical value so the discard edge sits on the coastline.
 uniform float seaLevel;
-// Main-pass near/far planes, to rewrite gl_FragDepth (see the seafloor branch).
-uniform vec2 depthPlanes;
+// Main-pass near plane, to rewrite gl_FragDepth (see the seafloor branch).
+// The main projection is infinite reversed-Z: depth = depthNear / distance
+// along the view axis.
+uniform float depthNear;
 
 const float PI = 3.14159265359;
 
@@ -368,18 +372,18 @@ void main()
 		// push the fragment's depth along the view ray to just under the
 		// shell instead: the water then draws over it and the coastline
 		// follows the per-pixel mask at every LOD. The clearance grows with
-		// the 24-bit depth resolution, ~D^2/(near*2^24), so it holds at range.
+		// the float reversed-Z depth resolution, a constant ~2^-23 of the
+		// distance, so it holds at range.
 		float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
 		float D = length(camDir);
-		float clearance = max(SEA_CLIP * R, 4.0 * D * D / (depthPlanes.x * 16777216.0));
+		float clearance = max(SEA_CLIP * R, 4.0 * D / 8388608.0);
 		float poke = (fRadius - 1.0) * R + clearance;   // world units above the target
 		if (poke > 0.0) {
-			float n = depthPlanes.x, f = depthPlanes.y;
-			float zNdc = gl_FragCoord.z * 2.0 - 1.0;
-			float zEye = 2.0 * n * f / ((f + n) - zNdc * (f - n));
+			// Reversed-Z infinite: depth = near / zEye.
+			float zEye = depthNear / max(gl_FragCoord.z, 1e-30);
 			// View-space depth scales with distance along the ray.
 			float zNew = zEye * (D + poke / graz) / max(D, 1e-4);
-			gl_FragDepth = 0.5 * ((f + n) - 2.0 * n * f / zNew) / (f - n) + 0.5;
+			gl_FragDepth = depthNear / zNew;
 		}
 		albedo = seafloorColor(e);
 		rough = 0.9;

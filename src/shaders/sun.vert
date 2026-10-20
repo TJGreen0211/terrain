@@ -19,7 +19,9 @@ void main()
 	// when the sun sits off-centre. The sun itself is placed/sized in the
 	// fragment shader from its projected NDC centre and half-size.
 	fragNdc = vPosition.xy;
-	gl_Position = vec4(vPosition.xy, 0.0, 1.0);
+	// z mid-range: the depth comes from gl_FragDepth (sunDepth); 0 would sit
+	// on the edge of the main pass's [0, w] clip range.
+	gl_Position = vec4(vPosition.xy, 0.5, 1.0);
 
 	vec4 sunView = vec4(sunCenter, 1.0) * view;
 	if( sunView.z >= 0.0 )
@@ -27,7 +29,7 @@ void main()
 		// At or behind the camera: put the sun far off-screen so nothing draws.
 		sunNdc = vec2(1e5);
 		sunHalf = 1.0;
-		sunDepth = 1.0;
+		sunDepth = 0.0;   // reversed-Z far plane
 		return;
 	}
 
@@ -41,5 +43,7 @@ void main()
 
 	sunNdc   = ndcPos;
 	sunHalf  = abs( clipR.x / clipR.w - ndcPos.x );
-	sunDepth = ( clip.z / clip.w + 1.0 ) * 0.5;
+	// Main pass uses a [0,1] clip depth range (reversed-Z), so window depth
+	// is the NDC z itself.
+	sunDepth = clip.z / clip.w;
 }

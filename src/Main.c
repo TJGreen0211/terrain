@@ -14,7 +14,12 @@
 #include <sys/stat.h>
 //#include <pthread.h>
 
-float zNear = 0.5, zFar = 100000.0;
+/* Main camera near plane (world units; 1 unit = planet radius / 300, ~21 km
+   at Earth scale, so this is ~0.1 m). The main pass uses an infinite
+   reversed-Z projection into a float depth buffer (see the scene target
+   below), whose relative precision is the same at every distance, so the
+   near plane can sit at surface scale while the sun and moon stay in view. */
+#define CAMERA_NEAR 5e-6f
 GLuint depthMap;
 /* Sun shadow map: a square depth texture rendered from the sun's position
    (it is a point light, so the light projection is a perspective frustum
@@ -50,10 +55,6 @@ GLuint planetHeightTex;
    the coast stay near sea level and coast-straddling triangles barely sag. */
 #define LAND_RELIEF 0.025f
 #define OCEAN_RELIEF 0.01f
-/* Main-pass clip planes (setBodyUniforms' projection); quad.frag needs them
-   to rewrite gl_FragDepth for seafloor that pokes through the water. */
-#define BODY_NEAR 0.5f
-#define BODY_FAR  100000.0f
 struct sphere planet;
 struct ring planetRing;
 struct quadCube qc, qc2;
@@ -346,14 +347,63 @@ static void bindShadowMap(GLuint shader, int unit) {
 	glActiveTexture(GL_TEXTURE0);
 }
 
+/* ---- Main-pass depth: reversed-Z into a float depth buffer ----
+   The window's default depth buffer is 24-bit fixed point, which reversed-Z
+   cannot help, so the scene renders into its own multisampled target (RGBA8
+   + DEPTH32F) that is resolved into the window at the end of the frame.
+   Clip control is per pass: the main pass uses GL_ZERO_TO_ONE with
+   GL_GREATER and a depth clear of 0; everything else (shadow map, bakes,
+   GPU wave passes, UI) keeps the standard convention. */
+#define SCENE_SAMPLES 4
+static GLuint g_sceneFBO, g_sceneColorRB, g_sceneDepthRB;
+static int g_sceneW, g_sceneH;
+
+static void ensureSceneTarget(int w, int h) {
+	if (g_sceneFBO && w == g_sceneW && h == g_sceneH)
+		return;
+	if (!g_sceneFBO) {
+		glGenFramebuffers(1, &g_sceneFBO);
+		glGenRenderbuffers(1, &g_sceneColorRB);
+		glGenRenderbuffers(1, &g_sceneDepthRB);
+	}
+	g_sceneW = w;
+	g_sceneH = h;
+	glBindRenderbuffer(GL_RENDERBUFFER, g_sceneColorRB);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, SCENE_SAMPLES, GL_RGBA8, w, h);
+	glBindRenderbuffer(GL_RENDERBUFFER, g_sceneDepthRB);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, SCENE_SAMPLES, GL_DEPTH_COMPONENT32F, w, h);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, g_sceneColorRB);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, g_sceneDepthRB);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		fprintf(stderr, "[main] scene framebuffer incomplete\n");
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* Switches clip control, depth test and depth clear value between the main
+   pass (reversed) and everything else (standard). Requires
+   GL_ARB_clip_control (checked at startup). */
+static void setReversedDepth(int on) {
+	glClipControl(GL_LOWER_LEFT, on ? GL_ZERO_TO_ONE : GL_NEGATIVE_ONE_TO_ONE);
+	glDepthFunc(on ? GL_GREATER : GL_LESS);
+	glClearDepth(on ? 0.0 : 1.0);
+}
+
+/* Main camera projection for every main-pass draw (infinite reversed-Z). */
+static mat4 cameraProjection(void) {
+	return perspectiveReversedInf(45.0, getWindowWidth()/getWindowHeight(), CAMERA_NEAR);
+}
+
 /* Main camera projection * view, matching initMVP/setBodyUniforms; the
-   quadtree walk frustum-culls its nodes against it. */
+   quadtree walk frustum-culls its nodes against it (with the infinite
+   projection its far plane never culls). */
 static mat4 getViewProjection(void) {
-	return multiplymat4(perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar), getViewMatrix());
+	return multiplymat4(cameraProjection(), getViewMatrix());
 }
 
 void initMVP(int shader, mat4 m, mat4 v) {
-	mat4 p = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
+	mat4 p = cameraProjection();
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &p.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, &v.m[0][0]);
@@ -370,7 +420,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
                      GLuint tex0, GLuint tex2, GLuint slopeTex, GLuint dispTex, GLuint jacobTex, GLuint skyTex) {
 	glUseProgram(shader);
 
-	mat4 p = perspective(45.0, getWindowWidth()/getWindowHeight(), BODY_NEAR, BODY_FAR);
+	mat4 p = cameraProjection();
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &p.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
 	mat4 v = getViewMatrix();
@@ -419,7 +469,9 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
 	glUniform1f(glGetUniformLocation(shader, "landRelief"), LAND_RELIEF);
 	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), OCEAN_RELIEF);
-	glUniform2f(glGetUniformLocation(shader, "depthPlanes"), BODY_NEAR, BODY_FAR);
+	/* quad.frag rewrites gl_FragDepth for seafloor that pokes through the
+	   water; it needs the main projection's convention and near plane. */
+	glUniform1f(glGetUniformLocation(shader, "depthNear"), CAMERA_NEAR);
 	/* Climate map (unit 8) + surface style for quad.frag's biome shading. */
 	setPlanetSurfaceUniforms(shader, 8);
 	glActiveTexture(GL_TEXTURE0);
@@ -811,6 +863,13 @@ int main(int argc, char *argv[])
         printf("Failed to initialize GLAD");
         return -1;
     }
+	/* The main pass's reversed-Z depth (setReversedDepth) needs clip control. */
+	if (!GLAD_GL_ARB_clip_control || !glClipControl)
+	{
+		fprintf(stderr, "GL_ARB_clip_control is required (reversed-Z depth) but not supported by this driver.\n");
+		glfwTerminate();
+		return -1;
+	}
 
 	// Show the loading screen before the first blocking load, so the window
 	// never sits blank/unresponsive while shaders compile, textures and models
@@ -1051,14 +1110,20 @@ int main(int argc, char *argv[])
 			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model);
 			drawPlanetDepth(depthShader, planetModel, fScale);
 			glDisable(GL_POLYGON_OFFSET_FILL);
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
-		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+		/* Main pass: the multisampled float-depth scene target, reversed-Z
+		   (see setReversedDepth), resolved into the window before the UI. */
+		int sceneW = (int)getWindowWidth(), sceneH = (int)getWindowHeight();
+		ensureSceneTarget(sceneW, sceneH);
+		glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
+		glViewport(0, 0, sceneW, sceneH);
+		setReversedDepth(1);
+
 		glClearColor(0.1, 0.0, 0.2, 1.0);
+		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
 		//Skybox: full-screen background, drawn first (far plane, no depth write)
-		mat4 skyboxProj = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
+		mat4 skyboxProj = cameraProjection();
 		drawSkybox(skyboxTexture, skyboxProj, getViewRotation());
 
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
@@ -1070,7 +1135,7 @@ int main(int argc, char *argv[])
 		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, dxWaveTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
 		//Water: drawn after the planet, shell at sea level (see drawWater)
 		//Sun (billboard): opaque disc drawn with the scene; glow drawn last (below)
-		mat4 sunProj = perspective(45.0, getWindowWidth()/getWindowHeight(), zNear, zFar);
+		mat4 sunProj = cameraProjection();
 		mat4 sunView = getViewMatrix();
 		drawSunDisc(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
 
@@ -1136,6 +1201,14 @@ int main(int argc, char *argv[])
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
 		drawSunGlow(sunProj, sunView, lightPositionXYZ, SUN_GLOW_RADIUS);
+
+		/* Resolve the scene into the window; the UI draws there directly,
+		   with the standard depth convention restored. */
+		setReversedDepth(0);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, g_sceneFBO);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+		glBlitFramebuffer(0, 0, sceneW, sceneH, 0, 0, sceneW, sceneH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 		//Camera speed sliders: UI overlay, drawn over everything. Laid out
 		//every frame so they track window resizes.

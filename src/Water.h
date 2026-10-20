@@ -10,23 +10,12 @@
 #include <GLFW/glfw3.h>
 
 #include "LinearAlg.h"
-#include "ComplexMath.h"
 
-/* Each complex grid packs two real fields as a + i*b (both spectra are
-   Hermitian), so one inverse FFT yields a in .real and b in .im. */
+/* FFT ocean, simulated on the GPU (Water.c): the textures below are render
+   targets refilled by generateWaves. */
 typedef struct waves {
-	complexType *hDxz;   // height + i * dDx/dz
-	complexType *disp;   // Dx + i * Dz          (choppy displacement)
-	complexType *slope;  // dh/dx + i * dh/dz
-	complexType *jacob;  // dDx/dx + i * dDz/dz
-	complexType *tildeh0k;
-	complexType *conjTildeh0MK;
 	int dimension;
 	float heightScale;
-	float *dyData;
-	float *dispData;
-	float *slopeData;
-	float *jacobData;
 	unsigned int dyTexture;     // R32F   height
 	unsigned int dispTexture;   // RG32F  Dx, Dz            (height units)
 	/* RGBA32F dh/dx, dh/dz, (dh/dx)^2, (dh/dz)^2 (per patch length).
@@ -43,15 +32,9 @@ typedef struct waves {
 } waves;
 
 /* Re-simulate the ocean every Nth generateWaves call. 1 = every frame.
-   Larger values save the FFT + upload cost but the waves visibly step
-   (e.g. 15 at 60 fps = 4 updates/s), since frames in between are not
-   interpolated. */
+   Larger values save the GPU passes but the waves visibly step (e.g. 15 at
+   60 fps = 4 updates/s), since frames in between are not interpolated. */
 #define WAVE_UPDATE_INTERVAL 1
-
-/* 1 = simulate the ocean on the GPU (wavespectrum/wavefft/wavepack
-   shaders, no per-frame upload), 0 = the CPU (/openmp) path. Both fill the
-   same textures; flip it to compare performance. */
-#define WAVES_ON_GPU 1
 
 void generateWaves(waves *water);
 void initializeWaves(waves *water, int dim);

@@ -77,8 +77,9 @@ void drawSunDisc(mat4 proj, mat4 view, vec3 center, float radius)
 	glUseProgram(sunShader);
 	setupSunUniforms(proj, view, center, radius, 1.0f);
 
+	/* Main pass is reversed-Z (Main.c setReversedDepth): nearer = greater. */
 	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_LESS);
+	glDepthFunc(GL_GREATER);
 	glDepthMask(GL_TRUE);
 	glDisable(GL_BLEND);
 
@@ -95,7 +96,7 @@ void drawSunGlow(mat4 proj, mat4 view, vec3 center, float radius)
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE);
-	glDepthFunc(GL_LESS);
+	glDepthFunc(GL_GREATER);
 	glDepthMask(GL_FALSE);
 
 	drawSunQuadPass();
