@@ -70,7 +70,7 @@ void main()
 
 	vec2 local = (vec2(cell) + vec2(u01(h), u01(h))) * cellSize;
 	float r01 = (length(local) - ringRadii.x) / (ringRadii.y - ringRadii.x);
-	vec4 prof = textureLod(ringProfile, clamp(r01, 0.0, 1.0), 2.0);
+	vec4 prof = textureLod(ringProfile, clamp(r01, 0.0, 1.0), 4.0);
 	float tau = (r01 > 0.0 && r01 < 1.0) ? prof.a : 0.0;
 	float present = step(u01(h), min(tau * density, 1.0));
 
