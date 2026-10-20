@@ -28,7 +28,8 @@ extern PlanetGenParams g_planetGen;
 /* Surface look + climate response, uploaded to quad.frag every frame. The
    defaults are Earth-like; every field is free to change for alien worlds
    (palette, temperature, humidity, how strongly the equator is favoured).
-   Biome grid: rows cold / temperate / hot, columns dry / medium / wet. */
+   Biome grid: rows cold / temperate / hot, columns dry / medium / wet.
+   All colours are sRGB; they are converted to linear albedo on upload. */
 typedef struct {
 	float biome[3][3][3];
 	float rock[3], snow[3], sand[3], salt[3], water[3];

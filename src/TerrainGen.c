@@ -768,19 +768,22 @@ static GLuint bakeClimate(const float *h, const float *anom, float *dep, float s
 
 /* ---------------- Surface style ---------------- */
 
-/* Earth-like defaults (linear albedo). */
+/* Earth-like defaults. Colours are sRGB (as a colour picker shows them);
+   setPlanetSurfaceUniforms converts them to linear albedo for the shader.
+   Linear targets roughly: forest ~0.02-0.05, grass ~0.05-0.10,
+   desert ~0.15-0.50, fresh snow ~0.85. */
 PlanetStyle g_planetStyle = {
 	{	/* cold:      tundra             boreal              taiga */
-		{ { 0.40f, 0.38f, 0.33f }, { 0.27f, 0.30f, 0.21f }, { 0.11f, 0.19f, 0.12f } },
+		{ { 0.47f, 0.44f, 0.38f }, { 0.30f, 0.33f, 0.24f }, { 0.16f, 0.22f, 0.14f } },
 		/* temperate: steppe             grassland           forest */
-		{ { 0.52f, 0.46f, 0.31f }, { 0.25f, 0.35f, 0.14f }, { 0.08f, 0.21f, 0.07f } },
+		{ { 0.60f, 0.54f, 0.40f }, { 0.40f, 0.45f, 0.25f }, { 0.18f, 0.27f, 0.13f } },
 		/* hot:       desert             savanna             rainforest */
-		{ { 0.74f, 0.57f, 0.37f }, { 0.48f, 0.43f, 0.21f }, { 0.04f, 0.17f, 0.04f } } },
-	{ 0.36f, 0.33f, 0.30f },   /* rock */
-	{ 0.92f, 0.93f, 0.95f },   /* snow */
-	{ 0.76f, 0.69f, 0.50f },   /* sand */
-	{ 0.86f, 0.83f, 0.76f },   /* salt pan */
-	{ 0.03f, 0.13f, 0.20f },   /* river / lake water */
+		{ { 0.76f, 0.62f, 0.44f }, { 0.58f, 0.52f, 0.32f }, { 0.12f, 0.22f, 0.09f } } },
+	{ 0.45f, 0.42f, 0.39f },   /* rock */
+	{ 0.95f, 0.96f, 0.97f },   /* snow */
+	{ 0.84f, 0.77f, 0.60f },   /* sand */
+	{ 0.92f, 0.90f, 0.85f },   /* salt pan */
+	{ 0.10f, 0.22f, 0.30f },   /* river / lake water */
 	0.0f,    /* tempOffset */
 	1.0f,    /* lapseRate */
 	0.12f,   /* snowTemp */
@@ -791,18 +794,35 @@ PlanetStyle g_planetStyle = {
 	0.55f,   /* rockSlope */
 };
 
+/* sRGB transfer function -> linear, componentwise over n floats. */
+static void srgbToLinear(const float *in, float *out, int n)
+{
+	for (int i = 0; i < n; i++) {
+		float c = in[i];
+		out[i] = (c <= 0.04045f) ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
+	}
+}
+
+/* Uploads an sRGB palette entry (count vec3s) as linear. */
+static void uniformSrgb3(unsigned int shader, const char *name, const float *srgb, int count)
+{
+	float lin[9 * 3];
+	srgbToLinear(srgb, lin, count * 3);
+	glUniform3fv(glGetUniformLocation(shader, name), count, lin);
+}
+
 void setPlanetSurfaceUniforms(unsigned int shader, int unit)
 {
 	const PlanetStyle *ps = &g_planetStyle;
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_2D, g_planetGen.climateTex);
 	glUniform1i(glGetUniformLocation(shader, "climateMap"), unit);
-	glUniform3fv(glGetUniformLocation(shader, "biomeColors"), 9, &ps->biome[0][0][0]);
-	glUniform3fv(glGetUniformLocation(shader, "rockColor"), 1, ps->rock);
-	glUniform3fv(glGetUniformLocation(shader, "snowColor"), 1, ps->snow);
-	glUniform3fv(glGetUniformLocation(shader, "sandColor"), 1, ps->sand);
-	glUniform3fv(glGetUniformLocation(shader, "saltColor"), 1, ps->salt);
-	glUniform3fv(glGetUniformLocation(shader, "inlandWaterColor"), 1, ps->water);
+	uniformSrgb3(shader, "biomeColors", &ps->biome[0][0][0], 9);
+	uniformSrgb3(shader, "rockColor", ps->rock, 1);
+	uniformSrgb3(shader, "snowColor", ps->snow, 1);
+	uniformSrgb3(shader, "sandColor", ps->sand, 1);
+	uniformSrgb3(shader, "saltColor", ps->salt, 1);
+	uniformSrgb3(shader, "inlandWaterColor", ps->water, 1);
 	glUniform1f(glGetUniformLocation(shader, "tempOffset"), ps->tempOffset);
 	glUniform1f(glGetUniformLocation(shader, "lapseRate"), ps->lapseRate);
 	glUniform1f(glGetUniformLocation(shader, "snowTemp"), ps->snowTemp);

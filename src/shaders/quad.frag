@@ -203,9 +203,10 @@ float heightAt(vec3 d, float lodBase) {
 
 // Seafloor albedo under the water (which adds its own tint): pale sand on
 // the shelf, darker silt/rock toward the abyss.
+// Linear albedo (sRGB ~(0.70, 0.66, 0.55) and ~(0.30, 0.33, 0.31)).
 vec3 seafloorColor(float e) {
-	vec3 sand = vec3(0.52, 0.48, 0.36);
-	vec3 silt = vec3(0.10, 0.12, 0.11);
+	vec3 sand = vec3(0.45, 0.39, 0.26);
+	vec3 silt = vec3(0.07, 0.09, 0.08);
 	return mix(silt, sand, smoothstep(seaLevel * 0.6, seaLevel, e));
 }
 
