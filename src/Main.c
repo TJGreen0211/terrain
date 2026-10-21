@@ -356,11 +356,13 @@ static void bindShadowMap(GLuint shader, int unit) {
    The window's default depth buffer is 24-bit fixed point, which reversed-Z
    cannot help, so the scene renders into its own multisampled target (RGBA8
    + DEPTH32F) that is resolved into the window at the end of the frame.
+   The depth is a multisample texture so the atmosphere dome can read it
+   (Atmosphere_SetSceneDepth) to end its rays at the visible surface.
    Clip control is per pass: the main pass uses GL_ZERO_TO_ONE with
    GL_GREATER and a depth clear of 0; everything else (shadow map, bakes,
    GPU wave passes, UI) keeps the standard convention. */
 #define SCENE_SAMPLES RENDER_MSAA_SAMPLES   /* WorldConfig.h */
-static GLuint g_sceneFBO, g_sceneColorRB, g_sceneDepthRB;
+static GLuint g_sceneFBO, g_sceneColorRB, g_sceneDepthTex;
 static int g_sceneW, g_sceneH;
 
 static void ensureSceneTarget(int w, int h) {
@@ -369,21 +371,24 @@ static void ensureSceneTarget(int w, int h) {
 	if (!g_sceneFBO) {
 		glGenFramebuffers(1, &g_sceneFBO);
 		glGenRenderbuffers(1, &g_sceneColorRB);
-		glGenRenderbuffers(1, &g_sceneDepthRB);
+		glGenTextures(1, &g_sceneDepthTex);
 	}
 	g_sceneW = w;
 	g_sceneH = h;
 	glBindRenderbuffer(GL_RENDERBUFFER, g_sceneColorRB);
 	glRenderbufferStorageMultisample(GL_RENDERBUFFER, SCENE_SAMPLES, GL_RGBA8, w, h);
-	glBindRenderbuffer(GL_RENDERBUFFER, g_sceneDepthRB);
-	glRenderbufferStorageMultisample(GL_RENDERBUFFER, SCENE_SAMPLES, GL_DEPTH_COMPONENT32F, w, h);
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	/* Fixed sample locations: required to mix with the colour renderbuffer. */
+	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, g_sceneDepthTex);
+	glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, SCENE_SAMPLES, GL_DEPTH_COMPONENT32F, w, h, GL_TRUE);
+	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
 	glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, g_sceneColorRB);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, g_sceneDepthRB);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, g_sceneDepthTex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 		fprintf(stderr, "[main] scene framebuffer incomplete\n");
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	Atmosphere_SetSceneDepth(g_sceneDepthTex, SCENE_SAMPLES, CAMERA_NEAR);
 }
 
 /* Switches clip control, depth test and depth clear value between the main
@@ -436,13 +441,29 @@ static double reliefOf(double h)
 	     - g_planetStyle.oceanRelief * s * s;
 }
 
+/* quad.vert / depth.vert's lodCellK: the height-map mip a vertex at
+   distance d samples is log2(d * lodCellK), the mip of the widest leaf the
+   main walk can have there (half-width d / (2 K R) cube units, K from
+   QT_TARGET_TRIANGLE_PX; a face-centre node is ~2 R x its half-width
+   across). A function of distance, not of the patch's level, so the
+   surface has no height steps where patch levels meet (they showed through
+   the atmosphere's depth-clipped haze), and it is never finer than the old
+   per-level mip. */
+static double lodCellKFor(double radius)
+{
+	return 2048.0 / (M_PI * 2.0 * QuadTree_SplitK(QT_TARGET_TRIANGLE_PX) * radius);
+}
+
 /* QuadTree_ReliefFn for Earth's land + seafloor (quad.vert, depth.vert):
-   the terrain the shaders can place over the cap, same mip selection. */
+   the terrain the shaders can place over the cap, same mip selection (the
+   coarsest any vertex there uses, at maxDist: the pyramid range at a mip
+   bounds every finer sample). */
 static void earthReliefBounds(const double dir[3], double capAngle, double cell,
                               double maxDist, double *lo, double *hi)
 {
+	(void)cell;
 	double lodK = LOD_K_NUMER / (g_bodies[BODY_EARTH].radius * getWindowHeight());
-	double lodCell = log2(fmax(cell * 2048.0 / M_PI, 1.0));
+	double lodCell = log2(fmax(maxDist * lodCellKFor(g_bodies[BODY_EARTH].radius), 1.0));
 	double lodPix = log2(fmax(maxDist * lodK, 1e-4));
 	double lod = fmin(fmax(fmax(lodCell, lodPix), 0.0), 11.0);
 	float hmin, hmax;
@@ -551,6 +572,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glBindTexture(GL_TEXTURE_2D, planetHeightTex);
 	glUniform1i(glGetUniformLocation(shader, "heightMap"), 6);
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
+	glUniform1f(glGetUniformLocation(shader, "lodCellK"), (float)lodCellKFor(lodRadius));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
 	/* World units are metres, so the body radius is its radius in metres
 	   (water.frag sizes the sub-pixel wind waves from it). */
@@ -833,6 +855,9 @@ void drawPlanetDepth(GLuint shader, const QuadTree_Body *body) {
 	/* Same vertex lod inputs as setBodyUniforms, so the displaced caster
 	   matches the drawn surface vertex for vertex. */
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
+	/* The main walk's mip by distance (not the caster walk's), so casters
+	   sample the very heights the receivers do. */
+	glUniform1f(glGetUniformLocation(shader, "lodCellK"), (float)lodCellKFor(lodRadius));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
 	/* Terrain detail faded for the caster walk's coarser triangles. */
 	TerrainDetail_SetUniforms(shader, lodRadius, QT_SHADOW_TRIANGLE_PX);
@@ -1349,8 +1374,9 @@ int main(int argc, char *argv[])
 		Rings_DrawDust(sunProj, sunView);
 		Prof_End(PROF_RINGS);
 
-		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
-		//scaled planet shell; params above with the planet extinction)
+		//Atmosphere dome: OpenGLSolar port (GPU Gems ch.16 scattering on the
+		//planet shell; params above with the planet extinction). Rays end at
+		//the scene depth, so this runs after everything opaque.
 		Prof_Begin(PROF_ATMOSPHERE);
 		drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
 		                   atmoInner, &g_atmosphere, lightPosition);

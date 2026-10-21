@@ -65,6 +65,11 @@ void QuadTree_DrawSphere(const QuadTree_Body *body, mat4 viewProj);
    texel only costs time. */
 void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing);
 
+/* The split rule's K for a LOD target of trianglePx (px per triangle edge)
+   at the current window height: a node of width W splits while the camera
+   is closer than K * W, so a leaf at distance d is at most d / K wide. */
+double QuadTree_SplitK(double trianglePx);
+
 /* Once per frame before any draw: drops the cached walk (so per-frame
    inputs the cache key cannot see, like live relief edits, apply). */
 void QuadTree_BeginFrame(void);

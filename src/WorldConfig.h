@@ -131,6 +131,18 @@
    integrated GPU at 2880x1880. Compiled into quad.frag (restart to change). */
 #define TERRAIN_DETAIL_PIXEL_OCTAVES    0
 
+/* ---- Atmosphere (Atmosphere.c, atmosphere.frag) -------------------------
+   A stylised single-scattering shell (O'Neill, GPU Gems 2 ch. 16), tuned
+   for look rather than measured Earth (which is ~100 km with 8 km air and
+   1.2 km haze scale heights). Defaults reproduce the original look. The
+   debug panel's Atmosphere section edits both live.
+   Shell height: where the air ends. The scattering constants (K_R, K_M)
+   are per shell height, so a taller shell also scatters more overall.
+   Scale height: density falls by e every this many metres. Below ~1/8 of
+   the shell the dome's 5-sample ray march starts to band. */
+#define ATMOSPHERE_SHELL_HEIGHT_M   (0.0424 * EARTH_RADIUS_M)          /* 270 km */
+#define ATMOSPHERE_SCALE_HEIGHT_M   (0.25 * ATMOSPHERE_SHELL_HEIGHT_M) /* 67.5 km */
+
 /* ---- Ocean ---------------------------------------------------------------
    Geometric swell: rms height (m) the water shell's vertices are displaced
    by at "Wave height" 1.0 (debug panel). Shading (slopes, foam) uses the

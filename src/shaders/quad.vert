@@ -26,6 +26,9 @@ uniform float oceanRelief;
 uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
+// Mip by vertex distance, as wide as the widest patch the walk can have
+// there (Main.c lodCellKFor): continuous across patch levels.
+uniform float lodCellK;
 
 // The depth prepass and the colour pass are separate programs built from
 // this source; their depths must match exactly (colour pass tests >=).
@@ -58,13 +61,13 @@ void main()
 	// Camera-relative sphere point, built from the patch corners (patch.glsl).
 	vec3 sphere = patchSphere(uv, d, model);
 
-	// Vertex texture fetch of the shaping field at the node's own resolution
-	// (never finer than a pixel footprint either).
-	float cell = patchCell();
+	// Vertex texture fetch of the shaping field at the resolution of the
+	// patches at this distance (never finer than a pixel footprint either).
+	float vDist = length(sphere - lodCameraPos);
 	vec2 huv = vec2((atan(d.y, d.x)/PI + 1.0)*0.5,
 	                (asin(clamp(d.z, -1.0, 1.0))/PI + 0.5));
-	float lodCell = log2(max(cell*2048.0/PI, 1.0));
-	float lodPix = log2(max(length(sphere - lodCameraPos)*lodK, 1e-4));
+	float lodCell = log2(max(vDist*lodCellK, 1.0));
+	float lodPix = log2(max(vDist*lodK, 1e-4));
 	float lod = clamp(max(lodCell, lodPix), 0.0, 11.0);
 	float h = textureLod(heightMap, huv, lod).r;
 
@@ -89,7 +92,7 @@ void main()
 	vec3 q = patchCube(uv);
 	vec2 gradCube;
 	float detail = detailVertex(pAddr, uv, length(q),
-	                            length(sphere - lodCameraPos) * detailPix, env, gradCube);
+	                            vDist * detailPix, env, gradCube);
 	fDetailSlope = detailSlope(pAddr.x, q, gradCube);
 	fPatchAddr = pAddr;
 	fPatchUV = uv;

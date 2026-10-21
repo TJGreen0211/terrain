@@ -257,6 +257,15 @@ static int levelForSpacing(double radius, double minSpacing)
 	return level > QT_LEVEL_CAP ? QT_LEVEL_CAP : level;
 }
 
+/* At the split distance a node of width L spans L/(K L) of the view, so one
+   of its QT_DIVISIONS triangles covers H / (QT_DIVISIONS * K * 2 tan(fov/2))
+   pixels: solve for K. */
+double QuadTree_SplitK(double trianglePx)
+{
+	double tanHalf = tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
+	return getWindowHeight() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
+}
+
 static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
 {
 	const double (*m)[4] = body->model.m;
@@ -265,11 +274,7 @@ static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int u
 	w->radius = body->radius;
 	w->maxLevel = levelForSpacing(body->radius, minSpacing);
 
-	/* At the split distance a node of width L spans L/(K L) of the view,
-	   so one of its QT_DIVISIONS triangles covers
-	   H / (QT_DIVISIONS * K * 2 tan(fov/2)) pixels: solve for K. */
-	double tanHalf = tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
-	w->splitK = getWindowHeight() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
+	w->splitK = QuadTree_SplitK(trianglePx);
 
 	/* Horizon: the lowest solid surface (seafloor; water is see-through)
 	   hides everything past acos(occ/d), and a node reaching radius r peeks

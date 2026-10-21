@@ -125,7 +125,8 @@ static void atmosphereSection(void)
 {
 	atmosphereParams *a = &g_atmosphere;
 
-	sliderRow("Outer radius", &a->outerScale, 1.005f, 1.2f, 0.0005f, "%.4f");
+	sliderRow("Shell height (m)", &a->shellHeight, 1.0e4f, 6.0e5f, 1.0e3f, "%.0f");
+	sliderRow("Scale height (m)", &a->scaleHeight, 1.0e3f, 2.0e5f, 5.0e2f, "%.0f");
 	sliderRow("C_R red", &a->C_R.x, 0.0f, 2.0f, 0.01f, "%.2f");
 	sliderRow("C_R green", &a->C_R.y, 0.0f, 2.0f, 0.01f, "%.2f");
 	sliderRow("C_R blue", &a->C_R.z, 0.0f, 2.0f, 0.01f, "%.2f");

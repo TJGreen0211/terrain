@@ -27,6 +27,7 @@ uniform float oceanRelief;
 uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
+uniform float lodCellK;   // as quad.vert (the main walk's value)
 
 const float PI = 3.14159265359;
 
@@ -39,12 +40,13 @@ void main()
 		vec3 sphere = patchSphere(uv, d, model);
 		float lift = 0.0;
 		if (displace > 0.5) {
-			// Identical to quad.vert: node-cell lod vs pixel-footprint lod.
-			float cell = patchCell();
+			// Identical to quad.vert: patch-size lod vs pixel-footprint lod,
+			// both by vertex distance.
+			float vDist = length(sphere - lodCameraPos);
 			vec2 huv = vec2((atan(d.y, d.x)/PI + 1.0)*0.5,
 			                (asin(clamp(d.z, -1.0, 1.0))/PI + 0.5));
-			float lodCell = log2(max(cell*2048.0/PI, 1.0));
-			float lodPix = log2(max(length(sphere - lodCameraPos)*lodK, 1e-4));
+			float lodCell = log2(max(vDist*lodCellK, 1.0));
+			float lodPix = log2(max(vDist*lodK, 1e-4));
 			float lod = clamp(max(lodCell, lodPix), 0.0, 11.0);
 			float h = textureLod(heightMap, huv, lod).r;
 			float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
@@ -56,7 +58,7 @@ void main()
 			float env = detailEnvelope(landRelief * alt01 * detailRadius, alt01);
 			vec2 gradCube;
 			lift += detailVertex(pAddr, uv, length(patchCube(uv)),
-			                     length(sphere - lodCameraPos) * detailPix, env, gradCube) / detailRadius;
+			                     vDist * detailPix, env, gradCube) / detailRadius;
 		}
 		// Skirt: same drop as quad.vert, as an offset from 1.
 		if (vPosition.w > 0.5)

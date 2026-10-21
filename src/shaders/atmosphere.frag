@@ -8,6 +8,8 @@ uniform vec3 shellCenter;   // camera-relative body centre (shell sphere origin)
 
 uniform float fInnerRadius;
 uniform float fOuterRadius;
+uniform float fScaleHeight;   // metres per e-fold of density (Atmosphere.c)
+#include "atmodensity.glsl"
 
 // Rings (Rings.c). Everything here is planet-local, and the ring is centred
 // on the planet, so positions need no ringCenter offset.
@@ -19,6 +21,14 @@ uniform float ringSunAngle;
 uniform vec2 ringFade;       // ring.frag's near-camera sheet fade
 
 in vec3 fLocalPos;
+
+// The main pass's depth (Atmosphere_SetSceneDepth): reversed-Z infinite,
+// depth = depthNear / view z. Rays end at the visible surface, so terrain
+// above sea level is not fogged by the air behind it.
+uniform sampler2DMS sceneDepth;
+uniform int sceneSamples;      // 0 = no depth (clip at the sea-level sphere only)
+uniform float depthNear;
+uniform vec3 camForward;       // camera forward axis, same frame as dir
 
 out vec4 FragColor;
 
@@ -64,6 +74,21 @@ vec2 rayIntersection(vec3 p, vec3 dir, float radius ) {
 	return vec2(near, far);
 }
 
+// Distance along dir to the visible surface (MAX for sky). The farthest of
+// the pixel's MSAA samples: at a silhouette the sky sample keeps its full
+// glow (as before this clip existed) instead of a dark fringe.
+float sceneDistance(vec3 dir) {
+	if (sceneSamples <= 0)
+		return MAX;
+	ivec2 px = ivec2(gl_FragCoord.xy);
+	float d = 1.0;
+	for (int i = 0; i < sceneSamples; i++)
+		d = min(d, texelFetch(sceneDepth, px, i).r);
+	if (d <= 0.0)
+		return MAX;   // cleared depth: nothing drawn
+	return depthNear / d / max(dot(dir, camForward), 1e-6);
+}
+
 // Mie
 // g : ( -0.75, -0.999 )
 //      3 * ( 1 - g^2 )               1 + c^2
@@ -105,9 +130,9 @@ float ringTransmittance(vec3 p, vec3 l) {
 	return exp(-tau / abs(mu));
 }
 
-//exp(fScaleOverScaleDepth * (fInnerRadius - fHeight));
+// Density at p (atmodensity.glsl; scaleH kept for the call sites).
 float density(vec3 p, float scaleH) {
-	return exp(-(length(p) - fInnerRadius) * scaleH);
+	return atmoDensity(length(p) - fInnerRadius);
 }
 
 float optic(vec3 p, vec3 q, float scaleH, float scaleL) {
@@ -157,7 +182,7 @@ void main (void)
 	vec3 dir = rayDirection(camPosition);
 	vec3 eye = camPosition;
 
-	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleH = 1.0 / fScaleHeight;
 	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
 
 	// Ring sheet along the view ray. The dome is additive, so where the
@@ -182,6 +207,9 @@ void main (void)
 	if (f.x > e.x) {
 		e.y = min(e.y, f.x);
 	}
+	// ...and at whatever the scene drew first: terrain above sea level, the
+	// water, the moon or ring rocks in front of the air (which then discard).
+	e.y = min(e.y, sceneDistance(dir));
 	if ( e.y <= e.x ) {
 		discard;
 	}

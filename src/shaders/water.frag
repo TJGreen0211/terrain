@@ -61,6 +61,8 @@ uniform vec3 bodyCenter;
 uniform float hasAtmosphere;
 uniform float fInnerRadius;
 uniform float fOuterRadius;
+uniform float fScaleHeight;   // metres per e-fold of density (Atmosphere.c)
+#include "atmodensity.glsl"
 uniform vec3 C_R;
 
 // Keep the miss sentinel beyond the largest supported shell radius.
@@ -68,12 +70,9 @@ const float ATMO_MAX = 1e30;
 uniform float K_R; // Rayleigh / Mie constants, shared with atmosphere.frag (Atmosphere.c)
 uniform float K_M;
 const int NUM_ATMO_STEPS = 5;
-// atmoOptic straight up from fInnerRadius to fOuterRadius. The shell
-// thickness cancels (scaleH = 4/thickness, scaleL = 1/thickness), so it is
-// (1/N) * sum_i exp(-4 (i + 0.5) / N) for any radii: a constant, folded at
-// compile time instead of a 5-step march per pixel. Keep in step with
-// NUM_ATMO_STEPS and the 4.0 in scaleH.
-const float TAU_ZENITH = 0.2 * (exp(-0.4) + exp(-1.2) + exp(-2.0) + exp(-2.8) + exp(-3.6));
+// atmoOptic straight up from fInnerRadius to fOuterRadius (the same
+// 5-sample midpoint march), computed once on the CPU (Atmosphere.c).
+uniform float atmoTauZenith;
 
 vec2 shellIntersection(vec3 p, vec3 dir, float radius)
 {
@@ -94,7 +93,7 @@ float atmoOptic(vec3 p, vec3 q, float scaleH, float scaleL)
 	float sum = 0.0;
 	for (int i = 0; i < NUM_ATMO_STEPS; i++) {
 		// Clamped at the ground (same as quad.frag).
-		sum += exp(-max(length(v) - fInnerRadius, 0.0) * scaleH);
+		sum += atmoDensity(length(v) - fInnerRadius);
 		v += step;
 	}
 	return sum * length(step) * scaleL;
@@ -102,7 +101,7 @@ float atmoOptic(vec3 p, vec3 q, float scaleH, float scaleL)
 
 vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
 {
-	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleH = 1.0 / fScaleHeight;
 	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
 
 	// Ray in the shell-centred frame: eye = camera, fragment at distance tFrag.
@@ -141,12 +140,12 @@ vec3 sunTransmittance(vec3 p, vec3 l, float sunAngle)
 	float horizon = smoothstep(-sunAngle, sunAngle, dot(up, l));
 	if (hasAtmosphere < 0.5 || horizon <= 0.0)
 		return vec3(horizon);
-	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleH = 1.0 / fScaleHeight;
 	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
 	p = up * max(length(p), fInnerRadius);
 	float tSun = shellIntersection(p, l, fOuterRadius).y;
 	float tau = atmoOptic(p, p + l * max(tSun, 0.0), scaleH, scaleL);
-	float excess = max(tau - TAU_ZENITH, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
+	float excess = max(tau - atmoTauZenith, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
 	return exp(-(K_R * C_R + K_M) * excess) * horizon;
 }
 
@@ -357,7 +356,7 @@ float skySunOptic(vec3 p, vec3 q, float scaleH, float scaleL)
 
 vec3 skyRadiance(vec3 p, vec3 dir, vec3 l, out vec3 viewT)
 {
-	float scaleH = 4.0 / (fOuterRadius - fInnerRadius);
+	float scaleH = 1.0 / fScaleHeight;
 	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
 	vec3 ext = K_R * C_R + K_M;
 
@@ -368,7 +367,7 @@ vec3 skyRadiance(vec3 p, vec3 dir, vec3 l, out vec3 viewT)
 	vec3 sum = vec3(0.0);
 	float viewOptic = 0.0;
 	for (int i = 0; i < NUM_SKY_STEPS; i++) {
-		float dv = exp(-max(length(v) - fInnerRadius, 0.0) * scaleH);
+		float dv = atmoDensity(length(v) - fInnerRadius);
 		float tSun = max(shellIntersection(v, l, fOuterRadius).y, 0.0);
 		float n = (viewOptic + 0.5 * dv * segL
 		         + skySunOptic(v, v + l * tSun, scaleH, scaleL)) * (4.0 * PI);
@@ -575,7 +574,7 @@ void main()
 		// flat daylight-sky estimate instead, and a short blend band hides
 		// the switch. Zenith transmittance stands in for the stars' path.
 		vec3 cheapSky = SKY_FALLBACK * sky * mix(vec3(1.0), sunT, 0.5);
-		vec3 cheapT = exp(-(K_R * C_R + K_M) * (4.0 * PI) * TAU_ZENITH);
+		vec3 cheapT = exp(-(K_R * C_R + K_M) * (4.0 * PI) * atmoTauZenith);
 		float march = smoothstep(SKY_MARCH_FRESNEL.x, SKY_MARCH_FRESNEL.y, fresnel);
 		skyDisp = cheapSky;
 		starT = cheapT;
