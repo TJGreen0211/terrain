@@ -1,6 +1,7 @@
 #define _CRT_SECURE_NO_WARNINGS // nuklear's NK_INCLUDE_STANDARD_IO uses fopen
 #include "DebugGUI.h"
 #include "Atmosphere.h"
+#include "Clouds.h"
 #include "TerrainGen.h"
 #include "TerrainDetail.h"
 #include "Shadows.h"
@@ -142,6 +143,46 @@ static void atmosphereSection(void)
 	nk_layout_row_dynamic(ctx, rowHeight, 1);
 	if (nk_button_label(ctx, "Reset atmosphere"))
 		*a = atmosphereDefaults();
+}
+
+/* The active planet's cloud layer (Clouds.c). Every change rebuilds its
+   weather maps, so dragging a slider costs a couple of map builds a frame. */
+static void cloudsSection(void)
+{
+	cloudParams *c = &g_clouds;
+
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	nk_checkbox_label(ctx, "Clouds on (all planets; work in progress)", &g_cloudsEnabled);
+
+	nk_layout_row(ctx, NK_DYNAMIC, rowHeight, 3, sliderRatios);
+	nk_label(ctx, "Style", NK_TEXT_LEFT);
+	nk_slider_int(ctx, 0, &c->style, CLOUD_STYLE_COUNT - 1, 1);
+	nk_label(ctx, Clouds_StyleName(c->style), NK_TEXT_RIGHT);
+	sliderRow("Coverage", &c->coverage, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Climate weight", &c->climateWeight, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Altitude (m)", &c->altitude, 1.0e3f, 3.0e5f, 500.0f, "%.0f");
+	sliderRow("Thickness (m)", &c->thickness, 500.0f, 1.0e5f, 500.0f, "%.0f");
+	sliderRow("Opacity (tau)", &c->opacity, 0.5f, 80.0f, 0.5f, "%.1f");
+	sliderRow("Weather scale", &c->weatherScale, 0.1f, 1.5f, 0.01f, "%.2f");
+	sliderRow("Sharpness", &c->sharpness, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Detail", &c->detail, 0.0f, 0.9f, 0.01f, "%.2f");
+	sliderRow("Bands", &c->bands, 1.0f, 20.0f, 0.5f, "%.1f");
+	/* Written back only when moved: the round trip through days can change
+	   the last bit, and any change rebuilds the maps. */
+	float days = c->flowPeriod / 86400.0f, shown = days;
+	sliderRow("Flow period (d)", &days, 0.0f, 10.0f, 0.05f, "%.2f");
+	if (days != shown)
+		c->flowPeriod = days * 86400.0f;
+	sliderRow("Colour red", &c->color[0], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour green", &c->color[1], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour blue", &c->color[2], 0.0f, 1.0f, 0.01f, "%.2f");
+
+	groupLabel("Quality (all planets)");
+	sliderRowInt("Detail octaves", &g_cloudSlabOctaves, 0, 12);
+
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	if (nk_button_label(ctx, "Reset clouds (Earth)"))
+		*c = cloudDefaults();
 }
 
 /* Focus body, time scale and the date. The time scale slider is log-mapped
@@ -391,6 +432,10 @@ static void buildPanel(void)
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Atmosphere", NK_MINIMIZED)) {
 			atmosphereSection();
+			nk_tree_pop(ctx);
+		}
+		if (nk_tree_push(ctx, NK_TREE_TAB, "Clouds", NK_MINIMIZED)) {
+			cloudsSection();
 			nk_tree_pop(ctx);
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Water", NK_MINIMIZED)) {

@@ -3,6 +3,7 @@
 #include "Planets.h"
 #include "SolarSystem.h"
 #include "Rings.h"
+#include "Clouds.h"
 #include "Window.h"
 #include "WorldConfig.h"
 #include <math.h>
@@ -146,6 +147,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots)
 	glUniform2f(glGetUniformLocation(shader, "ringRadii"), RING_INNER, RING_OUTER);
 	glUniform3f(glGetUniformLocation(shader, "ringColor"), pi->ringColor[0], pi->ringColor[1], pi->ringColor[2]);
 	glUniform1i(glGetUniformLocation(shader, "dotMode"), isDot);
+	Clouds_BindStandIn(shader, id);
 	/* Pixel size in body radii at the body (edge anti-aliasing). */
 	glUniform1f(glGetUniformLocation(shader, "pixelR"), (float)(d / pixelsPerRadian() / R));
 	if (isDot) {

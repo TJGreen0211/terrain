@@ -53,130 +53,12 @@ const float PI = 3.14159265359;
 uniform vec3 lodCameraPos;
 uniform vec3 bodyCenter;
 
-// Atmospheric extinction (OpenGLSolar planet.frag port): dims the surface by
-// the transmittance along the surface-to-camera path through the dome's shell.
-// The atmosphere dome pass adds the in-scattered light over both the limb and
-// the planet disc; adding it here as well would count that radiance twice.
-// applyAtmosphere takes planet-local eye/fragment positions (shell-centred).
-uniform float hasAtmosphere;
-uniform float fInnerRadius;
-uniform float fOuterRadius;
-uniform float fScaleHeight;   // metres per e-fold of density (Atmosphere.c)
-#include "atmodensity.glsl"
-uniform vec3 C_R;
+// Extinction toward the camera, sunlight colour, skylight (Atmosphere.c).
+#include "atmosurface.glsl"
 
-// Keep the miss sentinel beyond the largest supported shell radius.
-const float ATMO_MAX = 1e30;
-uniform float K_R; // Rayleigh / Mie constants, shared with atmosphere.frag (Atmosphere.c)
-uniform float K_M;
-const int NUM_ATMO_STEPS = 5;
-// atmoOptic straight up from fInnerRadius to fOuterRadius (the same
-// 5-sample midpoint march), computed once on the CPU (Atmosphere.c).
-uniform float atmoTauZenith;
-
-vec2 shellIntersection(vec3 p, vec3 dir, float radius)
-{
-	float b = dot(p, dir);
-	float c = dot(p, p) - radius * radius;
-	float d = b * b - c;
-	if (d < 0.0) {
-		return vec2(ATMO_MAX, -ATMO_MAX);
-	}
-	d = sqrt(d);
-	return vec2(-b - d, -b + d);
-}
-
-float atmoOptic(vec3 p, vec3 q, float scaleH, float scaleL)
-{
-	vec3 step = (q - p) / float(NUM_ATMO_STEPS);
-	vec3 v = p + step * 0.5;
-	float sum = 0.0;
-	for (int i = 0; i < NUM_ATMO_STEPS; i++) {
-		// Clamped at the ground (same as quad.frag).
-		sum += atmoDensity(length(v) - fInnerRadius);
-		v += step;
-	}
-	return sum * length(step) * scaleL;
-}
-
-vec3 applyAtmosphere(vec3 color, vec3 eye, vec3 frag)
-{
-	float scaleH = 1.0 / fScaleHeight;
-	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
-
-	// Ray in the shell-centred frame: eye = camera, fragment at distance tFrag.
-	vec3 ray = frag - eye;
-	float tFrag = length(ray);
-	vec3 dir = ray / max(tFrag, 1e-6);
-
-	vec2 e = shellIntersection(eye, dir, fOuterRadius);
-	if (e.x > e.y) {
-		return color; // view ray misses the shell entirely
-	}
-	vec2 f = shellIntersection(eye, dir, fInnerRadius);
-	// Clip the path at the shell exit, the inner sphere, and the actual
-	// fragment hit: the tFrag term handles displaced surfaces, where f.x
-	// would overshoot or fall short of the visible surface.
-	// camera inside the shell: the path starts at the camera
-	e.x = max(e.x, 0.0);
-	e.y = min(e.y, tFrag);
-	if (f.x > e.x) {
-		e.y = min(e.y, f.x);
-	}
-	if (e.y <= e.x) {
-		return color;
-	}
-
-	float tau = atmoOptic(eye + dir * e.x, eye + dir * e.y, scaleH, scaleL) * (4.0 * PI);
-	return color * exp(-(K_R * C_R + K_M) * tau);
-}
-
-// Sunlight colour relative to an overhead sun and skylight fraction; must
-// match quad.frag (see the comments there) so the coastline stays seamless.
-#define SUN_EXTINCTION 0.5
-vec3 sunTransmittance(vec3 p, vec3 l, float sunAngle)
-{
-	vec3 up = normalize(p);
-	float horizon = smoothstep(-sunAngle, sunAngle, dot(up, l));
-	if (hasAtmosphere < 0.5 || horizon <= 0.0)
-		return vec3(horizon);
-	float scaleH = 1.0 / fScaleHeight;
-	float scaleL = 1.0 / (fOuterRadius - fInnerRadius);
-	p = up * max(length(p), fInnerRadius);
-	float tSun = shellIntersection(p, l, fOuterRadius).y;
-	float tau = atmoOptic(p, p + l * max(tSun, 0.0), scaleH, scaleL);
-	float excess = max(tau - atmoTauZenith, 0.0) * (4.0 * PI) * SUN_EXTINCTION;
-	return exp(-(K_R * C_R + K_M) * excess) * horizon;
-}
-
-#define NIGHT_FLOOR vec3(0.003, 0.004, 0.006)
-float skyFraction(float sunUp)
-{
-	return smoothstep(-0.2, 0.3, sunUp);
-}
-
-// Ring shadow (same analytic lookup as quad.frag).
-uniform float hasRing;
-uniform sampler1D ringProfile;
-uniform vec3 ringCenter;     // camera-relative planet centre
-uniform vec3 ringNormal;
-uniform vec2 ringRadii;      // inner, outer (world units)
-uniform float ringSunAngle;
-
-float ringTransmittance(vec3 p, vec3 l, float maxT) {
-	float mu = dot(l, ringNormal);
-	if (hasRing < 0.5 || abs(mu) < 1e-4)
-		return 1.0;
-	float t = -dot(p, ringNormal) / mu;
-	if (t <= 0.0 || t >= maxT)
-		return 1.0;
-	float r01 = (length(p + l * t) - ringRadii.x) / (ringRadii.y - ringRadii.x);
-	if (r01 <= 0.0 || r01 >= 1.0)
-		return 1.0;
-	float texelW = (ringRadii.y - ringRadii.x) / float(textureSize(ringProfile, 0));
-	float tau = textureLod(ringProfile, r01, log2(max(t * ringSunAngle / texelW, 1.0))).a;
-	return exp(-tau / abs(mu));
-}
+#include "ringshadow.glsl"
+// Cloud shadows (Clouds.c).
+#include "cloudlayer.glsl"
 
 // Seascape (Alexander Alekseev aka TDM) sea palette and lighting terms.
 const vec3 SEA_BASE = vec3(0.0, 0.09, 0.18);
@@ -367,29 +249,8 @@ vec3 skyRadiance(vec3 p, vec3 dir, vec3 l, out vec3 viewT)
 	return sum * (K_R * C_R * 0.75 * (1.0 + cc) + K_M * mie) * E;
 }
 
-// Tone map shared with quad.frag (ACES fit, exposure, gamma 2.2), so land
-// and sea go through the same curve and the coastline matches.
-const float EXPOSURE = 1.05;
-const float GAMMA = 2.2;
-vec3 toneMap(vec3 c)
-{
-	vec3 x = c * EXPOSURE;
-	x = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
-	return pow(x, vec3(1.0 / GAMMA));
-}
-
-// Inverse of toneMap. The dome and skybox are added straight to the
-// framebuffer (display values, never tone mapped), so a reflected sky
-// converts back to linear radiance here and comes out of toneMap looking
-// like the sky it mirrors.
-vec3 displayToLinear(vec3 d)
-{
-	vec3 y = pow(clamp(d, 0.0, 0.95), vec3(GAMMA));
-	vec3 a = 2.51 - 2.43 * y;
-	vec3 b = 0.03 - 0.59 * y;
-	vec3 x = (-b + sqrt(b * b + 4.0 * a * 0.14 * y)) / (2.0 * a);
-	return x / EXPOSURE;
-}
+// Tone map (and its inverse for the reflected sky), shared by every lit shader.
+#include "tonemap.glsl"
 
 void main()
 {
@@ -530,6 +391,7 @@ void main()
 	/* No lookup on the night side, where the weight is 0. */
 	float sun = shadowWeight > 0.0 ? mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight) : 1.0;
 	sun *= ringTransmittance(fragPos - ringCenter, L, length(lightPosition - fragPos));
+	sun *= cloudShadow(localPos, L, length(dist) * cloudPixAngle);
 	// Reddened, setting sunlight (quad.frag) and the twilight skylight fade.
 	vec3 sunT = sunTransmittance(localPos, L, ringSunAngle);
 	vec3 sunCol = sunT * sun;

@@ -4,6 +4,7 @@
 #include "SolarSystem.h"
 #include "Skybox.h"
 #include "Atmosphere.h"
+#include "Clouds.h"
 #include "LoadingScreen.h"
 #include "GUI.h"
 #include "DebugGUI.h"
@@ -1118,6 +1119,7 @@ int main(int argc, char *argv[])
 	Rings_AttachReceiver(waterShader);
 	Rings_AttachReceiver(ringShader);
 	Rings_AttachReceiver(atmosphereShader);
+	Clouds_Init();
 
 	/* The procedural system (SolarSystem.c): Earth as baked above, every
 	   other planet from the system seed (baked on approach). */
@@ -1247,6 +1249,9 @@ int main(int argc, char *argv[])
 		   background first (a few seconds as a stand-in; cached after).
 		   Bench runs switch and bake at once: repeatable frames. */
 		SolarSystem_Update(g_cam, g_focusBody, Bench_BlockingBakes());
+		/* Cloud weather maps for the planets that have them (a build or
+		   two per frame, as simulation time moves on). */
+		Clouds_Update(g_simTime);
 		int activeId = SolarSystem_ActiveBody();
 		int isEarth = activeId == BODY_EARTH;
 		const Body *planetB = &g_bodies[activeId];
@@ -1444,6 +1449,7 @@ int main(int argc, char *argv[])
 			                0, dxWaveTex, 0, 0, 0, 0);
 			setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
 			Rings_BindReceiver(quadShader);
+			Clouds_BindReceiver(quadShader, activeId);
 			glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */
 			glDepthMask(GL_FALSE);
 			QuadTree_DrawSphere(&planetBody, viewProj);
@@ -1470,6 +1476,7 @@ int main(int argc, char *argv[])
 			/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
 			setOceanUniforms(waterShader, 10);
 			Rings_BindReceiver(waterShader);
+			Clouds_BindReceiver(waterShader, activeId);
 			/* Water.frag's back-face early-out is only safe from outside the
 			   shell; the surface view (camera inside) must still see it. */
 			double shellCamDist = dlengthvec3(dsubvec3(g_cam, translation));
@@ -1486,6 +1493,22 @@ int main(int argc, char *argv[])
 		}
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
+		//Clouds: the layer as a slab over the planet (Clouds.c), blended over
+		//the land and water, before the rings (which must draw over it).
+		//From here on the scene's alpha holds the cloud cover the dome and
+		//the sun's glow scale their light by: cleared to 0 here (every
+		//frame: the glow always reads it), written only by the clouds (the
+		//rings mask it off).
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		if (planetFull) {
+			Prof_Begin(PROF_CLOUDS);
+			Clouds_Draw(sunProj, sunView, g_cam, activeId);
+			Prof_End(PROF_CLOUDS);
+		}
+
 		//TEST: flat animated wave grid above the planet (debug for FFT water)
 		/*{
 			vec3 testPos = {0.0, 0.0, 60.0};
@@ -1498,9 +1521,11 @@ int main(int argc, char *argv[])
 		//atmosphere dome, which takes the sheet's coverage out of its glow.
 		if (planetFull) {
 			Prof_Begin(PROF_RINGS);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   /* the cloud cover (above) */
 			Rings_DrawRocks(sunProj, sunView);
 			Rings_DrawSheet(sunProj, sunView);
 			Rings_DrawDust(sunProj, sunView);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			Prof_End(PROF_RINGS);
 		}
 

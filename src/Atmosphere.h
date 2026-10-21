@@ -37,7 +37,8 @@ void initAtmosphere(GLuint shader, sphere mesh);
 // world space; w != 0 -> positional, w == 0 -> directional.
 // The in-scatter along each view ray stops at the visible surface, read from
 // the scene's depth (Atmosphere_SetSceneDepth), so terrain standing above sea
-// level is not fogged by air behind it.
+// level is not fogged by air behind it. It is added times (1 - the target's
+// alpha): the cloud cover Clouds_Draw leaves there (0 without clouds).
 void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
                         float fInner, const atmosphereParams *atmo, vec4 lightPosition);
 

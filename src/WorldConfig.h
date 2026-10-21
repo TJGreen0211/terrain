@@ -2,7 +2,7 @@
 #define WORLDCONFIG_H
 
 /* ======================================================================
-   WORLD CONFIGURATION — every world-scale constant lives here.
+   WORLD CONFIGURATION ??? every world-scale constant lives here.
 
    Units: 1 world unit = 1 metre. Angles in degrees unless the name says
    _RAD. Times in seconds of simulation time.
@@ -197,6 +197,53 @@
    the shell the dome's 5-sample ray march starts to band. */
 #define ATMOSPHERE_SHELL_HEIGHT_M   (0.0424 * EARTH_RADIUS_M)          /* 270 km */
 #define ATMOSPHERE_SCALE_HEIGHT_M   (0.25 * ATMOSPHERE_SHELL_HEIGHT_M) /* 67.5 km */
+
+/* ---- Clouds (Clouds.c, clouds.frag, notes/volumetric-clouds.md) ---------
+   Earth's cloud layer; every other planet's is generated (SolarSystem.c)
+   from the ranges further down. The debug panel's Clouds section edits the
+   active planet's live. Step 1 shades the layer as one slab at its middle
+   altitude.
+   Weather scale: the largest weather system's wavelength, in planet radii.
+   Opacity: optical depth of a full cloud column (thick cumulus ~20-50).
+   Flow period: simulation seconds per cycle of the two-phase flow map that
+   moves the clouds along the wind map (clouds re-form over about this).
+   Keep wind x period well under the weather scale: winds differ between
+   latitude belts, and a long period shears the noise into streaks.
+   Heights follow the stylised terrain, not real Earth: land rises up to
+   landRelief = 0.025 radii (~160 km, TerrainGen.c), so a real 5 km layer
+   would sit under every continent. Earth's layer floats at half the land
+   relief, so high ground and ranges stand above it. */
+/* Clouds start switched off (work in progress, notes/volumetric-clouds.md);
+   the debug panel's Clouds section turns them on. */
+#define CLOUDS_ENABLED_DEFAULT      0
+#define CLOUD_EARTH_ALTITUDE_M      (0.0125 * EARTH_RADIUS_M)   /* 80 km */
+#define CLOUD_EARTH_THICKNESS_M     (0.005 * EARTH_RADIUS_M)    /* 32 km */
+#define CLOUD_EARTH_COVERAGE        0.6
+#define CLOUD_EARTH_CLIMATE_WEIGHT  0.8
+#define CLOUD_EARTH_OPACITY         40.0
+#define CLOUD_EARTH_WEATHER_SCALE   0.3
+#define CLOUD_EARTH_FLOW_PERIOD_S   (0.5 * 86400.0)
+/* Weather maps (equirect, like the climate map): width in texels, and the
+   simulation time between rebuilds (the two newest are crossfaded). At
+   most this many maps are built per frame across all planets. */
+#define CLOUD_MAP_WIDTH             1024
+#define CLOUD_MAP_STEP_S            3600.0
+#define CLOUD_MAP_BUILDS_PER_FRAME  2
+/* Slab detail below the map: octaves (quality knob; each costs two noise
+   lookups per pixel where it is visible) and the finest wavelength (m). */
+#define CLOUD_SLAB_OCTAVES          9
+#define CLOUD_DETAIL_MIN_WAVELENGTH_M 200.0
+/* Generated planets: layer altitude as a fraction of the planet's land
+   relief (Earth's is 0.5), thickness as a fraction of the altitude.
+   Overcast (Venus-like) decks sit above the highest peaks. Every layer is
+   kept under CLOUD_GEN_MAX_SHELL of the atmosphere shell. */
+#define CLOUD_GEN_ALTITUDE_MIN      0.35
+#define CLOUD_GEN_ALTITUDE_MAX      0.8
+#define CLOUD_GEN_OVERCAST_ALT_MIN  1.05
+#define CLOUD_GEN_OVERCAST_ALT_MAX  1.4
+#define CLOUD_GEN_THICKNESS_MIN     0.25
+#define CLOUD_GEN_THICKNESS_MAX     0.6
+#define CLOUD_GEN_MAX_SHELL         0.6
 
 /* ---- Ocean ---------------------------------------------------------------
    Geometric swell: rms height (m) the water shell's vertices are displaced

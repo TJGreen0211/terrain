@@ -123,8 +123,11 @@ void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
 		return;
 	}
 
+	/* Additive, times (1 - destination alpha): the cloud slab leaves its
+	   cover there and has already added the air in front of itself
+	   (clouds.frag); elsewhere the alpha is 0 (Main.c clears it). */
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE);
+	glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 
 	glUseProgram(shader);
 

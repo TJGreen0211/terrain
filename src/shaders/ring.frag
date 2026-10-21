@@ -8,6 +8,8 @@ in vec3 fragPos;
 
 out vec4 FragColor;
 
+#include "tonemap.glsl"
+
 uniform vec3 lightPosition;   // camera-relative
 uniform vec3 ringCenter;      // camera-relative planet centre
 uniform vec3 ringNormal;
@@ -91,10 +93,7 @@ void main()
 	vec3 radiance = I / max(alpha, 1e-5) + albedo * 0.01;
 	alpha *= smoothstep(ringFade.x, ringFade.y, length(fragPos));
 
-	// Same filmic tone map + gamma as quad.frag.
-	float exposure = 1.05;
-	vec3 x = radiance * exposure;
-	vec3 col = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
-	col = pow(col, vec3(1.0 / 2.2));
+	// The scene's tone map (tonemap.glsl).
+	vec3 col = toneMap(radiance);
 	FragColor = vec4(col * alpha, alpha);
 }

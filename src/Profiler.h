@@ -11,6 +11,7 @@ typedef enum ProfSection {
 	PROF_MOON,
 	PROF_PLANET,
 	PROF_WATER,
+	PROF_CLOUDS,
 	PROF_RINGS,
 	PROF_ATMOSPHERE,
 	PROF_OVERLAY,    /* resolve blit + UI */

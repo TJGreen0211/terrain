@@ -24,12 +24,14 @@ char *readShader(char *filename)
 	return content;	
 }
 
-/* Expands `#include "file"` lines (one level, path relative to the
-   including shader's directory), so shared GLSL lives in one file. A #line
-   after each insert keeps compile errors on the including file's numbering. */
-static char *expandIncludes(char *src, const char *shaderPath)
+/* Expands `#include "file"` lines (nested up to MAX_INCLUDE_DEPTH, path
+   relative to the including file's directory), so shared GLSL lives in one
+   file. A #line after each insert keeps compile errors on the including
+   file's numbering. */
+#define MAX_INCLUDE_DEPTH 8
+static char *expandIncludes(char *src, const char *shaderPath, int depth)
 {
-	if (src == NULL || strstr(src, "#include") == NULL)
+	if (src == NULL || depth >= MAX_INCLUDE_DEPTH || strstr(src, "#include") == NULL)
 		return src;
 
 	char dir[260] = "";
@@ -57,7 +59,7 @@ static char *expandIncludes(char *src, const char *shaderPath)
 			if (q0 && q1 && q1 < line + lineLen) {
 				char path[520];
 				snprintf(path, sizeof(path), "%s%.*s", dir, (int)(q1 - q0 - 1), q0 + 1);
-				insert = readShader(path);
+				insert = expandIncludes(readShader(path), path, depth + 1);
 				if (insert == NULL)
 					fprintf(stderr, "Shader include not found: %s\n", path);
 				snprintf(directive, sizeof(directive), "\n#line %d\n", lineNo + 1);
@@ -118,7 +120,7 @@ GLuint LoadShaderDefines(char *shaderPath, int shaderType, const char *defines)
 {
 	GLuint shader = glCreateShader(shaderType);
 
-	char *shaderStr = insertDefines(expandIncludes(readShader(shaderPath), shaderPath), defines);
+	char *shaderStr = insertDefines(expandIncludes(readShader(shaderPath), shaderPath, 0), defines);
 
 	printf("Compiling %d, %s shader\n", shaderType, shaderPath);
 	GLint length = strlen(shaderStr);

@@ -88,8 +88,10 @@ void drawSunGlow(mat4 proj, mat4 view, vec3 center, float radius)
 	glUseProgram(sunShader);
 	setupSunUniforms(proj, view, center, radius, 0.0f);
 
+	/* Additive, times (1 - destination alpha): the cloud cover Clouds_Draw
+	   leaves there (Main.c), so the sun's glare goes behind thick cloud. */
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE);
+	glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 	glDepthFunc(GL_GREATER);
 	glDepthMask(GL_FALSE);
 

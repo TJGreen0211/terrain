@@ -174,11 +174,75 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 	k->dropletsPerPx *= frange(r, 0.2, 0.7);
 }
 
+/* Cloud layer for a planet with air (none without). Its own RNG stream, so
+   adding clouds left every other generated property as it was. Climate
+   style for planets that generated water (their moisture map is weather);
+   otherwise none through patchy and banded to Venus-like overcast. Heights
+   scale with the planet's land relief (the terrain is stylised, ~20x real
+   relief), kept inside its air. */
+static void generateClouds(unsigned int seed, int id, PlanetInfo *p)
+{
+	cloudParams *c = &p->clouds;
+	*c = cloudDefaults();
+	c->style = CLOUD_STYLE_NONE;
+	if (!p->hasAtmosphere || p->atmo.shellHeight <= 0.0f)
+		return;
+	Rng r = rngFor(seed, 3000 + id);
+	double u = rnd(&r);
+	if (p->hasWater)
+		c->style = CLOUD_STYLE_CLIMATE;
+	else if (u < 0.2)
+		return;
+	else if (u < 0.55)
+		c->style = CLOUD_STYLE_PATCHY;
+	else if (u < 0.8)
+		c->style = CLOUD_STYLE_BANDED;
+	else
+		c->style = CLOUD_STYLE_OVERCAST;
+
+	int overcast = c->style == CLOUD_STYLE_OVERCAST;
+	double relief = p->style.landRelief * g_bodies[id].radius;
+	double alt = relief * (overcast ? range(&r, CLOUD_GEN_OVERCAST_ALT_MIN, CLOUD_GEN_OVERCAST_ALT_MAX)
+	                                : range(&r, CLOUD_GEN_ALTITUDE_MIN, CLOUD_GEN_ALTITUDE_MAX));
+	c->altitude = (float)fmin(alt, CLOUD_GEN_MAX_SHELL * p->atmo.shellHeight);
+	c->thickness = c->altitude * frange(&r, CLOUD_GEN_THICKNESS_MIN, CLOUD_GEN_THICKNESS_MAX);
+	switch (c->style) {
+	case CLOUD_STYLE_CLIMATE:
+		c->coverage = frange(&r, 0.4, 0.7);
+		c->opacity = (float)logRange(&r, 10.0, 40.0);
+		break;
+	case CLOUD_STYLE_PATCHY:
+		c->coverage = frange(&r, 0.15, 0.55);
+		c->opacity = (float)logRange(&r, 3.0, 20.0);
+		break;
+	case CLOUD_STYLE_BANDED:
+		c->coverage = frange(&r, 0.3, 0.6);
+		c->opacity = (float)logRange(&r, 5.0, 25.0);
+		c->bands = frange(&r, 4.0, 14.0);
+		break;
+	default:
+		c->coverage = frange(&r, 0.9, 1.0);
+		c->opacity = (float)logRange(&r, 20.0, 60.0);
+		break;
+	}
+	c->weatherScale = frange(&r, 0.3, 0.7);
+	c->sharpness = frange(&r, 0.3, 0.8);
+	c->detail = frange(&r, 0.25, 0.6);
+	/* Flow cycle tied loosely to the spin, kept short enough that the
+	   wind belts do not shear the noise into streaks. */
+	double spin = fabs(g_bodies[id].rotationPeriod);
+	c->flowPeriod = (float)fmin(fmax(spin * range(&r, 0.5, 1.5), 0.25 * 86400.0), 1.5 * 86400.0);
+	/* Near-white, faintly tinted (sulphur yellows, dusty tans, cold blues). */
+	hsv(rnd(&r), range(&r, 0.0, overcast ? 0.3 : 0.12), range(&r, 0.85, 1.0), c->color);
+	c->seed = (unsigned int)(splitmix(&r.s) & 0x7fffffff);
+}
+
 static void freeBake(PlanetInfo *p)
 {
 	if (!p->baked)
 		return;
 	TerrainGen_FreePlanet(&p->gen);
+	Clouds_Drop((int)(p - g_planetInfo));   /* its weather came from that bake */
 	glDeleteTextures(1, &p->heightTex);
 	p->heightTex = 0;
 	p->baked = 0;
@@ -228,6 +292,7 @@ void SolarSystem_Generate(unsigned int seed)
 			b->radius = logRange(&r, ROCKY_RADIUS_MIN_M, ROCKY_RADIUS_MAX_M);
 			b->rotationPeriod = logRange(&r, 0.4, 60.0) * 86400.0;
 			generateRocky(&r, p, b, 1.0 / sqrt(aAU[i]), 0);
+			generateClouds(seed, id, p);
 			p->hasRings = rnd(&r) < ROCKY_RING_CHANCE;
 		}
 		p->ringSeed = (unsigned int)(splitmix(&r.s) & 0x7fffffff);
@@ -253,6 +318,7 @@ void SolarSystem_Generate(unsigned int seed)
 		b->rotationPeriod = logRange(&r, 0.2, 6.0) * 86400.0;
 		b->axialTilt = randomTilt(&r);
 		generateRocky(&r, p, b, 1.0 / sqrt(a), 1);
+		generateClouds(seed, id, p);
 		p->hasRings = rnd(&r) < DWARF_RING_CHANCE;
 		p->ringSeed = (unsigned int)(splitmix(&r.s) & 0x7fffffff);
 		hsv(range(&r, 0.05, 0.12), range(&r, 0.1, 0.35), range(&r, 0.6, 0.9), p->ringColor);
@@ -277,6 +343,9 @@ void SolarSystem_Generate(unsigned int seed)
 		        SolarSystem_TypeName(p->type), g_bodies[id].orbit.a / AU_M, g_bodies[id].radius / 1000.0,
 		        p->hasAtmosphere ? "  atmosphere" : "", p->hasRings ? "  rings" : "",
 		        p->hasWater ? "  (water)" : "");
+		if (p->clouds.style != CLOUD_STYLE_NONE)
+			fprintf(stderr, "            clouds: %s, %.0f km up, coverage %.2f\n",
+			        Clouds_StyleName(p->clouds.style), p->clouds.altitude / 1000.0, p->clouds.coverage);
 	}
 }
 
@@ -292,6 +361,7 @@ void SolarSystem_Init(void)
 	e->hasRings = 1;
 	e->ringSeed = g_terrainBake.seed;   /* Earth's rings follow its terrain seed */
 	e->atmo = g_atmosphere;              /* for its stand-in until it is first saved */
+	e->clouds = g_clouds;
 	e->ringColor[0] = 0.80f; e->ringColor[1] = 0.74f; e->ringColor[2] = 0.66f;
 	e->baked = 1;
 	activeBody = BODY_EARTH;
@@ -311,6 +381,7 @@ static void saveActive(void)
 	p->gen = g_planetGen;
 	p->style = g_planetStyle;
 	p->atmo = g_atmosphere;
+	p->clouds = g_clouds;
 	p->bake = g_terrainBake;
 	p->heightTex = planetHeightTex;
 }
@@ -321,6 +392,7 @@ static void loadActive(int body)
 	g_planetGen = p->gen;
 	g_planetStyle = p->style;
 	g_atmosphere = p->atmo;
+	g_clouds = p->clouds;
 	g_terrainBake = p->bake;
 	planetHeightTex = p->heightTex;
 	activeBody = body;

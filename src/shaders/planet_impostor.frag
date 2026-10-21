@@ -31,8 +31,36 @@ uniform float pixelR;       // one pixel at the body, in body radii
 uniform int dotMode;
 uniform float dotFlux;      // dot: total light (summed over pixels)
 uniform float dotSigma;     // dot: gaussian width, px
+// The cloud layer (Clouds_BindStandIn), once the planet is baked: the same
+// weather maps the full-detail slab draws, at the map's own resolution.
+uniform float cloudsOn;
+uniform sampler2D cloudMapA;
+uniform sampler2D cloudMapB;
+uniform float cloudMapBlend;
+uniform float cloudMapMaxLod;
+uniform float cloudTexelAngle;
+uniform float cloudOpacity;
+uniform float cloudDetail;
+uniform float cloudEdge;
+uniform vec3 cloudColor;
 
 out vec4 FragColor;
+
+// Cloud cover over body-fixed direction nb seen at cosine mu: alpha and
+// reflectance, as clouds.frag shades a slab from above (map coverage with
+// the detail at its mean: it is far below a pixel here).
+vec2 standInCloud(vec3 nb, float mu)
+{
+	float z = clamp(nb.z, -1.0, 1.0);
+	float cosLat = max(sqrt(max(1.0 - z * z, 1e-4)), 0.02);
+	float lod = clamp(log2(max(pixelR / max(mu, 0.2) / cloudTexelAngle, 1e-4) / cosLat), 0.0, cloudMapMaxLod);
+	vec2 uv = vec2((atan(nb.y, nb.x) / 3.14159265 + 1.0) * 0.5, asin(z) / 3.14159265 + 0.5);
+	vec2 w = mix(textureLod(cloudMapA, uv, lod).rg, textureLod(cloudMapB, uv, lod).rg, cloudMapBlend);
+	float cov = smoothstep(-cloudEdge, cloudEdge, w.x - 0.5);
+	float tau = cloudOpacity * w.y;
+	float reflectance = 1.0 - 1.0 / (1.0 + 0.1125 * tau);   // clouds.frag's two-stream slab
+	return vec2(cov * (1.0 - exp(-tau / max(mu, 0.1))), reflectance);
+}
 
 float depthOf(vec3 p)
 {
@@ -148,6 +176,10 @@ void main()
 			}
 		}
 		vec3 lit = albedo * (light + 0.02);
+		if (cloudsOn > 0.5) {
+			vec2 cl = standInCloud(viewToBody * n, max(dot(n, -d), 0.0));
+			lit = mix(lit, cloudColor * cl.y * (light + 0.02), cl.x);
+		}
 		// Air at the limb: a tinted rim on the day side.
 		if (atmoThick > 0.0) {
 			float mu = max(dot(n, -d), 0.0);

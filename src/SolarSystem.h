@@ -5,6 +5,7 @@
 #include "Bodies.h"
 #include "TerrainGen.h"
 #include "Atmosphere.h"
+#include "Clouds.h"
 
 /* The procedural solar system: every planet but Earth (and its Moon) is
    generated from the system seed (separate from Earth's terrain seed),
@@ -13,7 +14,7 @@
 
    Only one terrain planet is drawn in full at a time: the active one. Its
    state lives in the globals the planet passes have always used
-   (g_planetGen, g_planetStyle, g_atmosphere, g_terrainBake,
+   (g_planetGen, g_planetStyle, g_atmosphere, g_clouds, g_terrainBake,
    planetHeightTex, the ring state), so the debug panel edits whichever
    planet is active. Activating another planet saves those into its
    PlanetInfo and loads the new one. A planet's terrain is baked the first
@@ -38,6 +39,7 @@ typedef struct PlanetInfo {
 	TerrainBakeSettings bake;
 	PlanetStyle style;
 	atmosphereParams atmo;   /* shellHeight 0 = no atmosphere */
+	cloudParams clouds;      /* style none = no cloud layer */
 	/* Baked terrain (rocky / dwarf / Earth). */
 	int baked;
 	GLuint heightTex;
