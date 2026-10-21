@@ -39,6 +39,7 @@ uniform float oceanDepth;
 // water column thickness behind each pixel matches the drawn seafloor.
 uniform float oceanRelief;
 // Light absorbed per planet radius of water path: clear shallows, opaque abyss.
+// quad.frag uses the same value to skip seafloor this water hides.
 const float WATER_ABSORB = 500.0;
 // 1 when the camera is outside the water shell; gates the back-face early-out.
 uniform float outsideShell;
@@ -155,7 +156,9 @@ float skyFraction(float sunUp)
 	return smoothstep(-0.2, 0.3, sunUp);
 }
 
-// Sun visibility from the shadow map (same lookup as quad.frag): 1 = lit.
+// Sun visibility from the shadow map (quad.frag's lookup and offsets): 1 =
+// lit. Four bilinear-PCF taps half a texel out cover the same ~3x3-texel
+// footprint as quad.frag's nine, at under half the cost.
 float sunVisibility(vec3 p, vec3 n, vec3 l) {
 	float ndl = clamp(dot(n, l), 0.0, 1.0);
 	p += n * shadowTexel * (1.0 + 2.0 * (1.0 - ndl)) + l * shadowTexel;
@@ -163,12 +166,12 @@ float sunVisibility(vec3 p, vec3 n, vec3 l) {
 	vec3 s = c.xyz / c.w * 0.5 + 0.5;
 	if (s.z >= 1.0)
 		return 1.0;
-	vec2 texel = 1.0 / vec2(textureSize(depthMap, 0));
-	float lit = 0.0;
-	for (int x = -1; x <= 1; ++x)
-		for (int y = -1; y <= 1; ++y)
-			lit += texture(depthMap, vec3(s.xy + vec2(x, y) * texel, s.z));
-	return lit / 9.0;
+	vec2 texel = 0.5 / vec2(textureSize(depthMap, 0));
+	float lit = texture(depthMap, vec3(s.xy + vec2(-texel.x, -texel.y), s.z))
+	          + texture(depthMap, vec3(s.xy + vec2( texel.x, -texel.y), s.z))
+	          + texture(depthMap, vec3(s.xy + vec2(-texel.x,  texel.y), s.z))
+	          + texture(depthMap, vec3(s.xy + vec2( texel.x,  texel.y), s.z));
+	return lit * 0.25;
 }
 
 // Ring shadow (same analytic lookup as quad.frag).
@@ -543,7 +546,8 @@ void main()
 	// planet body self-occludes (matches quad.frag so the coast is seamless).
 	vec3 upGeo = normalize(localPos);
 	float shadowWeight = smoothstep(-0.06, 0.0, dot(upGeo, L));
-	float sun = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
+	/* No lookup on the night side, where the weight is 0. */
+	float sun = shadowWeight > 0.0 ? mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight) : 1.0;
 	sun *= ringTransmittance(fragPos - ringCenter, L, length(lightPosition - fragPos));
 	// Reddened, setting sunlight (quad.frag) and the twilight skylight fade.
 	vec3 sunT = sunTransmittance(localPos, L, ringSunAngle);
@@ -636,9 +640,12 @@ void main()
 	// Sea ice: the land's sea-level temperature (quad.frag) with the same
 	// noise scale; inside the margin the pack breaks into floes. The floe
 	// edge softens with the pixel footprint so it does not alias from orbit.
-	float iceN1 = vnoise3(dObj * 40.0);
-	float seaTemp = cosLat * 1.2 - 0.2 + tempOffset + (iceN1 - 0.5) * 0.08;
+	// The noise moves the temperature by at most +-0.04: skip it (and all
+	// the ice work) where even its coldest value stays ice-free.
 	float iceT = snowTemp + SEA_ICE_OFFSET;
+	float baseTemp = cosLat * 1.2 - 0.2 + tempOffset;
+	float iceN1 = baseTemp - 0.04 < iceT + 0.02 ? vnoise3(dObj * 40.0) : 0.5;
+	float seaTemp = baseTemp + (iceN1 - 0.5) * 0.08;
 	float iceCover = 1.0 - smoothstep(iceT - 0.06, iceT + 0.02, seaTemp);
 	// Floe noise only where there is ice to break up (polar seas).
 	float floeN = 0.5;

@@ -599,8 +599,8 @@ void Rings_DrawDust(mat4 proj, mat4 view)
 	glUniform1ui(glGetUniformLocation(s, "seed"), g_ring.seed ^ 0xD057u);
 	glUniform1i(glGetUniformLocation(s, "perCell"), DUST_PER_CELL);
 	glUniform1f(glGetUniformLocation(s, "density"), DUST_DENSITY);
-	/* Pixels per world unit at unit distance (45 deg vertical fov). */
-	glUniform1f(glGetUniformLocation(s, "projScale"), getWindowHeight() / (2.0f * tanf(22.5f * (float)M_PI / 180.0f)));
+	/* Pixels per world unit at unit distance. */
+	glUniform1f(glGetUniformLocation(s, "projScale"), getWindowHeight() / (2.0f * tanf(0.5f * (float)CAMERA_FOV_Y_DEG * (float)M_PI / 180.0f)));
 	beginTranslucent();
 	glEnable(GL_PROGRAM_POINT_SIZE);
 	glBindVertexArray(g_ring.emptyVAO);

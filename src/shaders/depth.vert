@@ -49,9 +49,9 @@ void main()
 			lift = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
 			     - oceanRelief * s * s;
 		}
-		// Skirt: radius (1 + lift) * 0.995, as an offset from 1.
+		// Skirt: same drop as quad.vert, as an offset from 1.
 		if (vPosition.w > 0.5)
-			lift = 0.995 * lift - 0.005;
+			lift = lift - patchSkirt();
 		world = sphere + patchOffset(d * lift, model);
 	}
 	else {

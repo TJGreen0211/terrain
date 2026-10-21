@@ -1,13 +1,17 @@
 #version 410
 #extension GL_ARB_conservative_depth : enable
 
-// The seafloor branch only ever pushes gl_FragDepth farther away, which in
-// the reversed-Z main pass (Main.c setReversedDepth) means a smaller value,
-// so declare it depth_less: the GPU can keep early/hierarchical-Z rejection
-// for this (expensive) shader instead of running it for every overlapping
-// fragment.
+// Two programs are built from this source (Main.c), for a depth prepass:
+// DEPTH_PREPASS writes only depth (the surface, with seafloor pushed behind
+// the water, seafloorDepth below) and returns before any shading; the
+// colour pass then runs the full shader with depth test >= and no depth
+// writes, so each pixel is shaded about once. Writing gl_FragDepth in the
+// colour pass instead disables early-Z on some GPUs (Intel ignores the
+// depth_less hint) and ran this shader for every hidden fragment.
+#ifdef DEPTH_PREPASS
 #ifdef GL_ARB_conservative_depth
 layout(depth_less) out float gl_FragDepth;
+#endif
 #endif
 
 in vec2 fTexCoords;
@@ -49,7 +53,12 @@ uniform float lodK;
 // ramp and the material bands all key off this single value, and water.frag
 // gets the identical value so the discard edge sits on the coastline.
 uniform float seaLevel;
-// Main-pass near plane, to rewrite gl_FragDepth (see the seafloor branch).
+// Water column under sea level (same values and profile as water.frag), for
+// skipping seafloor the water hides (see the deep-sea early-out in main).
+uniform float oceanDepth;
+uniform float oceanRelief;
+const float WATER_ABSORB = 500.0;   // must match water.frag
+// Main-pass near plane, to rewrite gl_FragDepth (see seafloorDepth).
 // The main projection is infinite reversed-Z: depth = depthNear / distance
 // along the view axis.
 uniform float depthNear;
@@ -325,6 +334,33 @@ float ringTransmittance(vec3 p, vec3 l, float maxT) {
 	return exp(-tau / abs(mu));
 }
 
+// Depth of this fragment for the prepass. Seafloor (e < seaLevel), seen
+// through the translucent water: coarse LOD triangles straddling the coast
+// interpolate their land height across pixels the fine field calls sea, so
+// the floor can sit at or above the water (jagged strips, or z-fighting the
+// shell in the shallows). Discarding would punch a hole now that the water
+// is see-through, so push the fragment's depth along the view ray to just
+// under the shell instead: the water then draws over it and the coastline
+// follows the per-pixel mask at every LOD. The clearance grows with the
+// float reversed-Z depth resolution, a constant ~2^-23 of the distance, so
+// it holds at range.
+float seafloorDepth(float e, vec3 camDir, float graz)
+{
+	if (e >= seaLevel)
+		return gl_FragCoord.z;
+	float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
+	float D = length(camDir);
+	float clearance = max(SEA_CLIP * R, 4.0 * D / 8388608.0);
+	float poke = (fRadius - 1.0) * R + clearance;   // world units above the target
+	if (poke <= 0.0)
+		return gl_FragCoord.z;
+	// Reversed-Z infinite: depth = near / zEye; view-space depth scales with
+	// distance along the ray.
+	float zEye = depthNear / max(gl_FragCoord.z, 1e-30);
+	float zNew = zEye * (D + poke / graz) / max(D, 1e-4);
+	return depthNear / zNew;
+}
+
 void main()
 {
 	vec3 ambientSky = vec3(0.10, 0.12, 0.16);   // cool skylight: keeps the night side off black
@@ -333,9 +369,6 @@ void main()
 	// Height field sampled from the startup-baked texture (rotates with the
 	// planet: dObj lives in the planet-local frame). Every face samples this
 	// one continuous field, so it is seamless across all six quadtree faces.
-	// Only the seafloor branch moves it; every path must write it.
-	gl_FragDepth = gl_FragCoord.z;
-
 	vec3 dObj = normalize(fSurfDir);
 	vec3 up = (abs(dObj.y) > 0.99) ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
 	vec3 T = normalize(cross(up, dObj));
@@ -352,6 +385,22 @@ void main()
 	// texels wide and blurred every crease up close.
 	float eps = TEXEL_ANG * exp2(clamp(lodBase, 0.0, 11.0));
 	float h  = heightAt(dObj, lodBase);
+#ifdef DEPTH_PREPASS
+	gl_FragDepth = seafloorDepth(clamp(h, 0.0, 1.0), camDir, graz);
+	return;
+#endif
+	// Deep sea: the water drawn over this pixel lets through at most its
+	// column transmittance of the seafloor (water.frag blends with alpha >=
+	// 1 - transmit, in display space), so below 1% the floor cannot show
+	// by more than ~1/255 of its (dark) brightness: skip all its lighting.
+	if (h < seaLevel) {
+		float dT = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
+		float transmit = exp(-WATER_ABSORB * oceanRelief * dT * dT / graz);
+		if (transmit < 0.01) {
+			FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+			return;
+		}
+	}
 	float hT = heightAt(normalize(dObj + T * eps), lodBase)
 	         - heightAt(normalize(dObj - T * eps), lodBase);
 	float hB = heightAt(normalize(dObj + B * eps), lodBase)
@@ -364,27 +413,8 @@ void main()
 	float rough, waterMask;
 
 	if (e < seaLevel) {
-		// Seafloor, seen through the translucent water. Coarse LOD triangles
-		// straddling the coast interpolate their land height across pixels
-		// the fine field calls sea, so the floor can sit at or above the
-		// water (jagged strips, or z-fighting the shell in the shallows).
-		// Discarding would punch a hole now that the water is see-through, so
-		// push the fragment's depth along the view ray to just under the
-		// shell instead: the water then draws over it and the coastline
-		// follows the per-pixel mask at every LOD. The clearance grows with
-		// the float reversed-Z depth resolution, a constant ~2^-23 of the
-		// distance, so it holds at range.
-		float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
-		float D = length(camDir);
-		float clearance = max(SEA_CLIP * R, 4.0 * D / 8388608.0);
-		float poke = (fRadius - 1.0) * R + clearance;   // world units above the target
-		if (poke > 0.0) {
-			// Reversed-Z infinite: depth = near / zEye.
-			float zEye = depthNear / max(gl_FragCoord.z, 1e-30);
-			// View-space depth scales with distance along the ray.
-			float zNew = zEye * (D + poke / graz) / max(D, 1e-4);
-			gl_FragDepth = depthNear / zNew;
-		}
+		// Seafloor, seen through the translucent water (its depth was
+		// pushed behind the shell in the prepass: seafloorDepth).
 		albedo = seafloorColor(e);
 		rough = 0.9;
 		waterMask = 0.0;

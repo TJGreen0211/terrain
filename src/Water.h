@@ -41,6 +41,11 @@ typedef struct waves {
    [3] tiling, [4] choppiness. Edited from the debug panel. */
 extern float g_waveParams[5];
 
+/* rms of the calibrated FFT height field, in body radii, at wave height
+   1.0 (initializeWaves). water.vert rescales the geometric displacement
+   from it to OCEAN_SWELL_RMS_M (WorldConfig.h). */
+#define OCEAN_FFT_RMS 0.0025f
+
 void generateWaves(waves *water);
 void initializeWaves(waves *water, int dim);
 

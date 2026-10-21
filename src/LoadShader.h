@@ -13,5 +13,7 @@
 #include <stdlib.h>
 
 GLuint LoadShader(char *shaderPath, int shaderType);
+/* Same, with `defines` (e.g. "#define FOO\n") inserted after #version. */
+GLuint LoadShaderDefines(char *shaderPath, int shaderType, const char *defines);
 
 #endif

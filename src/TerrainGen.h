@@ -115,4 +115,13 @@ extern TerrainBakeSettings g_terrainBake;
 unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, PlanetGenParams *out,
                                      void (*step)(void));
 
+/* Height bounds of the last bake (raw field units, like seaLevel), for the
+   quadtree's culling and split distances. HeightRange covers every value
+   the body shaders can sample over a spherical cap (dir: body-local unit
+   centre, capAngle in radians) at mip `lod` or finer, bilinear and
+   trilinear filtering included. Both return 0 (range 0..0) before the
+   first bake. */
+int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, float *hmin, float *hmax);
+int TerrainGen_GlobalRange(float *hmin, float *hmax);
+
 #endif

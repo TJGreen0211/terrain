@@ -8,6 +8,7 @@ SRCS = Main.c \
 	Atmosphere.c \
 	Rings.c \
 	Bodies.c \
+	Profiler.c \
 	LoadingScreen.c \
 	GUI.c \
 	DebugGUI.c \

@@ -6,8 +6,13 @@
 
 void createShader(GLuint *shader, char *vert, char *frag)
 {
-	GLuint vertShader = LoadShader(vert, GL_VERTEX_SHADER);
-    GLuint fragShader = LoadShader(frag, GL_FRAGMENT_SHADER);
+	createShaderDefines(shader, vert, frag, NULL);
+}
+
+void createShaderDefines(GLuint *shader, char *vert, char *frag, const char *defines)
+{
+	GLuint vertShader = LoadShaderDefines(vert, GL_VERTEX_SHADER, defines);
+    GLuint fragShader = LoadShaderDefines(frag, GL_FRAGMENT_SHADER, defines);
     *shader = glCreateProgram();
     glAttachShader(*shader, vertShader);
     glAttachShader(*shader, fragShader);

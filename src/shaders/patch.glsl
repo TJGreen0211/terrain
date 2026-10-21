@@ -19,7 +19,7 @@
 // This is an identity, not an approximation, so one path serves every
 // patch size.
 
-layout (location = 4) in vec4 pC0;   // xyz: corner at (0,0), camera-relative metres
+layout (location = 4) in vec4 pC0;   // xyz: corner at (0,0), camera-relative metres; w: skirt drop
 layout (location = 5) in vec4 pC1;   // (1,0)
 layout (location = 6) in vec4 pC2;   // (0,1)
 layout (location = 7) in vec4 pC3;   // (1,1)
@@ -35,6 +35,14 @@ uniform int patchLegacy;
 float patchCell()
 {
 	return pQ0.w;
+}
+
+// How far (body radii) this patch's skirt wall hangs below its surface:
+// sized per patch by the walk from its height range (skirtDrop in
+// QuadTree.c, whose culling bounds include it).
+float patchSkirt()
+{
+	return pC0.w;
 }
 
 // Body-local unit direction of patch point uv.

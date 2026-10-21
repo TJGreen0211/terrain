@@ -1081,6 +1081,175 @@ static void uploadShaping(const TerrainBakeSettings *bs)
 
 /* ---------------- Full bake ---------------- */
 
+/* ---------------- Height bounds pyramid ----------------
+   Min/max mip pyramid of the final field, for the quadtree's per-node
+   culling and split distances. Level k texel = min/max of the 2x2 (or 2x1)
+   block of level k-1: the same footprint glGenerateMipmap averages, so any
+   mip sample the shaders take lies inside the [min, max] of its block. */
+#define PYR_MAX_LEVELS 16
+static struct {
+	int levels;
+	int w[PYR_MAX_LEVELS], h[PYR_MAX_LEVELS];
+	float *mn[PYR_MAX_LEVELS], *mx[PYR_MAX_LEVELS];   /* level 0: mn == mx == the field */
+} g_pyr;
+
+static void freePyramid(void)
+{
+	for (int k = 0; k < g_pyr.levels; k++) {
+		free(g_pyr.mn[k]);
+		if (k > 0)
+			free(g_pyr.mx[k]);
+	}
+	memset(&g_pyr, 0, sizeof g_pyr);
+}
+
+/* Takes ownership of h (W x H, the uploaded field). */
+static void buildPyramid(float *h, int W, int H)
+{
+	freePyramid();
+	g_pyr.w[0] = W; g_pyr.h[0] = H;
+	g_pyr.mn[0] = g_pyr.mx[0] = h;
+	g_pyr.levels = 1;
+	while ((g_pyr.w[g_pyr.levels-1] > 1 || g_pyr.h[g_pyr.levels-1] > 1) && g_pyr.levels < PYR_MAX_LEVELS) {
+		int k = g_pyr.levels;
+		int pw = g_pyr.w[k-1], ph = g_pyr.h[k-1];
+		int w = pw > 1 ? pw / 2 : 1, hh = ph > 1 ? ph / 2 : 1;
+		float *mn = malloc((size_t)w * hh * sizeof(float));
+		float *mx = malloc((size_t)w * hh * sizeof(float));
+		const float *pmn = g_pyr.mn[k-1], *pmx = g_pyr.mx[k-1];
+		for (int y = 0; y < hh; y++) {
+			int y0 = 2*y, y1 = 2*y + 1 < ph ? 2*y + 1 : ph - 1;
+			for (int x = 0; x < w; x++) {
+				int x0 = 2*x, x1 = 2*x + 1 < pw ? 2*x + 1 : pw - 1;
+				size_t a = (size_t)y0*pw + x0, b = (size_t)y0*pw + x1;
+				size_t c = (size_t)y1*pw + x0, d = (size_t)y1*pw + x1;
+				mn[(size_t)y*w + x] = fminf(fminf(pmn[a], pmn[b]), fminf(pmn[c], pmn[d]));
+				mx[(size_t)y*w + x] = fmaxf(fmaxf(pmx[a], pmx[b]), fmaxf(pmx[c], pmx[d]));
+			}
+		}
+		g_pyr.w[k] = w; g_pyr.h[k] = hh;
+		g_pyr.mn[k] = mn; g_pyr.mx[k] = mx;
+		g_pyr.levels++;
+	}
+}
+
+int TerrainGen_GlobalRange(float *hmin, float *hmax)
+{
+	if (g_pyr.levels == 0) {
+		*hmin = *hmax = 0.0f;
+		return 0;
+	}
+	int top = g_pyr.levels - 1;
+	*hmin = g_pyr.mn[top][0];
+	*hmax = g_pyr.mx[top][0];
+	return 1;
+}
+
+int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, float *hmin, float *hmax)
+{
+	if (g_pyr.levels == 0) {
+		*hmin = *hmax = 0.0f;
+		return 0;
+	}
+
+	/* Cap -> lat/lon box -> the shaders' equirectangular uv:
+	   u = atan2(y, x)/(2 pi) + 0.5, v = asin(z)/pi + 0.5. */
+	double lat = asin(fmax(fmin(dir[2], 1.0), -1.0));
+	double lon = atan2(dir[1], dir[0]);
+	double latLo = lat - capAngle, latHi = lat + capAngle;
+	double u0 = 0.0, u1 = 1.0;
+	if (latLo > -0.5*M_PI && latHi < 0.5*M_PI) {
+		double s = sin(capAngle) / cos(lat);
+		if (s < 1.0) {
+			double dLon = asin(s);
+			u0 = (lon - dLon) / (2.0*M_PI) + 0.5;
+			u1 = (lon + dLon) / (2.0*M_PI) + 0.5;
+		}
+	}
+	double v0 = fmax(latLo / M_PI + 0.5, 0.0), v1 = fmin(latHi / M_PI + 0.5, 1.0);
+
+	/* Mip 0 only (every deep node at planet scale): the sampled surface is
+	   exactly the bilinear interpolation of the texels, whose extremes over
+	   a box lie at the box corners, where its edges cross texel rows /
+	   columns, or at texel centres inside it. Evaluating just those gives
+	   the exact range: tight bounds for nodes far smaller than a texel. */
+	if (lod <= 0.0) {
+		int W = g_pyr.w[0], H = g_pyr.h[0];
+		double xa = u0 * W - 0.5, xb = u1 * W - 0.5;
+		double ya = v0 * H - 0.5, yb = v1 * H - 0.5;
+		if (xb - xa <= 16.0 && yb - ya <= 16.0) {
+			double xs[20], ys[20];
+			int nx = 0, ny = 0;
+			xs[nx++] = xa;
+			for (double g = floor(xa) + 1.0; g < xb; g += 1.0) xs[nx++] = g;
+			xs[nx++] = xb;
+			ys[ny++] = ya;
+			for (double g = floor(ya) + 1.0; g < yb; g += 1.0) ys[ny++] = g;
+			ys[ny++] = yb;
+
+			const float *f = g_pyr.mn[0];
+			float lo = FLT_MAX, hi = -FLT_MAX;
+			for (int j = 0; j < ny; j++) {
+				/* GL clamp-to-edge in v, repeat in u. */
+				int y0 = (int)floor(ys[j]);
+				double fy = ys[j] - y0;
+				int y1 = y0 + 1;
+				y0 = y0 < 0 ? 0 : (y0 > H - 1 ? H - 1 : y0);
+				y1 = y1 < 0 ? 0 : (y1 > H - 1 ? H - 1 : y1);
+				for (int i = 0; i < nx; i++) {
+					int x0 = (int)floor(xs[i]);
+					double fx = xs[i] - x0;
+					int x1 = ((x0 + 1) % W + W) % W;
+					x0 = (x0 % W + W) % W;
+					double a = f[(size_t)y0*W + x0] + fx * (f[(size_t)y0*W + x1] - f[(size_t)y0*W + x0]);
+					double b = f[(size_t)y1*W + x0] + fx * (f[(size_t)y1*W + x1] - f[(size_t)y1*W + x0]);
+					float v = (float)(a + fy * (b - a));
+					if (v < lo) lo = v;
+					if (v > hi) hi = v;
+				}
+			}
+			/* Float uv/filtering differences on the GPU side. */
+			float eps = 1e-6f * (hi - lo) + 1e-7f;
+			*hmin = lo - eps;
+			*hmax = hi + eps;
+			return 1;
+		}
+	}
+
+	/* Otherwise the min/max pyramid: at least the coarsest mip the shader
+	   may read there (a coarser block's min/max bounds every finer sample
+	   inside it), and coarse enough that the box spans a handful of
+	   texels. */
+	int top = g_pyr.levels - 1;
+	int k = (int)ceil(fmax(lod, 0.0));
+	if (k > top) k = top;
+	while (k < top && ((u1 - u0) * g_pyr.w[k] > 8.0 || (v1 - v0) * g_pyr.h[k] > 8.0))
+		k++;
+
+	/* Texels bilinear filtering touches (texel coords u*W - 0.5), plus one
+	   more each side so the finer mip of a trilinear blend stays inside. */
+	int W = g_pyr.w[k], H = g_pyr.h[k];
+	int x0 = (int)floor(u0 * W - 0.5) - 1, x1 = (int)floor(u1 * W - 0.5) + 2;
+	int y0 = (int)floor(v0 * H - 0.5) - 1, y1 = (int)floor(v1 * H - 0.5) + 2;
+	if (x1 - x0 + 1 >= W) { x0 = 0; x1 = W - 1; }
+	if (y0 < 0) y0 = 0;
+	if (y1 > H - 1) y1 = H - 1;
+
+	float lo = FLT_MAX, hi = -FLT_MAX;
+	const float *mn = g_pyr.mn[k], *mx = g_pyr.mx[k];
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			int xi = ((x % W) + W) % W;   /* longitude wraps */
+			size_t i = (size_t)y * W + xi;
+			if (mn[i] < lo) lo = mn[i];
+			if (mx[i] > hi) hi = mx[i];
+		}
+	}
+	*hmin = lo;
+	*hmax = hi;
+	return 1;
+}
+
 unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenParams *out,
                                      void (*step)(void))
 {
@@ -1209,10 +1378,12 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenPar
 	g_planetGen = *out;
 	clock_t t6 = clock();
 
-	/* 6. Upload the final R16F field (same sampling params the body shaders
-	   expect) + a full mip chain. */
+	/* 6. Upload the final field (same sampling params the body shaders
+	   expect) + a full mip chain. R32F: half floats would round heights to
+	   ~100 m steps at Earth scale, and the CPU bounds pyramid below must see
+	   exactly the values the GPU samples. */
 	glBindTexture(GL_TEXTURE_2D, heightTex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, W, H, 0, GL_RED, GL_FLOAT, h);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, W, H, 0, GL_RED, GL_FLOAT, h);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	/* Longitude is periodic; the latitude clamp keeps the poles from
@@ -1223,7 +1394,8 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenPar
 	glGenerateMipmap(GL_TEXTURE_2D);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	free(h);
+	/* Keeps h as level 0 of the quadtree's height-bounds pyramid. */
+	buildPyramid(h, W, H);
 
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
 	glEnable(GL_DEPTH_TEST);

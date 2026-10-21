@@ -233,7 +233,7 @@ void initializeWaves(waves *water, int dim) {
 			sum += (double)raw[i]*raw[i];
 		free(raw);
 		float rms = (float)sqrt(sum/(double)dim2);
-		float targetRms = 0.0025f;
+		float targetRms = OCEAN_FFT_RMS;
 		// Absorbs the 1/dim^2 unnormalized-IFFT factor: data = raw * heightScale.
 		water->heightScale = (rms > 0.0f) ? targetRms/rms : 1.0f;
 		setWaveScale(water->heightScale);

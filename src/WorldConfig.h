@@ -56,6 +56,8 @@
 /* Main camera near plane. The main pass is infinite reversed-Z into a float
    depth buffer, so this can sit at surface scale. */
 #define CAMERA_NEAR_M             0.1
+/* Vertical field of view (degrees). The terrain LOD split rule uses it too. */
+#define CAMERA_FOV_Y_DEG          45.0
 /* Orbit pivot spawn, on +Z from the planet centre. */
 #define CAMERA_SPAWN_DISTANCE_M   (3.0 * EARTH_RADIUS_M)
 /* Scroll-out limit of the orbit radius behind the pivot. */
@@ -74,6 +76,47 @@
 #define SURFACE_CAMERA_MIN_RADIUS_M (1.1 * EARTH_RADIUS_M)
 #define SURFACE_CAMERA_MAX_RADIUS_M (1.483 * EARTH_RADIUS_M)
 #define SURFACE_CAMERA_TILT_DEG     24.0
+
+/* ---- Terrain LOD (quadtree) ---------------------------------------------
+   A node splits when the camera is closer than K node widths to it (its
+   height range included). K comes from the target on-screen triangle size:
+   at the split distance a triangle edge spans QT_TARGET_TRIANGLE_PX, and
+   just after the split half that. Smaller = finer and more patches (the
+   count grows with 1/px^2). */
+#define QT_TARGET_TRIANGLE_PX     24.0
+/* The shadow-caster walk's target: casters only need to resolve the shadow
+   map, not the screen, and nothing culls them (the sun's box holds the
+   whole planet), so they refine much more coarsely. */
+#define QT_SHADOW_TRIANGLE_PX     96.0
+/* The water shell's target: half the terrain's LOD. A sphere at sea level
+   barely needs vertices for its shape (the corner path is exact), only for
+   the swell and smooth shading. */
+#define QT_WATER_TRIANGLE_PX      (2.0 * QT_TARGET_TRIANGLE_PX)
+/* Deepest level: subdivide until grid vertices are this far apart (m).
+   ~20 levels for Earth. The shadow-caster walk stops earlier, at half a
+   shadow-map texel. */
+#define QT_MIN_VERTEX_SPACING_M   1.0
+/* Patch-edge skirts (walls hiding LOD seams). A seam can only open as far
+   as heights differ along the edge, so each patch's wall drops
+   RANGE_FACTOR x its own height range + WIDTH_FRACTION x its width: tiny
+   on flat ground and water, deep in mountains. Every wall fragment runs the
+   full surface shader, so deeper than needed is expensive overdraw. Capped
+   at 0.5% of the radius. */
+#define QT_SKIRT_RANGE_FACTOR     1.5
+#define QT_SKIRT_WIDTH_FRACTION   0.02
+
+/* ---- Ocean ---------------------------------------------------------------
+   Geometric swell: rms height (m) the water shell's vertices are displaced
+   by at "Wave height" 1.0 (debug panel). Shading (slopes, foam) uses the
+   normalised wave field and does not change with it. The FFT field itself
+   is calibrated in body radii (Water.c), so without this the swell would
+   be kilometres tall at Earth scale. */
+#define OCEAN_SWELL_RMS_M         2.0
+
+/* ---- Rendering ------------------------------------------------------------
+   MSAA samples of the main scene target. Every sample costs memory
+   bandwidth (and the planet's depth prepass runs per sample). */
+#define RENDER_MSAA_SAMPLES       2
 
 /* ---- Sun rendering ------------------------------------------------------
    The sun billboard's corona half-size, in sun radii. The opaque disc is

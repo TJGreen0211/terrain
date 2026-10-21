@@ -16,6 +16,10 @@ uniform float waveChoppy;
 uniform float oceanOffset;
 uniform float waveAmp;
 uniform float waveTiling;
+// Geometric displacement scale: the wave field is in body radii (rms
+// OCEAN_FFT_RMS per unit waveAmp); this maps it to OCEAN_SWELL_RMS_M of
+// real swell (WorldConfig.h). fWave (foam, crest shading) stays unscaled.
+uniform float waveGeomScale;
 // Same height field / sea level / LOD inputs as quad.vert, so the shell knows
 // the water depth under each vertex and calms the waves toward the coast.
 uniform sampler2D heightMap;
@@ -59,7 +63,7 @@ void main()
 	if(vPosition.w > 0.5) {
 		// Boundary skirt: wall vertices skip the wave displacement and sit
 		// just under sea level, hiding LOD patch-edge cracks under the shell.
-		disp = p * ((oceanOffset - 1.0) - 0.001);
+		disp = p * ((oceanOffset - 1.0) - patchSkirt());
 		wave = 0.0;
 	}
 	else {
@@ -96,7 +100,7 @@ void main()
 		vec2 D = texture(waveDisp, uv*waveTiling).rg * (waveAmp * waveChoppy * calm);
 		vec3 T = normalize(vec3(-p.y, p.x, 1e-4));
 		vec3 B = normalize(cross(p, T));
-		disp = p * ((oceanOffset - 1.0) + d) + T * D.x + B * D.y;
+		disp = p * ((oceanOffset - 1.0) + d * waveGeomScale) + (T * D.x + B * D.y) * waveGeomScale;
 	}
 
 	// Row-vector pipeline convention (p * model), matching quad.vert. The

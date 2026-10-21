@@ -85,11 +85,40 @@ static char *expandIncludes(char *src, const char *shaderPath)
 	return out;
 }
 
+/* Inserts `defines` (whole lines) right after the #version line, so one
+   source can build program variants. A #line keeps error numbering. */
+static char *insertDefines(char *src, const char *defines)
+{
+	if (src == NULL || defines == NULL || defines[0] == '\0')
+		return src;
+	char *eol = strchr(src, '\n');
+	size_t head = eol ? (size_t)(eol - src) + 1 : strlen(src);
+	const char *lineDirective = "#line 2\n";
+	size_t len = strlen(src) + strlen(defines) + strlen(lineDirective) + 2;
+	char *out = malloc(len);
+	memcpy(out, src, head);
+	out[head] = '\0';
+	if (!eol)
+		strcat(out, "\n");
+	strcat(out, defines);
+	if (defines[strlen(defines) - 1] != '\n')
+		strcat(out, "\n");
+	strcat(out, lineDirective);
+	strcat(out, src + head);
+	free(src);
+	return out;
+}
+
 GLuint LoadShader(char *shaderPath, int shaderType)
+{
+	return LoadShaderDefines(shaderPath, shaderType, NULL);
+}
+
+GLuint LoadShaderDefines(char *shaderPath, int shaderType, const char *defines)
 {
 	GLuint shader = glCreateShader(shaderType);
 
-	char *shaderStr = expandIncludes(readShader(shaderPath), shaderPath);
+	char *shaderStr = insertDefines(expandIncludes(readShader(shaderPath), shaderPath), defines);
 
 	printf("Compiling %d, %s shader\n", shaderType, shaderPath);
 	GLint length = strlen(shaderStr);

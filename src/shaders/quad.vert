@@ -25,6 +25,10 @@ uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 
+// The depth prepass and the colour pass are separate programs built from
+// this source; their depths must match exactly (colour pass tests >=).
+invariant gl_Position;
+
 out vec3 fragPos;
 out vec3 fE;
 out vec3 fN;
@@ -67,12 +71,12 @@ void main()
 	// Boundary skirt: wall vertices (w = 1) sit just under the DISPLACED
 	// planet surface so they hide T-junction seams along LOD patch edges
 	// without z-fighting it (the relief is a function of direction only, so
-	// the skirt follows the surface across the whole edge). The radius is
-	// (1 + relief) * 0.995; kept as the small offset from 1 so it never
-	// rounds against the unit radius.
+	// the skirt follows the surface across the whole edge). The drop is
+	// sized per patch from its height range (patchSkirt); kept as the small
+	// offset from 1 so it never rounds against the unit radius.
 	float lift = relief;
 	if(vPosition.w > 0.5)
-		lift = 0.995 * relief - 0.005;
+		lift = relief - patchSkirt();
 	float radius = 1.0 + lift;
 
 	vec3 world = sphere + patchOffset(d * lift, model);

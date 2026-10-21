@@ -10,6 +10,8 @@
 #include <GLFW/glfw3.h>
 
 void createShader(GLuint *shader, char *vert, char *frag);
+/* Variant: `defines` lines are inserted after #version in both stages. */
+void createShaderDefines(GLuint *shader, char *vert, char *frag, const char *defines);
 //GLfloat frameCount();
 
 #endif

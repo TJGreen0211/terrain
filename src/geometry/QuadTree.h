@@ -25,19 +25,54 @@
    location 0, patch instance attributes at 4-10). */
 void QuadTree_InitGL(void);
 
-/* Draw one LOD sphere with the currently bound program: each cube face is
-   subdivided as a quadtree around the camera (nodes closer than the halving
-   split distance refine; only leaves are drawn), in one instanced draw.
-   Nodes outside the `viewProj` frustum or past the body's horizon are culled
-   and never refined. LOD split distance scales with `radius` so every body
-   gets the same screen-space detail. Back-to-back calls with identical
-   inputs reuse the last walk. */
-void QuadTree_DrawSphere(const dmat4 *model, double radius, mat4 viewProj);
+/* Height range a body's patches can reach over a spherical cap, as offsets
+   from the unit sphere in body radii (every vertex the drawing program
+   places there, skirts excluded). lo > hi means nothing is drawn there at
+   all, and the node is culled. dir: body-local unit cap centre; capAngle:
+   radians; cell: the patch half-width in cube units (its height-map mip);
+   maxDist: farthest camera distance to the cap's sea-level surface, metres
+   (the pixel-footprint mip). */
+typedef void (*QuadTree_ReliefFn)(const double dir[3], double capAngle, double cell,
+                                  double maxDist, double *lo, double *hi);
 
-/* Shadow-map caster pass for the same body: identical camera-centred LOD
-   (caster mesh == drawn mesh), culled against the light's projection * view
-   instead of the camera frustum and without the camera horizon cull. */
-void QuadTree_DrawShadowCasters(const dmat4 *model, double radius, mat4 lightViewProj);
+typedef struct QuadTree_Body {
+	dmat4 model;              /* camera-relative, Body_ModelMatrix */
+	double radius;            /* metres */
+	QuadTree_ReliefFn relief; /* NULL = smooth sphere */
+	double occluderRelief;    /* lowest SOLID surface, body radii (<= 0): the horizon occluder */
+	double trianglePx;        /* LOD target (px per triangle edge); 0 = QT_TARGET_TRIANGLE_PX */
+} QuadTree_Body;
+
+/* Draw one LOD sphere with the currently bound program: each cube face is
+   subdivided as a quadtree around the camera, in one instanced draw. A node
+   splits while the camera is closer than K node widths to it (its height
+   range included; K from QT_TARGET_TRIANGLE_PX, WorldConfig.h), down to
+   QT_MIN_VERTEX_SPACING_M. Nodes outside the `viewProj` frustum or below
+   the body's horizon are culled and never refined, using per-node height
+   bounds. Back-to-back calls with identical inputs reuse the last walk. */
+void QuadTree_DrawSphere(const QuadTree_Body *body, mat4 viewProj);
+
+/* Shadow-map caster pass for the same body: a coarser camera-centred LOD
+   (QT_SHADOW_TRIANGLE_PX), culled against the light's projection * view
+   instead of the camera frustum and without the camera horizon cull, and
+   no finer than minSpacing (m) between vertices: detail below a shadow
+   texel only costs time. */
+void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing);
+
+/* Once per frame before any draw: drops the cached walk (so per-frame
+   inputs the cache key cannot see, like live relief edits, apply). */
+void QuadTree_BeginFrame(void);
+
+/* Totals over every walk since QuadTree_BeginFrame (shadow casters, moon,
+   planet, water), for the debug panel. */
+typedef struct QuadTree_Stats {
+	int walks;       /* walks run (cached redraws excluded) */
+	int leaves;      /* drawn patches */
+	int nodes;       /* nodes visited */
+	int maxLevel;    /* deepest drawn level */
+	double walkMs;   /* CPU time of the walks */
+} QuadTree_Stats;
+extern QuadTree_Stats g_qtStats;
 
 /* Debug (panel toggle): 1 = place vertices with the old float path, for
    comparing against the double-precision patch corners. */

@@ -9,6 +9,7 @@
 #include "Rings.h"
 #include "WorldConfig.h"
 #include "Bodies.h"
+#include "Profiler.h"
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -67,10 +68,14 @@ static mat4 camRelTranslate(dvec3 world) {
 	return translatevec3(toCamRel(world));
 }
 
-GLuint initQuadShader() {
+/* The planet surface program. depthPrepass = 1 builds the depth-only
+   variant (surface depth with the seafloor pushed behind the water); the
+   colour variant never writes depth, so the GPU keeps early-Z for it (see
+   quad.frag). */
+GLuint initQuadShader(int depthPrepass) {
 	GLuint shader;
-	createShader(&shader, "shaders/quad.vert",
-		"shaders/quad.frag");
+	createShaderDefines(&shader, "shaders/quad.vert",
+		"shaders/quad.frag", depthPrepass ? "#define DEPTH_PREPASS\n" : NULL);
 	return shader;
 }
 
@@ -345,7 +350,7 @@ static void bindShadowMap(GLuint shader, int unit) {
    Clip control is per pass: the main pass uses GL_ZERO_TO_ONE with
    GL_GREATER and a depth clear of 0; everything else (shadow map, bakes,
    GPU wave passes, UI) keeps the standard convention. */
-#define SCENE_SAMPLES 4
+#define SCENE_SAMPLES RENDER_MSAA_SAMPLES   /* WorldConfig.h */
 static GLuint g_sceneFBO, g_sceneColorRB, g_sceneDepthRB;
 static int g_sceneW, g_sceneH;
 
@@ -383,7 +388,7 @@ static void setReversedDepth(int on) {
 
 /* Main camera projection for every main-pass draw (infinite reversed-Z). */
 static mat4 cameraProjection(void) {
-	return perspectiveReversedInf(45.0, getWindowWidth()/getWindowHeight(), CAMERA_NEAR);
+	return perspectiveReversedInf((float)CAMERA_FOV_Y_DEG, getWindowWidth()/getWindowHeight(), CAMERA_NEAR);
 }
 
 /* Main camera projection * view, matching initMVP/setBodyUniforms; the
@@ -398,6 +403,91 @@ void initMVP(int shader, mat4 m, mat4 v) {
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &p.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, &v.m[0][0]);
+}
+
+/* water.vert's geometric wave scale: the FFT field's rms (body radii)
+   mapped to OCEAN_SWELL_RMS_M of real swell on this body. */
+static double waveGeomScale(double radius)
+{
+	return OCEAN_SWELL_RMS_M / (OCEAN_FFT_RMS * radius);
+}
+
+/* Water shell bound, in rms of the displaced swell: the sea state can
+   double it (water.vert's calm clamp) and peaks stay within ~4 rms.
+   Choppy displacement moves vertices sideways by the same scale. */
+#define WAVE_BOUND_RMS 8.0
+
+/* quad.vert's relief profile (body radii) for a raw height h. Monotonic in
+   h, so a height range maps straight to a relief range. */
+static double reliefOf(double h)
+{
+	double sea = g_planetGen.seaLevel;
+	double s = fmin(fmax((sea - h) / fmax(g_planetGen.oceanDepth, 1e-4), 0.0), 1.0);
+	return g_planetStyle.landRelief * fmax(h - sea, 0.0) / fmax(1.0 - sea, 1e-3)
+	     - g_planetStyle.oceanRelief * s * s;
+}
+
+/* QuadTree_ReliefFn for Earth's land + seafloor (quad.vert, depth.vert):
+   the terrain the shaders can place over the cap, same mip selection. */
+static void earthReliefBounds(const double dir[3], double capAngle, double cell,
+                              double maxDist, double *lo, double *hi)
+{
+	double lodK = LOD_K_NUMER / (g_bodies[BODY_EARTH].radius * getWindowHeight());
+	double lodCell = log2(fmax(cell * 2048.0 / M_PI, 1.0));
+	double lodPix = log2(fmax(maxDist * lodK, 1e-4));
+	double lod = fmin(fmax(fmax(lodCell, lodPix), 0.0), 11.0);
+	float hmin, hmax;
+	TerrainGen_HeightRange(dir, capAngle, lod, &hmin, &hmax);
+	*lo = reliefOf(hmin);
+	*hi = reliefOf(hmax);
+}
+
+/* 1 if every height a fragment shader can sample over the cap is above
+   sea level, i.e. no pixel there is sea: water.frag discards all of them.
+   It picks their mip as the
+   pixel term + the grazing term (graz >= 0.15) + the latitude term; a
+   coarser block's minimum bounds every finer sample. */
+static int footprintAllLand(const double dir[3], double capAngle, double maxDist)
+{
+	double lodK = LOD_K_NUMER / (g_bodies[BODY_EARTH].radius * getWindowHeight());
+	double latEdge = fmin(asin(fmin(fabs(dir[2]), 1.0)) + capAngle, 0.5 * M_PI);
+	double cosLat = fmax(cos(latEdge), 0.02);
+	double fragLod = log2(fmax(maxDist * lodK, 1e-4)) + log2(1.0 / 0.15) + log2(1.0 / cosLat);
+	float hmin, hmax;
+	TerrainGen_HeightRange(dir, capAngle, fmin(fmax(fragLod, 0.0), 11.0), &hmin, &hmax);
+	return hmin > g_planetGen.seaLevel;
+}
+
+/* QuadTree_ReliefFn for Earth's water shell (water.vert): sea level, plus
+   waves wherever there is sea. Its own walk, so the thin shell is culled
+   and refined on its own instead of inheriting the seafloor's depth range.
+   All-land footprints are empty (water.frag discards every fragment). */
+static void waterReliefBounds(const double dir[3], double capAngle, double cell,
+                              double maxDist, double *lo, double *hi)
+{
+	(void)cell;
+	if (footprintAllLand(dir, capAngle, maxDist)) {
+		*lo = 1.0;
+		*hi = 0.0;
+		return;
+	}
+	double shell = g_waveParams[0] - 1.0;
+	double R = g_bodies[BODY_EARTH].radius;
+	double wave = WAVE_BOUND_RMS * OCEAN_FFT_RMS * waveGeomScale(R)
+	            * g_waveParams[1] * (1.0 + g_waveParams[4]);
+	*lo = shell - wave;
+	*hi = shell + wave;
+}
+
+/* Earth as the quadtree sees it: camera-relative model, relief bounds for
+   the surface being drawn (terrain or water shell), and the deepest
+   seafloor as the horizon occluder (water is see-through). */
+static QuadTree_Body earthQuadTreeBody(const Body *earth, QuadTree_ReliefFn relief)
+{
+	float gmin, gmax;
+	TerrainGen_GlobalRange(&gmin, &gmax);
+	QuadTree_Body b = { Body_ModelMatrix(earth, g_cam), earth->radius, relief, reliefOf(gmin) };
+	return b;
 }
 
 /* Uniform + texture-unit recipe for the quadtree body passes, reproduced
@@ -679,8 +769,9 @@ void drawOrbit(GLuint shader, GLuint texture, const Body *moon, vec4 lightPositi
 {
 	glUseProgram(shader);
 
-	dmat4 modelD = Body_ModelMatrix(moon, g_cam);
-	mat4 model = dmat4tomat4(modelD);
+	/* Smooth sphere: no relief, the surface itself is the horizon occluder. */
+	QuadTree_Body body = { Body_ModelMatrix(moon, g_cam), moon->radius, NULL, 0.0 };
+	mat4 model = dmat4tomat4(body.model);
 	initMVP(shader, model, getViewMatrix());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 
@@ -692,7 +783,7 @@ void drawOrbit(GLuint shader, GLuint texture, const Body *moon, vec4 lightPositi
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
 	/* Receives the planet's shadow when it passes behind it. */
 	bindShadowMap(shader, 1);
-	QuadTree_DrawSphere(&modelD, moon->radius, getViewProjection());
+	QuadTree_DrawSphere(&body, getViewProjection());
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -712,8 +803,9 @@ void drawDepth(GLuint vao, GLuint shader, int vertices, mat4 m) {
 	glBindVertexArray(0);
 }
 
-void drawPlanetDepth(GLuint shader, dmat4 md, float lodRadius) {
-	mat4 m = dmat4tomat4(md);
+void drawPlanetDepth(GLuint shader, const QuadTree_Body *body) {
+	mat4 m = dmat4tomat4(body->model);
+	float lodRadius = (float)body->radius;
 	glUseProgram(shader);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 	glUniform1f(glGetUniformLocation(shader, "displace"), 1.0f);
@@ -731,7 +823,8 @@ void drawPlanetDepth(GLuint shader, dmat4 md, float lodRadius) {
 	   matches the drawn surface vertex for vertex. */
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
-	QuadTree_DrawShadowCasters(&md, lodRadius, g_lightSpaceMatrix);
+	/* No finer than half a shadow texel: smaller detail cannot show in it. */
+	QuadTree_DrawShadowCasters(body, g_lightSpaceMatrix, 0.5 * g_shadowTexel);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -871,7 +964,8 @@ int main(int argc, char *argv[])
 	GLuint depthShader = initDepthShader();
 	GLuint fboShader = initFramebufferShader();
 	GLuint instanceShader = initInstanceShader();
-	GLuint quadShader = initQuadShader();
+	GLuint quadShader = initQuadShader(0);
+	GLuint quadDepthShader = initQuadShader(1);
 	GLuint planetShader = initPlanetShader();
 	attachGUIShaders();
 	uiInit();
@@ -882,6 +976,7 @@ int main(int argc, char *argv[])
 	   layout wired once (all three body programs declare vPosition at 0 and
 	   the instance matrix at 4-7). */
 	QuadTree_InitGL();
+	Prof_Init();
 	LoadingScreen_Step();
 
 	initSun();
@@ -1010,7 +1105,9 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		Prof_Begin(PROF_WAVES);
 		generateWaves(&ocean);
+		Prof_End(PROF_WAVES);
 
 		GLfloat currentFrame = glfwGetTime();
 		deltaTime = currentFrame - lastFrame;
@@ -1067,8 +1164,10 @@ int main(int argc, char *argv[])
 		/* Planet model (scale * spin/tilt, camera-relative), composed in
 		   double and downcast once; shared by the shadow casters and the
 		   main pass. */
-		dmat4 planetModelD = Body_ModelMatrix(earth, g_cam);
-		mat4 planetModel = dmat4tomat4(planetModelD);
+		QuadTree_Body planetBody = earthQuadTreeBody(earth, earthReliefBounds);
+		mat4 planetModel = dmat4tomat4(planetBody.model);
+		/* New frame: the walk cache must not outlive this frame's inputs. */
+		QuadTree_BeginFrame();
 
 		/* Shadow frustum: the sun is far enough away to be a directional
 		   light, so an orthographic box along the sun direction, just wide
@@ -1096,6 +1195,7 @@ int main(int argc, char *argv[])
 		   ring profile instead (ringTransmittance). A slope-scaled polygon
 		   offset handles the remaining grazing acne together with the
 		   receiver offsets in sunVisibility. */
+		Prof_Begin(PROF_SHADOW);
 		glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
 			glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
 			glClear(GL_DEPTH_BUFFER_BIT);
@@ -1103,8 +1203,9 @@ int main(int argc, char *argv[])
 			glPolygonOffset(1.5f, 2.0f);
 			model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
 			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model);
-			drawPlanetDepth(depthShader, planetModelD, fScale);
+			drawPlanetDepth(depthShader, &planetBody);
 			glDisable(GL_POLYGON_OFFSET_FILL);
+		Prof_End(PROF_SHADOW);
 
 		/* Main pass: the multisampled float-depth scene target, reversed-Z
 		   (see setReversedDepth), resolved into the window before the UI. */
@@ -1122,7 +1223,9 @@ int main(int argc, char *argv[])
 		drawSkybox(skyboxTexture, skyboxProj, getViewRotation());
 
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
+		Prof_Begin(PROF_MOON);
 		drawOrbit(ringShader, moonTex, moon, lightPosition);
+		Prof_End(PROF_MOON);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 		//Planet
 		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, dxWaveTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
@@ -1141,17 +1244,43 @@ int main(int argc, char *argv[])
 
 		//Planet (land + seafloor): drawn first so the translucent water can
 		//blend over the seafloor.
+		//Depth prepass, then colour: the prepass lays down the surface depth
+		//(seafloor pushed behind the water) with a cheap program; the full
+		//shader then runs only where its fragment is the visible one (depth
+		//test >=, no depth writes, so early-Z holds). The second draw reuses
+		//the walk.
+		Prof_Begin(PROF_PLANET);
+		setBodyUniforms(quadDepthShader, fScale, model, lightPosition,
+		                0, dxWaveTex, 0, 0, 0, 0);
+		/* Per MSAA sample: a shader that writes gl_FragDepth writes one
+		   value for the whole pixel, and the colour pass's per-sample >=
+		   test would then fail on about half the samples of every sloped
+		   surface (resolving to see-through terrain). The prepass is cheap,
+		   so running it per sample costs little. */
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glEnable(GL_SAMPLE_SHADING);
+		glMinSampleShading(1.0f);
+		QuadTree_DrawSphere(&planetBody, viewProj);
+		glDisable(GL_SAMPLE_SHADING);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
 		setBodyUniforms(quadShader, fScale, model, lightPosition,
 		                0, dxWaveTex, 0, 0, 0, 0);
 		setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
 		Rings_BindReceiver(quadShader);
-		QuadTree_DrawSphere(&planetModelD, earth->radius, viewProj);
+		glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */
+		glDepthMask(GL_FALSE);
+		QuadTree_DrawSphere(&planetBody, viewProj);
+		glDepthMask(GL_TRUE);
+		glDepthFunc(GL_GREATER);
+		Prof_End(PROF_PLANET);
 
-		//Water: same quadtree LOD as the planet (reuses its walk), FFT-
+		//Water: its own quadtree walk over the thin shell, FFT-
 		//displaced sea-level shell that discards over land in-shader
 		//(waveHeight/Disp/Slope + tiled detail normals + skybox reflection in
 		//water.frag). Alpha-blended: water.frag fades to clear in the
 		//shallows from the per-pixel water depth.
+		Prof_Begin(PROF_WATER);
 		setBodyUniforms(waterShader, fScale, model, lightPosition,
 		                ocean.dyTexture, ocean.detailTexture,
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
@@ -1159,6 +1288,7 @@ int main(int argc, char *argv[])
 		setAtmosphereExtinction(waterShader, atmoInner, &g_atmosphere);
 		/* Detail layers' slope variance (BRDF roughness, water.frag). */
 		glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
+		glUniform1f(glGetUniformLocation(waterShader, "waveGeomScale"), (float)waveGeomScale(earth->radius));
 		/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
 		setOceanUniforms(waterShader, 10);
 		Rings_BindReceiver(waterShader);
@@ -1167,10 +1297,14 @@ int main(int argc, char *argv[])
 		double shellCamDist = dlengthvec3(dsubvec3(g_cam, translation));
 		glUniform1f(glGetUniformLocation(waterShader, "outsideShell"),
 		            shellCamDist > fScale*1.05 ? 1.0f : 0.0f);
+		/* Its own walk and bounds: the thin shell (land footprints culled). */
+		QuadTree_Body waterBody = earthQuadTreeBody(earth, waterReliefBounds);
+		waterBody.trianglePx = QT_WATER_TRIANGLE_PX;
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		QuadTree_DrawSphere(&planetModelD, earth->radius, viewProj);
+		QuadTree_DrawSphere(&waterBody, viewProj);
 		glDisable(GL_BLEND);
+		Prof_End(PROF_WATER);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 		//TEST: flat animated wave grid above the planet (debug for FFT water)
@@ -1183,20 +1317,25 @@ int main(int argc, char *argv[])
 		//Rings: opaque close-up rocks, then the analytic sheet and the dust
 		//(premultiplied, depth-tested, no depth write). Before the
 		//atmosphere dome, which takes the sheet's coverage out of its glow.
+		Prof_Begin(PROF_RINGS);
 		Rings_DrawRocks(sunProj, sunView);
 		Rings_DrawSheet(sunProj, sunView);
 		Rings_DrawDust(sunProj, sunView);
+		Prof_End(PROF_RINGS);
 
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//scaled planet shell; params above with the planet extinction)
+		Prof_Begin(PROF_ATMOSPHERE);
 		drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
 		                   atmoInner, &g_atmosphere, lightPosition);
+		Prof_End(PROF_ATMOSPHERE);
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
 		drawSunGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
 
 		/* Resolve the scene into the window; the UI draws there directly,
 		   with the standard depth convention restored. */
+		Prof_Begin(PROF_OVERLAY);
 		setReversedDepth(0);
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, g_sceneFBO);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1214,6 +1353,8 @@ int main(int argc, char *argv[])
 
 		//Debug panel (F1): drawn last, over the sliders.
 		DebugGUI_Frame();
+		Prof_End(PROF_OVERLAY);
+		Prof_EndFrame();
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);

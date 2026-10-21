@@ -4,6 +4,7 @@
 #include "TerrainGen.h"
 #include "Water.h"
 #include "Bodies.h"
+#include "Profiler.h"
 #include <limits.h>
 #include <math.h>
 #include <string.h>
@@ -151,6 +152,13 @@ static void cameraSection(void)
 	else
 		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
 	nk_checkbox_label(ctx, "Legacy float vertex path", &g_qtLegacyPath);
+
+	/* Totals over this frame's walks (shadow casters, moon, planet, water). */
+	groupLabel("Terrain LOD (frame)");
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Patches: %d   nodes: %d", g_qtStats.leaves, g_qtStats.nodes);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Deepest level: %d", g_qtStats.maxLevel);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Walks: %d   CPU: %.2f ms", g_qtStats.walks, g_qtStats.walkMs);
 }
 
 /* Live: g_waveParams is uploaded every frame. [0] (oceanOffset) is left
@@ -176,7 +184,7 @@ static void terrainSurfaceSection(void)
 	PlanetStyle *s = &g_planetStyle;
 
 	groupLabel("Relief (fraction of radius)");
-	/* Capped under QT_CULL_RELIEF (0.05) so the quadtree never culls peaks. */
+	/* The quadtree's culling bounds follow these live (earthReliefBounds). */
 	sliderRow("Land relief", &s->landRelief, 0.0f, 0.045f, 0.0005f, "%.4f");
 	sliderRow("Ocean relief", &s->oceanRelief, 0.0f, 0.03f, 0.0005f, "%.4f");
 
@@ -276,6 +284,11 @@ static void buildPanel(void)
 			nk_layout_row_dynamic(ctx, rowHeight, 1);
 			nk_labelf(ctx, NK_TEXT_LEFT, "Frame: %.2f ms (%.0f fps)",
 			          frameMs, frameMs > 0.0f ? 1000.0f / frameMs : 0.0f);
+			/* Per pass: CPU (issue + quadtree walks) | GPU (timer queries). */
+			nk_label(ctx, "Pass: CPU ms / GPU ms", NK_TEXT_LEFT);
+			for (int i = 0; i < PROF_COUNT; i++)
+				nk_labelf(ctx, NK_TEXT_LEFT, "  %s: %.2f / %.2f", Prof_Name((ProfSection)i),
+				          Prof_CpuMs((ProfSection)i), Prof_GpuMs((ProfSection)i));
 			nk_tree_pop(ctx);
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Camera", NK_MINIMIZED)) {

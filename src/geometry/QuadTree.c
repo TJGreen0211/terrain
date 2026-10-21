@@ -16,31 +16,33 @@
    Boundary skirt vertices (position w = 1) duplicate each grid edge
    slightly below the surface so LOD patch edges never crack. */
 #include "QuadTree.h"
+#include "Window.h"
+#include "WorldConfig.h"
 #include <stddef.h>
 
 #define QT_DIVISIONS 10
 /* Surface cells + outer boundary skirt (4 edges x QT_DIVISIONS segments x 6
    wall verts), kept in sync with buildGrid. */
-#define QT_GRID_VERTS (QT_DIVISIONS * QT_DIVISIONS * 6 + 4 * QT_DIVISIONS * 6)
-/* Walk nodes per face, and drawn leaves per walk (every face's nodes could
-   in principle all be leaves, so no leaf is ever dropped). */
-#define QT_NODE_CAP 8192
-#define QT_INSTANCE_CAP (6 * QT_NODE_CAP)
-
-/* Terrain drew at planet radius 30 with a first split distance of 128; keep
-   the same screen-space behaviour by scaling the start distance with radius. */
-#define QT_LEVEL_PER_RADIUS (128.0 / 30.0)
-#define QT_SPLIT_LOD 256.0
-/* Culling margin as a fraction of the body radius: covers the land relief
-   (g_planetStyle.landRelief, capped below this by the debug panel), the
-   water shell + swell, and the skirts. */
-#define QT_CULL_RELIEF 0.05
+#define QT_SURFACE_VERTS (QT_DIVISIONS * QT_DIVISIONS * 6)
+#define QT_SKIRT_VERTS (4 * QT_DIVISIONS * 6)
+#define QT_GRID_VERTS (QT_SURFACE_VERTS + QT_SKIRT_VERTS)
+/* Walk nodes per face and drawn leaves per walk. A walk that hits either
+   cap stops refining (it never drops a leaf). */
+#define QT_NODE_CAP 32768
+#define QT_INSTANCE_CAP 65536
+/* Hard depth limit (integer node coordinates and the float patch data stay
+   exact well past this). */
+#define QT_LEVEL_CAP 28
+/* Skirt drop cap, body radii. */
+#define QT_SKIRT_MAX 0.005
 
 int g_qtLegacyPath = 0;
+QuadTree_Stats g_qtStats;
 
 /* One drawn leaf (shaders/patch.glsl, attribute locations 4-10). */
 typedef struct qtInstance {
-	float corner[4][4];   /* xyz: sphere corners (0,0) (1,0) (0,1) (1,1), camera-relative */
+	float corner[4][4];   /* xyz: sphere corners (0,0) (1,0) (0,1) (1,1), camera-relative;
+	                         corner[0][3]: skirt drop (body radii) */
 	float q0[4];          /* xyz: cube-space corner (0,0); w: cell half-width (cube units) */
 	float eu[3];          /* cube-space edge along u */
 	float ev[3];          /* cube-space edge along v */
@@ -48,7 +50,6 @@ typedef struct qtInstance {
 
 typedef struct qtNode {
 	int level, x, y;
-	dvec3 center;         /* camera-relative sphere point of the node centre */
 } qtNode;
 
 static qtInstance instances[QT_INSTANCE_CAP];
@@ -215,71 +216,64 @@ void QuadTree_InitGL(void)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
+
 /* ---- Walk ------------------------------------------------------------------ */
 
-/* Per-walk culling inputs shared by every face, all camera-relative double
-   (the camera is the origin): the body centre and radius, the horizon
-   angle, and the six view-frustum planes (ax + by + cz + d >= 0 inside). */
-typedef struct qtCull {
-	dvec3 center;
+/* Per-walk inputs shared by every face, all camera-relative double (the
+   camera is the origin). */
+typedef struct qtWalk {
+	const QuadTree_Body *body;
+	dvec3 center;           /* body centre */
 	double radius;
-	dvec3 camDir;       /* unit direction centre -> camera */
-	double horizon;     /* max visible angle from camDir; > PI disables */
-	double frustum[6][4];
-} qtCull;
+	double splitK;          /* split while distance < splitK * node width */
+	int maxLevel;
+	int useHorizon;
+	double camDist;         /* |centre| */
+	dvec3 camDir;           /* unit, centre -> camera */
+	double occluder;        /* horizon occluder radius, m */
+	double frustum[6][4];   /* ax + by + cz + d >= 0 inside */
+} qtWalk;
 
-/* Conservative visibility of a node's bounding sphere. A node of cube-space
-   half-width `size` has every (displaced) vertex within
-   radius*(size*sqrt(2) + QT_CULL_RELIEF) of its centre: projecting the cube
-   face onto the unit sphere never stretches distances, and the relief only
-   moves vertices radially. Culled nodes are neither drawn nor split, so
-   their whole subtree drops out. */
-static int nodeVisible(const qtCull *c, dvec3 nodeCenter, double size)
+static double dotd(dvec3 a, dvec3 b)
 {
-	double chord = size * 1.41421356237;
-	double r = c->radius * (chord + QT_CULL_RELIEF);
-
-	for(int p = 0; p < 6; p++) {
-		const double *pl = c->frustum[p];
-		if(pl[0]*nodeCenter.x + pl[1]*nodeCenter.y + pl[2]*nodeCenter.z + pl[3] < -r)
-			return 0;
-	}
-
-	if(c->horizon < M_PI) {
-		dvec3 d = dsubvec3(nodeCenter, c->center);
-		double len = dlengthvec3(d);
-		if(len > 1e-9 * c->radius) {
-			double cosA = (d.x*c->camDir.x + d.y*c->camDir.y + d.z*c->camDir.z) / len;
-			if(cosA < -1.0) cosA = -1.0;
-			if(cosA > 1.0) cosA = 1.0;
-			/* Angular half-size of the node on the unit sphere. */
-			double nodeAng = 2.0 * asin(fmin(chord * 0.5, 1.0));
-			if(acos(cosA) - nodeAng > c->horizon)
-				return 0;
-		}
-	}
-	return 1;
+	return a.x*b.x + a.y*b.y + a.z*b.z;
 }
 
-static void buildCull(qtCull *c, const dmat4 *model, mat4 viewProj, int useHorizon)
+static dvec3 normd(dvec3 q)
 {
-	const double (*m)[4] = model->m;
-	c->center.x = m[0][3]; c->center.y = m[1][3]; c->center.z = m[2][3];
-	/* Uniform scale: length of the model's first basis column. */
-	c->radius = sqrt(m[0][0]*m[0][0] + m[1][0]*m[1][0] + m[2][0]*m[2][0]);
+	return dscalarvec3(q, 1.0 / dlengthvec3(q));
+}
 
-	/* Horizon: the solid unit sphere (ocean floor / undisplaced body) hides
-	   everything past acos(R/d); terrain up to R*(1 + relief) peeks over it
-	   by a further acos(1/(1 + relief)). Inside the sphere: no horizon. */
-	double d = dlengthvec3(c->center);
-	if(useHorizon && d > c->radius) {
-		c->camDir = dscalarvec3(c->center, -1.0 / d);
-		c->horizon = acos(c->radius/d) + acos(1.0/(1.0 + QT_CULL_RELIEF));
-	}
-	else {
-		c->camDir.x = 0.0; c->camDir.y = 0.0; c->camDir.z = 1.0;
-		c->horizon = 4.0;
-	}
+/* Deepest level whose grid vertices are still >= minSpacing apart: a root
+   face spans ~R*pi/2 with QT_DIVISIONS cells. */
+static int levelForSpacing(double radius, double minSpacing)
+{
+	double cells = radius * 0.5 * M_PI / (QT_DIVISIONS * fmax(minSpacing, 1e-3));
+	int level = cells > 1.0 ? (int)ceil(log2(cells)) : 0;
+	return level > QT_LEVEL_CAP ? QT_LEVEL_CAP : level;
+}
+
+static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
+{
+	const double (*m)[4] = body->model.m;
+	w->body = body;
+	w->center.x = m[0][3]; w->center.y = m[1][3]; w->center.z = m[2][3];
+	w->radius = body->radius;
+	w->maxLevel = levelForSpacing(body->radius, minSpacing);
+
+	/* At the split distance a node of width L spans L/(K L) of the view,
+	   so one of its QT_DIVISIONS triangles covers
+	   H / (QT_DIVISIONS * K * 2 tan(fov/2)) pixels: solve for K. */
+	double tanHalf = tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
+	w->splitK = getWindowHeight() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
+
+	/* Horizon: the lowest solid surface (seafloor; water is see-through)
+	   hides everything past acos(occ/d), and a node reaching radius r peeks
+	   over it by a further acos(occ/r). Off inside the occluder. */
+	w->camDist = dlengthvec3(w->center);
+	w->occluder = body->radius * (1.0 + fmin(body->occluderRelief, 0.0));
+	w->useHorizon = useHorizon && w->camDist > w->occluder;
+	w->camDir = dscalarvec3(w->center, -1.0 / fmax(w->camDist, 1e-9));
 
 	/* Gribb-Hartmann planes from clip = viewProj * world (column vectors,
 	   rows m[i][*]): left/right, bottom/top, near/far. */
@@ -287,21 +281,29 @@ static void buildCull(qtCull *c, const dmat4 *model, mat4 viewProj, int useHoriz
 		int row = p >> 1;
 		double sign = (p & 1) ? -1.0 : 1.0;
 		for(int k = 0; k < 4; k++)
-			c->frustum[p][k] = (double)viewProj.m[3][k] + sign*(double)viewProj.m[row][k];
-		double len = sqrt(c->frustum[p][0]*c->frustum[p][0] + c->frustum[p][1]*c->frustum[p][1] + c->frustum[p][2]*c->frustum[p][2]);
+			w->frustum[p][k] = (double)viewProj.m[3][k] + sign*(double)viewProj.m[row][k];
+		double len = sqrt(w->frustum[p][0]*w->frustum[p][0] + w->frustum[p][1]*w->frustum[p][1] + w->frustum[p][2]*w->frustum[p][2]);
 		if(len > 0.0)
 			for(int k = 0; k < 4; k++)
-				c->frustum[p][k] /= len;
+				w->frustum[p][k] /= len;
 	}
+}
+
+/* Skirt drop (body radii) of a patch `width` metres wide whose surface
+   spans relief [lo, hi]: a seam opens at most as far as heights differ
+   along the edge (QT_SKIRT_*, WorldConfig.h). Shipped per patch to the
+   shaders (patchSkirt), so the culling bounds and the walls agree. */
+static double skirtDrop(double lo, double hi, double width, double radius)
+{
+	double drop = QT_SKIRT_RANGE_FACTOR * (hi - lo) + QT_SKIRT_WIDTH_FRACTION * width / radius;
+	return fmin(drop, QT_SKIRT_MAX * (1.0 + hi));
 }
 
 /* Appends the instance for a leaf: its four sphere corners in double,
    camera-relative, then downcast (shaders/patch.glsl rebuilds the surface
-   from them). */
-static void emitLeaf(const dmat4 *model, int f, const qtNode *nd)
+   from them), and its skirt drop (body radii). */
+static void emitLeaf(const dmat4 *model, int f, const qtNode *nd, double skirt)
 {
-	if(instanceCount >= QT_INSTANCE_CAP)
-		return;
 	qtInstance *inst = &instances[instanceCount++];
 	double size = ldexp(1.0, -nd->level);
 
@@ -312,6 +314,7 @@ static void emitLeaf(const dmat4 *model, int f, const qtNode *nd)
 		inst->corner[i][2] = (float)c.z;
 		inst->corner[i][3] = 0.0f;
 	}
+	inst->corner[0][3] = (float)skirt;
 	dvec3 q0 = cubePoint(f, nd->level, nd->x, nd->y);
 	inst->q0[0] = (float)q0.x;
 	inst->q0[1] = (float)q0.y;
@@ -325,65 +328,160 @@ static void emitLeaf(const dmat4 *model, int f, const qtNode *nd)
 	}
 }
 
-/* One frame's quadtree walk over a single face: appends the visible leaf
-   instances (split parents and culled nodes emit nothing). */
-static void traverseFace(const dmat4 *model, int f, const qtCull *cull, double level)
+/* Visits one node: 0 = culled, 1 = leaf, 2 = split. Bounds come from the
+   node's footprint on the unit sphere (body-local, exact in double) and the
+   body's relief over it:
+   - frustum: a sphere around the node's height shell;
+   - horizon: the node's highest point against the occluder;
+   - split: distance to the node's vertical extent (so standing on a
+     mountain refines the mountain), against K node widths. */
+static int visitNode(const qtWalk *w, int f, const qtNode *nd, int canSplit, double *skirt)
+{
+	const QuadTree_Body *b = w->body;
+	double R = w->radius;
+	double cell = ldexp(1.0, -nd->level);
+
+	/* Footprint: centre direction, corner directions, cap and width. */
+	dvec3 qc = cubePoint(f, nd->level, nd->x + 0.5, nd->y + 0.5);
+	dvec3 nc = normd(qc);
+	dvec3 n[4];
+	double chord = 0.0;
+	for(int i = 0; i < 4; i++) {
+		n[i] = normd(cubePoint(f, nd->level, nd->x + (i & 1), nd->y + (i >> 1)));
+		chord = fmax(chord, dlengthvec3(dsubvec3(n[i], nc)));
+	}
+	double capAngle = 2.0 * asin(fmin(0.5 * chord, 1.0));
+	double width = R * fmax(dlengthvec3(dsubvec3(n[0], n[1])), dlengthvec3(dsubvec3(n[0], n[2])));
+
+	/* Camera-relative sea-level centre and world up. */
+	dvec3 sea = spherePoint(&b->model, qc);
+	dvec3 up = dscalarvec3(dsubvec3(sea, w->center), 1.0 / R);
+
+	double dirv[3] = { nc.x, nc.y, nc.z };
+	double maxDist = dlengthvec3(sea) + R * chord;
+	double lo = 0.0, hi = 0.0;
+	if(b->relief) {
+		b->relief(dirv, capAngle, cell, maxDist, &lo, &hi);
+		if(lo > hi)
+			return 0;   /* nothing drawn over this footprint */
+	}
+	*skirt = skirtDrop(lo, hi, width, R);
+	double loS = lo - *skirt;
+
+	/* Frustum: sphere around the shell [R(1+loS), R(1+hi)] over the cap. A
+	   point at radius r, angle a from the centre line, lies within
+	   sqrt((r - mid)^2 + r*mid*chord^2) of the mid point. */
+	double mid = R * (1.0 + 0.5 * (loS + hi));
+	double rTop = R * (1.0 + hi);
+	double half = 0.5 * R * (hi - loS);
+	double bound = sqrt(half*half + rTop * mid * chord * chord);
+	dvec3 s = daddvec3(w->center, dscalarvec3(up, mid));
+	for(int p = 0; p < 6; p++) {
+		const double *pl = w->frustum[p];
+		if(pl[0]*s.x + pl[1]*s.y + pl[2]*s.z + pl[3] < -bound)
+			return 0;
+	}
+
+	if(w->useHorizon) {
+		double cosA = fmax(fmin(dotd(up, w->camDir), 1.0), -1.0);
+		double limit = acos(fmin(w->occluder / w->camDist, 1.0))
+		             + acos(fmin(w->occluder / rTop, 1.0));
+		if(acos(cosA) - capAngle > limit)
+			return 0;
+	}
+
+	if(canSplit && nd->level < w->maxLevel) {
+		/* Closest point of the node's vertical extent through its centre. */
+		double t = fmax(fmin(-dotd(w->center, up), R * (1.0 + hi)), R * (1.0 + lo));
+		double dist = dlengthvec3(daddvec3(w->center, dscalarvec3(up, t)));
+		if(dist < w->splitK * width)
+			return 2;
+	}
+	return 1;
+}
+
+/* One frame's quadtree walk over a single face (breadth first): appends
+   the visible leaf instances (split parents and culled nodes emit
+   nothing). */
+static void traverseFace(const qtWalk *w, int f)
 {
 	static qtNode nodes[QT_NODE_CAP];
 
 	nodes[0].level = 0; nodes[0].x = 0; nodes[0].y = 0;
-	nodes[0].center = spherePoint(model, cubePoint(f, 0, 0.5, 0.5));
-
-	int maxLOD = (int)(log(QT_SPLIT_LOD)/log(2.0) + 0.5);
 	int numNodes = 1;
-	int levelStart = 0;
 
-	for(int depth = 0; depth <= maxLOD; depth++) {
-		int levelEnd = numNodes;
-		for(int k = levelStart; k < levelEnd; k++) {
-			const qtNode *nd = &nodes[k];
-			double size = ldexp(1.0, -nd->level);
-			if(!nodeVisible(cull, nd->center, size))
-				continue;
-
-			/* Camera at the origin: the node's distance is |centre|. */
-			int split = depth < maxLOD
-			         && numNodes + 4 <= QT_NODE_CAP
-			         && dlengthvec3(nd->center) < level;
-			if(split) {
-				for(int j = 0; j < 4; j++) {
-					qtNode *child = &nodes[numNodes++];
-					child->level = nd->level + 1;
-					child->x = 2*nd->x + (j & 1);
-					child->y = 2*nd->y + (j >> 1);
-					child->center = spherePoint(model, cubePoint(f, child->level, child->x + 0.5, child->y + 0.5));
-				}
-				continue;
+	for(int k = 0; k < numNodes; k++) {
+		const qtNode *nd = &nodes[k];
+		/* Room for this node's children, and for every node already
+		   queued to become a leaf. */
+		int canSplit = numNodes + 4 <= QT_NODE_CAP
+		            && instanceCount + (numNodes - k) + 4 <= QT_INSTANCE_CAP;
+		double skirt;
+		int v = visitNode(w, f, nd, canSplit, &skirt);
+		g_qtStats.nodes++;
+		if(v == 0)
+			continue;
+		if(v == 2) {
+			for(int j = 0; j < 4; j++) {
+				qtNode *child = &nodes[numNodes++];
+				child->level = nd->level + 1;
+				child->x = 2*nd->x + (j & 1);
+				child->y = 2*nd->y + (j >> 1);
 			}
-			emitLeaf(model, f, nd);
+			continue;
 		}
-		levelStart = levelEnd;
-		level *= 0.5;
+		if(instanceCount < QT_INSTANCE_CAP) {
+			emitLeaf(&w->body->model, f, nd, skirt);
+			if(nd->level > g_qtStats.maxLevel)
+				g_qtStats.maxLevel = nd->level;
+		}
 	}
 }
 
-/* Last walk's inputs: the planet and water passes draw the same body from
-   the same camera back to back, so the second pass reuses the instance
-   buffer the first one uploaded. The camera is always the origin, so a
-   moved camera shows up as a changed (camera-relative) model matrix. */
-static dmat4 lastModel;
-static mat4 lastViewProj;
-static double lastRadius = -1.0;
+/* Last walk's inputs: a repeated draw of the same body with the same
+   inputs reuses the instance buffer already uploaded. QuadTree_BeginFrame
+   drops it, so live relief edits (bounds) always take effect next frame. */
+typedef struct qtKey {
+	dmat4 model;
+	double radius, occluderRelief, minSpacing, trianglePx;
+	QuadTree_ReliefFn relief;
+	mat4 viewProj;
+	int horizon;
+	float windowHeight;
+} qtKey;
+static qtKey lastKey;
+static int lastValid;
 
-static void walkFaces(const dmat4 *model, double radius, mat4 viewProj, int useHorizon)
+static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
 {
-	qtCull cull;
-	buildCull(&cull, model, viewProj, useHorizon);
-	double level0 = radius * QT_LEVEL_PER_RADIUS;
+	qtKey k;
+	memset(&k, 0, sizeof k);   /* padding too: keys compare with memcmp */
+	k.model = body->model;
+	k.radius = body->radius;
+	k.occluderRelief = body->occluderRelief;
+	k.minSpacing = minSpacing;
+	k.trianglePx = trianglePx;
+	k.relief = body->relief;
+	k.viewProj = viewProj;
+	k.horizon = useHorizon;
+	k.windowHeight = getWindowHeight();
+	return k;
+}
 
+static void walkFaces(const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
+{
+	qtKey key = makeKey(body, viewProj, useHorizon, minSpacing, trianglePx);
+	if(lastValid && memcmp(&key, &lastKey, sizeof key) == 0)
+		return;
+
+	LARGE_INTEGER t0, t1, freq;
+	QueryPerformanceCounter(&t0);
+
+	qtWalk w;
+	buildWalk(&w, body, viewProj, useHorizon, minSpacing, trianglePx);
 	instanceCount = 0;
 	for(int f = 0; f < 6; f++)
-		traverseFace(model, f, &cull, level0);
+		traverseFace(&w, f);
 
 	if(instanceCount > 0) {
 		/* Full re-specify orphans the old storage, so a draw still reading
@@ -392,6 +490,15 @@ static void walkFaces(const dmat4 *model, double radius, mat4 viewProj, int useH
 		glBufferData(GL_ARRAY_BUFFER, sizeof(qtInstance)*instanceCount, instances, GL_STREAM_DRAW);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
+
+	QueryPerformanceCounter(&t1);
+	QueryPerformanceFrequency(&freq);
+	g_qtStats.walks++;
+	g_qtStats.leaves += instanceCount;
+	g_qtStats.walkMs += 1000.0 * (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+
+	lastKey = key;
+	lastValid = 1;
 }
 
 static void drawPatches(void)
@@ -399,7 +506,7 @@ static void drawPatches(void)
 	if(instanceCount == 0)
 		return;
 
-	/* The debug path toggle is a uniform of whichever body program is bound. */
+	/* Per-draw uniforms of whichever body program is bound (patch.glsl). */
 	GLint program = 0;
 	glGetIntegerv(GL_CURRENT_PROGRAM, &program);
 	glUniform1i(glGetUniformLocation((GLuint)program, "patchLegacy"), g_qtLegacyPath);
@@ -411,35 +518,39 @@ static void drawPatches(void)
 	   rest of the frame afterwards. */
 	glDisable(GL_CULL_FACE);
 	glBindVertexArray(gridVAO);
-	glDrawElementsInstanced(GL_TRIANGLES, QT_GRID_VERTS, GL_UNSIGNED_SHORT, BUFFER_OFFSET(0), instanceCount);
+	/* Every patch's surface first, then every skirt: the walls hang below
+	   surfaces that are by then in the depth buffer, so their (expensive,
+	   mostly hidden) fragments are rejected before shading. buildGrid puts
+	   the skirt triangles after the surface cells. */
+	glDrawElementsInstanced(GL_TRIANGLES, QT_SURFACE_VERTS, GL_UNSIGNED_SHORT, BUFFER_OFFSET(0), instanceCount);
+	glDrawElementsInstanced(GL_TRIANGLES, QT_SKIRT_VERTS, GL_UNSIGNED_SHORT,
+	                        BUFFER_OFFSET(QT_SURFACE_VERTS * sizeof(GLushort)), instanceCount);
 	glBindVertexArray(0);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 }
 
-void QuadTree_DrawShadowCasters(const dmat4 *model, double radius, mat4 lightViewProj)
+void QuadTree_BeginFrame(void)
 {
-	/* Same camera-centred LOD as the main pass (so caster and receiver
-	   meshes match), culled against the light frustum, and without the
-	   camera horizon cull: terrain past the horizon can still shadow what
-	   the camera sees. It overwrites the instance buffer, so the next
-	   QuadTree_DrawSphere must walk again. */
-	walkFaces(model, radius, lightViewProj, 0);
-	lastRadius = -1.0;
+	lastValid = 0;
+	memset(&g_qtStats, 0, sizeof g_qtStats);
+}
+
+void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing)
+{
+	/* Camera-centred LOD like the main pass but coarser (it resolves the
+	   shadow map, not the screen; the receiver offsets in sunVisibility
+	   cover the caster/receiver mesh difference), culled against the light
+	   frustum, and without the camera horizon cull: terrain past the
+	   horizon can still shadow what the camera sees. */
+	walkFaces(body, lightViewProj, 0, fmax(minSpacing, QT_MIN_VERTEX_SPACING_M), QT_SHADOW_TRIANGLE_PX);
 	drawPatches();
 }
 
-void QuadTree_DrawSphere(const dmat4 *model, double radius, mat4 viewProj)
+void QuadTree_DrawSphere(const QuadTree_Body *body, mat4 viewProj)
 {
-	int cached = radius == lastRadius
-	          && memcmp(model, &lastModel, sizeof(dmat4)) == 0
-	          && memcmp(&viewProj, &lastViewProj, sizeof(mat4)) == 0;
-
-	if(!cached) {
-		walkFaces(model, radius, viewProj, 1);
-		lastModel = *model; lastViewProj = viewProj; lastRadius = radius;
-	}
-
+	walkFaces(body, viewProj, 1, QT_MIN_VERTEX_SPACING_M,
+	          body->trianglePx > 0.0 ? body->trianglePx : QT_TARGET_TRIANGLE_PX);
 	drawPatches();
 }
 
