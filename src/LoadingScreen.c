@@ -5,6 +5,7 @@
 static GLFWwindow *loadWindow = NULL;
 static GLuint loadingShader, loadingVAO, loadingVBO;
 static int loadStepDone = 0;
+static int loadTotal = 0;   /* 0 = LOAD_TOTAL_STEPS (start-up) */
 
 // Number of discrete load steps main() takes: waves (1) + all shaders (1) +
 // quadtree (1) + sun (1) + skybox setup (1) + skybox cube (1) + textures (1) +
@@ -70,9 +71,17 @@ void LoadingScreen_Render(float progress)
 
 // One loading step: repaint the bar at the current fraction done. Call once
 // per discrete unit of work (each texture decode, each init phase).
+void LoadingScreen_Begin(GLFWwindow *window, int steps)
+{
+	loadWindow = window;
+	loadStepDone = 0;
+	loadTotal = steps > 0 ? steps : 1;
+	LoadingScreen_Render(0.0f);
+}
+
 void LoadingScreen_Step(void)
 {
-	float pct = (float)loadStepDone / (float)LOAD_TOTAL_STEPS;
+	float pct = (float)loadStepDone / (float)(loadTotal ? loadTotal : LOAD_TOTAL_STEPS);
 	loadStepDone++;
 	if (pct > 1.0f)
 		pct = 1.0f;

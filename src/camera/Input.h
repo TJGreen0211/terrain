@@ -16,5 +16,6 @@ void doMovement(float deltaTime);
 int getWireframeState(void);
 int getRotationPaused(void);
 int consumeRegenRequest(void);
+int consumeFocusStep(void);   /* Tab / Shift+Tab since the last call */
 
 #endif

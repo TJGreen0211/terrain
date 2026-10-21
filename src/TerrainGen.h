@@ -8,9 +8,15 @@
 #include <windows.h>
 #include <glad/glad.h>
 
-/* Sea level + ocean depth derived from the baked, eroded height field; both
-   shaders must use the identical values or the water discard edge drifts off
-   the drawn coastline. Filled by generatePlanetHeightmap(). */
+/* CPU min/max pyramid of a baked height field (TerrainGen.c). */
+typedef struct TerrainPyramid TerrainPyramid;
+
+/* One baked planet: sea level + ocean depth derived from the baked, eroded
+   height field (both shaders must use the identical values or the water
+   discard edge drifts off the drawn coastline), its climate and ocean maps
+   and its height-bounds pyramid. Filled by generatePlanetHeightmap(); owned
+   by the caller (TerrainGen_FreePlanet). g_planetGen is the active planet:
+   the one the body shaders and the bounds queries below use. */
 typedef struct {
 	float seaLevel;
 	float oceanDepth;
@@ -19,15 +25,17 @@ typedef struct {
 	   G = river strength (log drainage area, widened by discharge),
 	   B = alluvial deposition from the hydraulic erosion,
 	   A = lake depth (depression filling above sea level).
-	   Owned by TerrainGen: each bake deletes the previous one. */
+	   Freed by TerrainGen_FreePlanet. */
 	unsigned int climateTex;
 	/* RGBA8 ocean map, same layout and mips, from the prevailing winds:
 	   R = wind speed / WIND_MAX_MS (latitude cells + storm/calm regions),
 	   G, B = wind direction (east, north) * 0.5 + 0.5, the way it blows,
 	   A = fetch: how developed the sea is from open water upwind (0 in the
 	   lee of land, 1 after a long run of open ocean).
-	   Owned by TerrainGen: each bake deletes the previous one. */
+	   Freed by TerrainGen_FreePlanet. */
 	unsigned int oceanTex;
+	/* Height bounds for the quadtree (TerrainGen_HeightRange). */
+	TerrainPyramid *pyramid;
 } PlanetGenParams;
 
 extern PlanetGenParams g_planetGen;
@@ -115,13 +123,34 @@ extern TerrainBakeSettings g_terrainBake;
 unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, PlanetGenParams *out,
                                      void (*step)(void));
 
-/* Height bounds of the last bake (raw field units, like seaLevel), for the
-   quadtree's culling and split distances. HeightRange covers every value
+/* Background bake: the same bake without the stall. The GPU shaping pass
+   is drawn in strips over successive polls and read back asynchronously;
+   the CPU part (erosion, climate maps, bounds pyramid: nearly all of the
+   time) runs on a worker thread. Poll once a frame from the GL thread; it
+   returns 1 when the job is ready, then Finish uploads the maps into out
+   and returns the height texture, like generatePlanetHeightmap but
+   without making the planet active. Cancel drops a job. One bake at a
+   time: a start or a blocking bake first completes a running one. */
+typedef struct TerrainBakeJob TerrainBakeJob;
+TerrainBakeJob *TerrainGen_BakeStart(const TerrainBakeSettings *settings);
+int TerrainGen_BakePoll(TerrainBakeJob *job);
+float TerrainGen_BakeProgress(const TerrainBakeJob *job);   /* 0..1, rough */
+unsigned int TerrainGen_BakeFinish(TerrainBakeJob *job, PlanetGenParams *out);
+void TerrainGen_BakeCancel(TerrainBakeJob *job);
+
+/* Frees a baked planet's climate / ocean maps and bounds pyramid (not its
+   height texture, which generatePlanetHeightmap returns separately). */
+void TerrainGen_FreePlanet(PlanetGenParams *p);
+
+/* Height bounds of the active planet (g_planetGen; raw field units, like
+   seaLevel), for the quadtree's culling and split distances. HeightRange covers every value
    the body shaders can sample over a spherical cap (dir: body-local unit
    centre, capAngle in radians) at mip `lod` or finer, bilinear and
    trilinear filtering included. Both return 0 (range 0..0) before the
    first bake. */
 int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, float *hmin, float *hmax);
 int TerrainGen_GlobalRange(float *hmin, float *hmax);
+/* GlobalRange of any baked planet, active or not. */
+int TerrainGen_PlanetRange(const PlanetGenParams *planet, float *hmin, float *hmax);
 
 #endif

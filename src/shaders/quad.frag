@@ -442,10 +442,12 @@ void main()
 		// Moisture: baked wind rain x latitude rain belts, wetter on
 		// alluvial plains and along big rivers/lakes.
 		float absLat = degrees(asin(min(abs(dObj.z), 1.0)));
-		float moist = 2.0 * clim.r * mix(1.0, hadleyFactor(absLat), hadleyStrength) * humidity;
+		// humidity scales every term: 0 = a dry world (no lakes, no rivers).
+		float moist = 2.0 * clim.r * mix(1.0, hadleyFactor(absLat), hadleyStrength);
 		moist += 0.2 * clim.b;
 		moist += 0.3 * smoothstep(riverThreshold - 0.15, riverThreshold + 0.05, climWide.g);
 		moist += 0.3 * smoothstep(LAKE_MIN, LAKE_MIN * 3.0, climWide.a);
+		moist *= humidity;
 		moist = clamp(moist + (n2 - 0.5) * 0.12, 0.0, 1.0);
 
 		float tBiome = clamp((temp - 0.2) / 0.7, 0.0, 1.0);
@@ -480,7 +482,8 @@ void main()
 		// min() with a coarser mip drops one-texel erosion pits: only basins
 		// with real area stay flooded.
 		float lakeA = min(clim.a, textureLod(climateMap, uv, min(lod + LAKE_LOD, 11.0)).a * 2.0);
-		float lake = smoothstep(LAKE_MIN, LAKE_MIN * 2.0, lakeA);
+		// No basins flood (or dry to salt) on a world with no water at all.
+		float lake = smoothstep(LAKE_MIN, LAKE_MIN * 2.0, lakeA) * min(humidity * 4.0, 1.0);
 		float wetBasin = smoothstep(0.15, 0.3, moist);
 		albedo = mix(albedo, saltColor, lake * (1.0 - wetBasin));
 		rough = mix(rough, 0.5, lake * (1.0 - wetBasin));

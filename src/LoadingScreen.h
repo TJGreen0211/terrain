@@ -12,6 +12,9 @@ void LoadingScreen_Step(void);
 // Draw one loading frame at the given 0..1 progress (used for the 0.0 start and
 // the forced 1.0 final full-bar frame).
 void LoadingScreen_Render(float progress);
+// Re-arm for a later load (a planet bake on approach): `steps` Step calls
+// fill the bar. End with LoadingScreen_Finish.
+void LoadingScreen_Begin(GLFWwindow *window, int steps);
 // Forced final full-bar frame, then detach the window.
 void LoadingScreen_Finish(void);
 

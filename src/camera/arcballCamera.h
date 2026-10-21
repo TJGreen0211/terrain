@@ -21,7 +21,13 @@ extern GLfloat CameraScrollSpeed;
    sits at the origin of every space the GPU sees. getCameraPosition() is the
    absolute world camera in double: subtract it from world positions in double
    and downcast only the difference (see LinearAlg.h dvec3). */
-void setCameraPivot(dvec3 pivot);
+void setCameraPivot(dvec3 pivot);   /* world position (kept relative to the focus) */
+/* Focus body for this frame: the pivot rides with origin (world centre),
+   the surface preset (G) stands on the body (radius) below the sun
+   (sunDir: unit, body -> Sun). Call before using the camera each frame. */
+void setCameraFocus(dvec3 origin, double radius, dvec3 sunDir);
+/* After a focus switch: pivot on the body's centre, orbit at distance. */
+void resetCameraForFocus(double distance);
 dvec3 getCameraPosition(void);
 mat4 getViewMatrix();
 mat4 getViewRotation();

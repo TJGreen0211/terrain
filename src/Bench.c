@@ -16,6 +16,7 @@
 #include "LinearAlg.h"
 #include "arcballCamera.h"
 #include "Bodies.h"
+#include "SolarSystem.h"
 #include "WorldConfig.h"
 #include "QuadTree.h"
 #include "Profiler.h"
@@ -32,6 +33,7 @@ typedef struct { double frame, dist, yaw, pitch; } PoseKey;
 typedef struct { double frame, alt; } AltKey;
 
 static int active;
+static int bakeAsync;             /* bakeasync: planets bake in the background */
 static long frame;
 static long totalFrames;          /* 0 until resolved (scene then CLI wins) */
 static long cliFrames;
@@ -41,6 +43,10 @@ static char shotDir[512] = "../bench/cand";
 
 static int viewSurface;           /* 0 orbit, 1 surface preset */
 static int pivotSubsolar;
+static int pivotBody = BODY_EARTH;  /* pivot <body name>: orbit it (and focus it) */
+/* pivotat <frame> <body name>: switch the pivot body from that frame on. */
+static long switchFrame[MAX_KEYS]; static int switchBody[MAX_KEYS]; static int nSwitch;
+static int startBody = BODY_EARTH;
 static double pivotOff, phaseDeg, simStart;
 static int pivotGround;           /* poff ground: pivotOff is above the terrain */
 static double timeScale = 1.0;
@@ -116,9 +122,18 @@ static int loadScene(const char *path)
 			sscanf(line, "%*s %63s", v);
 			viewSurface = strcmp(v, "surface") == 0;
 		} else if (strcmp(tok, "pivot") == 0) {
-			char v[64] = "earth";
-			sscanf(line, "%*s %63s", v);
+			char v[64] = "earth", w[64] = "";
+			sscanf(line, "%*s %63s %63s", v, w);
 			pivotSubsolar = strcmp(v, "subsolar") == 0;
+			/* "pivot subsolar <body>": that body's sub-solar point. */
+			if (pivotSubsolar && w[0])
+				strcpy(v, w);
+			/* Any body by name (case-insensitive): orbit its centre and
+			   make it the focus. "earth" / "subsolar" keep Earth. */
+			pivotBody = BODY_EARTH;
+			for (int i = 0; i < BODY_COUNT; i++)
+				if (_stricmp(v, g_bodies[i].name) == 0)
+					pivotBody = i;
 		} else if (strcmp(tok, "poff") == 0) {
 			char v[64] = "";
 			sscanf(line, "%*s %63s", v);
@@ -128,6 +143,19 @@ static int loadScene(const char *path)
 			sscanf(line, "%*s %lf", &phaseDeg);
 		} else if (strcmp(tok, "frames") == 0) {
 			sscanf(line, "%*s %ld", &sceneFrames);
+		} else if (strcmp(tok, "pivotat") == 0 && nSwitch < MAX_KEYS) {
+			char v[64] = "";
+			long f = 0;
+			if (sscanf(line, "%*s %ld %63s", &f, v) == 2)
+				for (int i = 0; i < BODY_COUNT; i++)
+					if (_stricmp(v, g_bodies[i].name) == 0) {
+						switchFrame[nSwitch] = f;
+						switchBody[nSwitch++] = i;
+					}
+		} else if (strcmp(tok, "bakeasync") == 0) {
+			bakeAsync = 1;
+		} else if (strcmp(tok, "systemseed") == 0) {
+			sscanf(line, "%*s %u", &g_systemSeed);
 		} else if (strcmp(tok, "timescale") == 0) {
 			sscanf(line, "%*s %lf", &timeScale);
 		} else if (strcmp(tok, "simtime") == 0) {
@@ -161,6 +189,8 @@ static int loadScene(const char *path)
 		fprintf(stderr, "[bench] scene %s needs at least two 'key' lines\n", path);
 		return 0;
 	}
+	g_focusBody = pivotBody;
+	startBody = pivotBody;
 	if (phaseDeg != 0.0) {
 		char buf[64];
 		sprintf(buf, "%g", phaseDeg);
@@ -222,12 +252,13 @@ void Bench_ParseArgs(int argc, char *argv[])
 	}
 	fprintf(stderr, "[bench] scene %s: %ld frames, %s view, %s pivot\n",
 	        sceneName, totalFrames, viewSurface ? "surface" : "orbit",
-	        pivotSubsolar ? "subsolar" : "earth");
+	        pivotSubsolar ? "subsolar" : g_bodies[pivotBody].name);
 }
 
 /* ---------------- accessors ---------------- */
 
 int Bench_Active(void) { return active; }
+int Bench_BlockingBakes(void) { return active && !bakeAsync; }
 long Bench_Frame(void) { return frame; }
 double Bench_SimTimeStart(void) { return simStart; }
 double Bench_SimTime(void) { return simStart + (double)frame * BENCH_DT * SIM_TIME_SCALE * timeScale; }
@@ -244,7 +275,12 @@ int Bench_FixedWindowSize(int *w, int *h)
 void Bench_UpdateCamera(void)
 {
 	if (!active) return;
-	const Body *e = &g_bodies[BODY_EARTH];
+	pivotBody = startBody;
+	for (int i = 0; i < nSwitch; i++)
+		if (frame >= switchFrame[i])
+			pivotBody = switchBody[i];
+	g_focusBody = pivotBody;
+	const Body *e = &g_bodies[pivotBody];
 	if (viewSurface) {
 		if (!isSurfaceCamera()) toggleSurfaceCamera();
 		testSetSurfaceRadius((float)interpAlt((double)frame));
@@ -252,7 +288,7 @@ void Bench_UpdateCamera(void)
 	}
 	double dist, yaw, pitch;
 	interpPose((double)frame, &dist, &yaw, &pitch);
-	dvec3 pivot = e->position;
+	dvec3 pivot = g_bodies[pivotBody].position;
 	if (pivotSubsolar) {
 		/* True sub-solar point: the direction of the sun body itself, so
 		   the pivot is lit at any simTime (the phase key then slides the

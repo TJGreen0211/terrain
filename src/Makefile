@@ -16,6 +16,8 @@ SRCS = Main.c \
 	TerrainGen.c \
 	TerrainDetail.c \
 	Shadows.c \
+	Planets.c \
+	SolarSystem.c \
 	glad.c \
 	LoadShader.c \
 	math/LinearAlg.c \

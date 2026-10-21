@@ -16,6 +16,7 @@ void DebugGUI_Frame(void);              // build + draw, into the bound (default
 void DebugGUI_Shutdown(void);
 
 void DebugGUI_ToggleVisible(void);
+int  DebugGUI_ConsumeNewSystem(void);         // 1 once after the system seed changed (SolarSystem_Generate)
 int  DebugGUI_ConsumeRegenerate(void);        // 1 once after "Regenerate planet" / "New seed"
 int  DebugGUI_WantsMouse(double x, double y); // cursor in window px y-down
 

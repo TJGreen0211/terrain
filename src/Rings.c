@@ -5,8 +5,6 @@
 #include <stdlib.h>
 
 /* Ring geometry in planet radii. Saturn's main rings span ~1.24-2.27. */
-#define RING_INNER 1.30f
-#define RING_OUTER 2.30f
 /* Ring-plane tilt (degrees): normal = rotX(TILT_X) * rotZ(TILT_Z) * +Y.
    The sun sits in the planet's XZ plane, so an untilted ring would be
    edge-on to it (unlit, no shadow). These put the sun ~18 deg above the
@@ -45,6 +43,8 @@ static struct {
 	GLuint rockVAO[3];
 	int rockVerts[3];
 	unsigned int seed;
+	int enabled;            /* the active planet has rings (Rings_SetPlanet) */
+	unsigned int profileSeed;   /* seed of the baked profile */
 
 	/* Ring frame (world, constant): normal + in-plane basis. */
 	dvec3 n, u, v;
@@ -415,12 +415,7 @@ void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[
 		g_ring.rockVerts[i] = rockVerts[i];
 	}
 
-	double tz = RING_TILT_Z * M_PI / 180.0, tx = RING_TILT_X * M_PI / 180.0;
-	dvec3 n = { -sin(tz), cos(tz) * cos(tx), cos(tz) * sin(tx) };
-	dvec3 ref = { 0.0, 0.0, 1.0 };
-	g_ring.n = dnormalize(n);
-	g_ring.u = dnormalize(dcross(g_ring.n, ref));
-	g_ring.v = dcross(g_ring.n, g_ring.u);
+	Rings_SetPlanet(1, seed, Rings_DefaultNormal());
 
 	glGenTextures(1, &g_ring.profileTex);
 	glBindTexture(GL_TEXTURE_1D, g_ring.profileTex);
@@ -429,6 +424,7 @@ void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[
 	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glBindTexture(GL_TEXTURE_1D, 0);
 	Rings_Regenerate(seed);
+	g_ring.profileSeed = seed;
 
 	GLuint own[3] = { g_ring.sheetShader, g_ring.rockShader, g_ring.dustShader };
 	for (int i = 0; i < 3; i++) {
@@ -441,6 +437,27 @@ void Rings_Regenerate(unsigned int seed)
 {
 	g_ring.seed = pcgHash(seed);
 	bakeProfile(seed);
+}
+
+dvec3 Rings_DefaultNormal(void)
+{
+	double tz = RING_TILT_Z * M_PI / 180.0, tx = RING_TILT_X * M_PI / 180.0;
+	dvec3 n = { -sin(tz), cos(tz) * cos(tx), cos(tz) * sin(tx) };
+	return dnormalize(n);
+}
+
+void Rings_SetPlanet(int enabled, unsigned int seed, dvec3 normal)
+{
+	g_ring.enabled = enabled;
+	g_ring.n = dnormalize(normal);
+	dvec3 ref = { 0.0, 0.0, 1.0 };
+	if (fabs(g_ring.n.z) > 0.99) { ref.x = 1.0; ref.z = 0.0; }
+	g_ring.u = dnormalize(dcross(g_ring.n, ref));
+	g_ring.v = dcross(g_ring.n, g_ring.u);
+	if (enabled && g_ring.profileTex && seed != g_ring.profileSeed) {
+		Rings_Regenerate(seed);
+		g_ring.profileSeed = seed;
+	}
 }
 
 void Rings_AttachReceiver(GLuint shader)
@@ -495,7 +512,7 @@ static void setRingShape(GLuint shader)
 void Rings_BindReceiver(GLuint shader)
 {
 	glUseProgram(shader);
-	glUniform1f(glGetUniformLocation(shader, "hasRing"), 1.0f);
+	glUniform1f(glGetUniformLocation(shader, "hasRing"), g_ring.enabled ? 1.0f : 0.0f);
 	setRingShape(shader);
 	bindProfile();
 }
@@ -544,6 +561,8 @@ void Rings_DrawRocks(mat4 proj, mat4 view)
 {
 	GLuint s = g_ring.rockShader;
 	int gridN;
+	if (!g_ring.enabled)
+		return;
 	useRingProgram(s, proj, view);
 	if (!setSpawnGrid(s, ROCK_CELL, ROCK_RANGE, RING_HALF_THICKNESS, &gridN))
 		return;
@@ -581,6 +600,8 @@ static void endTranslucent(void)
 
 void Rings_DrawSheet(mat4 proj, mat4 view)
 {
+	if (!g_ring.enabled)
+		return;
 	useRingProgram(g_ring.sheetShader, proj, view);
 	beginTranslucent();
 	glBindVertexArray(g_ring.emptyVAO);
@@ -593,6 +614,8 @@ void Rings_DrawDust(mat4 proj, mat4 view)
 {
 	GLuint s = g_ring.dustShader;
 	int gridN;
+	if (!g_ring.enabled)
+		return;
 	useRingProgram(s, proj, view);
 	if (!setSpawnGrid(s, DUST_CELL, DUST_RANGE, DUST_HALF_THICKNESS, &gridN))
 		return;

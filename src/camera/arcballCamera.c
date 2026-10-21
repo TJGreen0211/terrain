@@ -23,11 +23,18 @@ static quaternion dragStartOrientation = { 1.0f, 0.0f, 0.0f, 0.0f };
 static vec3 dragStartPos = { 0.0f, 0.0f, 1.0f };
 static int dragging = 0;
 
-/* Point the camera orbits / looks at: an absolute world coordinate in
-   double, so WASD accumulation never quantizes against the scene scale
-   (camera-relative rendering, see getViewMatrix). Starts where the camera
-   used to spawn (in front of the planet) since the distance starts at 0. */
+/* Point the camera orbits / looks at, relative to the focus body's centre
+   (world axes, not turning with the body), so the camera rides along with
+   the body's orbit. Double, so WASD accumulation never quantizes against
+   the scene scale (camera-relative rendering, see getViewMatrix). Starts
+   where the camera used to spawn (in front of the planet) since the
+   distance starts at 0. */
 static dvec3 Pivot = { 0.0, 0.0, CAMERA_SPAWN_DISTANCE_M };
+/* Focus body, set every frame (setCameraFocus): its world centre, its
+   radius, and the unit direction from it to the Sun. */
+static dvec3 FocusOrigin = { 0.0, 0.0, 0.0 };
+static double FocusRadius = EARTH_RADIUS_M;
+static dvec3 FocusSunDir = { -0.70710678118654752, 0.0, -0.70710678118654752 };
 
 /* Sub-solar surface preset. When active the camera stands above the planet
    surface at the sub-solar point ??? the spot where the fixed sun
@@ -52,7 +59,21 @@ static vec3 Right = {1.0f, 0.0f, 0.0f};
 
 void setCameraPivot(dvec3 pivot)
 {
-    Pivot = pivot;
+    Pivot = dsubvec3(pivot, FocusOrigin);
+}
+
+void setCameraFocus(dvec3 origin, double radius, dvec3 sunDir)
+{
+    FocusOrigin = origin;
+    FocusRadius = radius;
+    FocusSunDir = sunDir;
+}
+
+void resetCameraForFocus(double distance)
+{
+    Pivot = (dvec3){ 0.0, 0.0, 0.0 };
+    CameraDistance = (float)fmin(distance, CameraDistanceMax);
+    dragging = 0;
 }
 
 static quaternion normalizeOrIdentity(quaternion q)
@@ -129,14 +150,15 @@ mat4 getViewRotation()
     return r;
 }
 
-/* Sub-solar "stand on the planet" pose. The sun is fixed in the XZ plane at
-   SUN_ORBIT_PHASE_DEG. We place the camera on the sub-solar point (the spot
-   where the sun is directly overhead) and look across a local tangent, tilted
+/* Sub-solar "stand on the planet" pose. We place the camera above the focus
+   body's sub-solar point (the spot where the sun is directly overhead; it
+   drifts as the body orbits) and look across a local tangent, tilted
    SURFACE_TILT below the horizon. That yields a sunlit daytime interior: a blue
-   sky dome overhead, lit fog-ground below, and a bright horizon between. */
+   sky dome overhead, lit fog-ground below, and a bright horizon between. The
+   sun direction is flattened onto the XZ plane, so the tangent stays level. */
 static vec3 surfaceSun(void)
 {
-    double a = SUN_ORBIT_PHASE_DEG * (M_PI / 180.0);
+    double a = atan2(FocusSunDir.z, FocusSunDir.x);
     a += testPhase() * (M_PI / 180.0);
     vec3 s = { (float)cos(a), 0.0f, (float)sin(a) };
     return s;
@@ -168,12 +190,13 @@ static int surfaceViewActive(void) { return surfaceView; }
 
 static dvec3 surfaceEye(void)
 {
-    double a = SUN_ORBIT_PHASE_DEG * (M_PI / 180.0);
-    a += testPhase() * (M_PI / 180.0);
+    vec3 s = surfaceSun();
+    /* surfAlt is a radius for an Earth-sized body: scale it to the focus. */
+    double r = surfAlt * (FocusRadius / EARTH_RADIUS_M);
     dvec3 e;
-    e.x = cos(a) * surfAlt;
-    e.y = 0.0;
-    e.z = sin(a) * surfAlt;
+    e.x = FocusOrigin.x + s.x * r;
+    e.y = FocusOrigin.y;
+    e.z = FocusOrigin.z + s.z * r;
     return e;
 }
 
@@ -324,9 +347,9 @@ dvec3 getCameraPosition(void)
     if (surfaceViewActive()) return surfaceEye();
     mat4 r = getViewRotation();
     dvec3 c;
-    c.x = Pivot.x + (double)CameraDistance * r.m[2][0];
-    c.y = Pivot.y + (double)CameraDistance * r.m[2][1];
-    c.z = Pivot.z + (double)CameraDistance * r.m[2][2];
+    c.x = FocusOrigin.x + Pivot.x + (double)CameraDistance * r.m[2][0];
+    c.y = FocusOrigin.y + Pivot.y + (double)CameraDistance * r.m[2][1];
+    c.z = FocusOrigin.z + Pivot.z + (double)CameraDistance * r.m[2][2];
     return c;
 }
 
@@ -405,7 +428,10 @@ void processMouseScroll(float yoffset)
         if (surfAlt > SURFACE_MAX) surfAlt = SURFACE_MAX;
         return;
     }
-    CameraDistance += yoffset * CameraScrollSpeed;
+    /* At least a tenth of the current distance per notch, so the outer
+       system is reachable; near the pivot the slider's step rules. */
+    float step = fmaxf(CameraScrollSpeed, 0.1f * CameraDistance);
+    CameraDistance += yoffset * step;
     if (CameraDistance < 0.0f)
         CameraDistance = 0.0f;
     if (CameraDistance > CameraDistanceMax)

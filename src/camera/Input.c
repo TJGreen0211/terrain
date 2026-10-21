@@ -8,6 +8,7 @@ static int keyW, keyA, keyS, keyD;
 static int wireframe = 0;
 static int rotationPaused = 0;
 static int regenRequested = 0;
+static int focusStep = 0;
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
@@ -24,6 +25,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         regenRequested = 1;
     if (key == GLFW_KEY_F1 && action == GLFW_PRESS && mode == 0)
         DebugGUI_ToggleVisible();
+    /* Tab / Shift+Tab: next / previous focus body. */
+    if (key == GLFW_KEY_TAB && action == GLFW_PRESS)
+        focusStep += (mode & GLFW_MOD_SHIFT) ? -1 : 1;
 
     /* GLFW_REPEAT leaves the held state alone. */
     if (action != GLFW_PRESS && action != GLFW_RELEASE)
@@ -103,4 +107,11 @@ int consumeRegenRequest(void) {
 	int r = regenRequested;
 	regenRequested = 0;
 	return r;
+}
+
+/* Focus-body steps requested since the last call (Tab +1, Shift+Tab -1). */
+int consumeFocusStep(void) {
+	int s = focusStep;
+	focusStep = 0;
+	return s;
 }

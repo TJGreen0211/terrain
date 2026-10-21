@@ -1,5 +1,7 @@
 #include "Main.h"
 #include "Sun.h"
+#include "Planets.h"
+#include "SolarSystem.h"
 #include "Skybox.h"
 #include "Atmosphere.h"
 #include "LoadingScreen.h"
@@ -462,17 +464,17 @@ static double lodCellKFor(double radius)
    cascades. nearest: the camera's height above the highest terrain within
    its horizon (no ground is closer); farthest: the distance to the horizon
    plus as far as that terrain's peaks can peek over it. */
-static void terrainViewRange(const Body *earth, double *nearest, double *farthest)
+static void terrainViewRange(const Body *planet, double *nearest, double *farthest)
 {
-	dvec3 rel = dsubvec3(g_cam, earth->position);
-	double d = dlengthvec3(rel), R = earth->radius;
+	dvec3 rel = dsubvec3(g_cam, planet->position);
+	double d = dlengthvec3(rel), R = planet->radius;
 	float gmin, gmax;
 	TerrainGen_GlobalRange(&gmin, &gmax);
 	double topGlobal = R * (1.0 + reliefOf(gmax));
 	double cap = d > topGlobal ? acos(R / d) + acos(R / topGlobal) : M_PI;
 	/* Body-local nadir: rotation is body -> world, so its transpose. */
 	double w[3] = { rel.x / d, rel.y / d, rel.z / d }, dl[3];
-	const double (*m)[4] = earth->rotation.m;
+	const double (*m)[4] = planet->rotation.m;
 	for (int j = 0; j < 3; j++)
 		dl[j] = m[0][j] * w[0] + m[1][j] * w[1] + m[2][j] * w[2];
 	float lo, hi;
@@ -496,16 +498,17 @@ double Earth_GroundRadius(dvec3 worldDir, double capAngle)
 	return earth->radius * (1.0 + fmax(reliefOf(hi), 0.0)) + TerrainDetail_Amplitude(earth->radius);
 }
 
-/* QuadTree_ReliefFn for Earth's land + seafloor (quad.vert, depth.vert):
+/* QuadTree_ReliefFn for the active planet's land + seafloor (quad.vert, depth.vert):
    the terrain the shaders can place over the cap, same mip selection (the
    coarsest any vertex there uses, at maxDist: the pyramid range at a mip
    bounds every finer sample). */
-static void earthReliefBounds(const double dir[3], double capAngle, double cell,
-                              double maxDist, double *lo, double *hi)
+static void terrainReliefBounds(const double dir[3], double capAngle, double cell,
+                                double maxDist, double *lo, double *hi)
 {
 	(void)cell;
-	double lodK = LOD_K_NUMER / (g_bodies[BODY_EARTH].radius * getWindowHeight());
-	double lodCell = log2(fmax(maxDist * lodCellKFor(g_bodies[BODY_EARTH].radius), 1.0));
+	double R = g_bodies[SolarSystem_ActiveBody()].radius;
+	double lodK = LOD_K_NUMER / (R * getWindowHeight());
+	double lodCell = log2(fmax(maxDist * lodCellKFor(R), 1.0));
 	double lodPix = log2(fmax(maxDist * lodK, 1e-4));
 	double lod = fmin(fmax(fmax(lodCell, lodPix), 0.0), 11.0);
 	float hmin, hmax;
@@ -521,7 +524,7 @@ static void earthReliefBounds(const double dir[3], double capAngle, double cell,
    coarser block's minimum bounds every finer sample. */
 static int footprintAllLand(const double dir[3], double capAngle, double maxDist)
 {
-	double lodK = LOD_K_NUMER / (g_bodies[BODY_EARTH].radius * getWindowHeight());
+	double lodK = LOD_K_NUMER / (g_bodies[SolarSystem_ActiveBody()].radius * getWindowHeight());
 	double latEdge = fmin(asin(fmin(fabs(dir[2]), 1.0)) + capAngle, 0.5 * M_PI);
 	double cosLat = fmax(cos(latEdge), 0.02);
 	double fragLod = log2(fmax(maxDist * lodK, 1e-4)) + log2(1.0 / 0.15) + log2(1.0 / cosLat);
@@ -551,14 +554,14 @@ static void waterReliefBounds(const double dir[3], double capAngle, double cell,
 	*hi = shell + wave;
 }
 
-/* Earth as the quadtree sees it: camera-relative model, relief bounds for
-   the surface being drawn (terrain or water shell), and the deepest
-   seafloor as the horizon occluder (water is see-through). */
-static QuadTree_Body earthQuadTreeBody(const Body *earth, QuadTree_ReliefFn relief)
+/* The active planet as the quadtree sees it: camera-relative model, relief
+   bounds for the surface being drawn (terrain or water shell), and the
+   deepest seafloor as the horizon occluder (water is see-through). */
+static QuadTree_Body planetQuadTreeBody(const Body *planet, QuadTree_ReliefFn relief)
 {
 	float gmin, gmax;
 	TerrainGen_GlobalRange(&gmin, &gmax);
-	QuadTree_Body b = { Body_ModelMatrix(earth, g_cam), earth->radius, relief, reliefOf(gmin) };
+	QuadTree_Body b = { Body_ModelMatrix(planet, g_cam), planet->radius, relief, reliefOf(gmin) };
 	return b;
 }
 
@@ -1066,6 +1069,7 @@ int main(int argc, char *argv[])
 	LoadingScreen_Step();
 
 	initSun();
+	Planets_Init();
 	LoadingScreen_Step();
 
 	initSkybox();
@@ -1105,16 +1109,19 @@ int main(int argc, char *argv[])
 	   stats (TerrainGen.c), from g_terrainBake. The seed advances on every
 	   H-key re-bake; the debug panel edits the rest and re-bakes on demand. */
 	planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetGen, LoadingScreen_Step);
-	unsigned int ringSeed = g_terrainBake.seed;
 
 	/* Procedural rings, seeded with the planet (re-rolled with it when the
 	   seed changes). Every program that samples the ring shadow is a
 	   receiver. */
-	Rings_Init(ringSeed, rockVAOs, rockVerts);
+	Rings_Init(g_terrainBake.seed, rockVAOs, rockVerts);
 	Rings_AttachReceiver(quadShader);
 	Rings_AttachReceiver(waterShader);
 	Rings_AttachReceiver(ringShader);
 	Rings_AttachReceiver(atmosphereShader);
+
+	/* The procedural system (SolarSystem.c): Earth as baked above, every
+	   other planet from the system seed (baked on approach). */
+	SolarSystem_Init();
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
@@ -1175,26 +1182,29 @@ int main(int argc, char *argv[])
 		}*/
 		fpsFrames++;
 
-		/* H: re-roll the seed and re-bake the height field; the debug
-		   panel's regenerate button re-bakes with its current settings
-		   (1-3 s hitch either way). */
+		/* H: re-roll the active planet's terrain seed and re-bake it; the
+		   debug panel's regenerate button re-bakes with its current
+		   settings (1-3 s hitch either way). A new system seed re-generates
+		   every planet but Earth. */
 		int rebake = DebugGUI_ConsumeRegenerate();
 		if (consumeRegenRequest()) {
 			g_terrainBake.seed++;
 			rebake = 1;
 		}
-		if (rebake) {
-			glDeleteTextures(1, &planetHeightTex);
-			planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetGen, NULL);
-			if (g_terrainBake.seed != ringSeed) {
-				ringSeed = g_terrainBake.seed;
-				Rings_Regenerate(ringSeed);
-			}
+		if (rebake)
+			SolarSystem_RebakeActive(NULL);
+		if (DebugGUI_ConsumeNewSystem()) {
+			SolarSystem_Generate(g_systemSeed);
+			/* The focused planet may have a new size: back off to see it. */
+			resetCameraForFocus(CAMERA_FOCUS_DISTANCE_RADII * g_bodies[g_focusBody].radius);
 		}
 
-		Prof_Begin(PROF_WAVES);
-		generateWaves(&ocean);
-		Prof_End(PROF_WAVES);
+		/* Ocean waves: only Earth has water. */
+		if (SolarSystem_ActiveBody() == BODY_EARTH) {
+			Prof_Begin(PROF_WAVES);
+			generateWaves(&ocean);
+			Prof_End(PROF_WAVES);
+		}
 
 		GLfloat currentFrame = (GLfloat)App_Time();
 		deltaTime = currentFrame - lastFrame;
@@ -1207,15 +1217,47 @@ int main(int argc, char *argv[])
 		if (Bench_Active())
 			simTime = Bench_SimTime();
 		else if (!getRotationPaused())
-			simTime += fmin(deltaTime, 0.1) * SIM_TIME_SCALE;
+			simTime += fmin(deltaTime, 0.1) * g_simTimeScale;
 		Bodies_Update(simTime);
+
+		/* Focus body (Tab / debug panel): the camera rides with it. A
+		   switch re-centres the orbit on the new body. */
+		{
+			static int lastFocus = BODY_EARTH;
+			int step = consumeFocusStep();
+			if (step != 0 && !Bench_Active())
+				g_focusBody = ((g_focusBody + step) % BODY_COUNT + BODY_COUNT) % BODY_COUNT;
+			const Body *f = &g_bodies[g_focusBody];
+			dvec3 toSun = dsubvec3(g_bodies[BODY_SUN].position, f->position);
+			double ds = dlengthvec3(toSun);
+			dvec3 sunDir = ds > 0.0 ? dscalarvec3(toSun, 1.0 / ds) : (dvec3){ 1.0, 0.0, 0.0 };
+			setCameraFocus(f->position, f->radius, sunDir);
+			if (g_focusBody != lastFocus) {
+				resetCameraForFocus(CAMERA_FOCUS_DISTANCE_RADII * f->radius);
+				lastFocus = g_focusBody;
+			}
+		}
 		Bench_UpdateCamera();
-		const Body *earth = &g_bodies[BODY_EARTH];
-		const Body *sun = &g_bodies[BODY_SUN];
-		const Body *moon = &g_bodies[BODY_MOON];
 
 		/* This frame's floating origin (see camRelTranslate). */
 		g_cam = getCameraPosition();
+
+		/* The active planet (SolarSystem.c): the terrain planet drawn in full,
+		   the largest on screen. One never seen up close bakes in the
+		   background first (a few seconds as a stand-in; cached after).
+		   Bench runs switch and bake at once: repeatable frames. */
+		SolarSystem_Update(g_cam, g_focusBody, Bench_BlockingBakes());
+		int activeId = SolarSystem_ActiveBody();
+		int isEarth = activeId == BODY_EARTH;
+		const Body *planetB = &g_bodies[activeId];
+		const Body *sun = &g_bodies[BODY_SUN];
+		const Body *moon = &g_bodies[BODY_MOON];
+
+		/* Full passes for the active planet and the Moon only while they are
+		   more than a few pixels across; Planets_Draw stands in otherwise.
+		   The Moon needs Earth's shadow map, so only with Earth active. */
+		int planetFull = Planets_FullDetail(planetB, g_cam);
+		int moonFull = isEarth && Planets_FullDetail(moon, g_cam);
 
 		if(currentFrame - lastTime >= 1.0)
 		{
@@ -1225,8 +1267,8 @@ int main(int argc, char *argv[])
 		}
 
 		/* Planet radius (metres) and world centre. */
-		float fScale = (float)earth->radius;
-		dvec3 translation = earth->position;
+		float fScale = (float)planetB->radius;
+		dvec3 translation = planetB->position;
 
 		/* Atmosphere: shell starts at the planet surface; the rest of its
 		   parameters live in g_atmosphere (Atmosphere.c, debug panel).
@@ -1255,11 +1297,11 @@ int main(int argc, char *argv[])
 		/* Planet model (scale * spin/tilt, camera-relative), composed in
 		   double and downcast once; shared by the shadow casters and the
 		   main pass. */
-		QuadTree_Body planetBody = earthQuadTreeBody(earth, earthReliefBounds);
+		QuadTree_Body planetBody = planetQuadTreeBody(planetB, terrainReliefBounds);
 		/* Land carries detail noise (quad.vert, depth.vert): widen its
 		   bounds and skirts. The water shell does not. */
-		planetBody.detailAmp = TerrainDetail_Amplitude(earth->radius);
-		planetBody.detailSeam = TerrainDetail_Seam(earth->radius);
+		planetBody.detailAmp = TerrainDetail_Amplitude(planetB->radius);
+		planetBody.detailSeam = TerrainDetail_Seam(planetB->radius);
 		mat4 planetModel = dmat4tomat4(planetBody.model);
 		/* New frame: the walk cache must not outlive this frame's inputs. */
 		QuadTree_BeginFrame();
@@ -1276,7 +1318,8 @@ int main(int argc, char *argv[])
 			dvec3 toSun = dsubvec3(lightWorld, translation);
 			dvec3 sunDir = dscalarvec3(toSun, 1.0 / dlengthvec3(toSun));
 			double boundR = fScale * (1.0 + g_planetStyle.landRelief) * SHADOW_BOUND_MARGIN;
-			double reach = dlengthvec3(dsubvec3(moon->position, translation)) + moon->radius * 1.5 + boundR;
+			/* Earth's Moon both casts and receives; other planets only self-shadow. */
+			double reach = (isEarth ? dlengthvec3(dsubvec3(moon->position, translation)) + moon->radius * 1.5 : 0.0) + boundR;
 			dvec3 eye = daddvec3(translation, dscalarvec3(sunDir, reach));
 			mat4 lightProjection = ortho((float)-boundR, (float)boundR, (float)-boundR, (float)boundR, 0.0f, (float)(2.0 * reach));
 			mat4 lightView = getLightViewMatrix(eye, translation);
@@ -1290,42 +1333,47 @@ int main(int argc, char *argv[])
 		   ring profile instead (ringTransmittance). A slope-scaled polygon
 		   offset handles the remaining grazing acne together with the
 		   receiver offsets in sunVisibility. */
-		Prof_Begin(PROF_SHADOW);
-		glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
-			glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
-			glClear(GL_DEPTH_BUFFER_BIT);
-			glEnable(GL_POLYGON_OFFSET_FILL);
-			glPolygonOffset(1.5f, 2.0f);
-			model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
-			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model, g_lightSpaceMatrix);
-			/* Coarse walk, no finer than half a texel: smaller detail cannot
-			   show in this map. */
-			drawPlanetDepth(depthShader, &planetBody, g_lightSpaceMatrix, 0.5 * g_shadowTexel,
-			                QT_SHADOW_TRIANGLE_PX, 1);
+		/* Only while the planet or the Moon is drawn in full (the Moon receives Earth's shadow). */
+		if (planetFull || moonFull) {
+			Prof_Begin(PROF_SHADOW);
+			glBindFramebuffer(GL_FRAMEBUFFER, depthbuffer);
+				glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+				glClear(GL_DEPTH_BUFFER_BIT);
+				glEnable(GL_POLYGON_OFFSET_FILL);
+				glPolygonOffset(1.5f, 2.0f);
+				model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
+				if (isEarth)
+					drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model, g_lightSpaceMatrix);
+				/* Coarse walk, no finer than half a texel: smaller detail cannot
+				   show in this map. */
+				drawPlanetDepth(depthShader, &planetBody, g_lightSpaceMatrix, 0.5 * g_shadowTexel,
+				                QT_SHADOW_TRIANGLE_PX, 1);
 
-			/* Cascades: finer maps around the camera (Shadows.c), fitted
-			   between the nearest and farthest terrain in view. Casters use
-			   the main pass's LOD, so they are the very mesh that receives
-			   (minus what each box culls), and keep everything up-sun of the
-			   box (clamped onto its near plane). */
-			{
-				double nearest, farthest;
-				terrainViewRange(earth, &nearest, &farthest);
-				mat4 view = getViewMatrix();
-				dvec3 forward = { -view.m[2][0], -view.m[2][1], -view.m[2][2] };
-				dvec3 toSun = dsubvec3(lightWorld, translation);
-				Shadows_Fit(g_cam, forward, dscalarvec3(toSun, 1.0 / dlengthvec3(toSun)), nearest, farthest);
-			}
-			for (int i = 0; i < g_cascades.count; i++) {
-				const ShadowCascade *sc = &g_cascades.c[i];
-				Shadows_BeginCascade(i);
-				drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model, sc->lightSpace);
-				drawPlanetDepth(depthShader, &planetBody, sc->lightSpace, 0.5 * sc->texel,
-				                QT_TARGET_TRIANGLE_PX, 0);
-			}
-			Shadows_EndCascades();
-			glDisable(GL_POLYGON_OFFSET_FILL);
-		Prof_End(PROF_SHADOW);
+				/* Cascades: finer maps around the camera (Shadows.c), fitted
+				   between the nearest and farthest terrain in view. Casters use
+				   the main pass's LOD, so they are the very mesh that receives
+				   (minus what each box culls), and keep everything up-sun of the
+				   box (clamped onto its near plane). */
+				{
+					double nearest, farthest;
+					terrainViewRange(planetB, &nearest, &farthest);
+					mat4 view = getViewMatrix();
+					dvec3 forward = { -view.m[2][0], -view.m[2][1], -view.m[2][2] };
+					dvec3 toSun = dsubvec3(lightWorld, translation);
+					Shadows_Fit(g_cam, forward, dscalarvec3(toSun, 1.0 / dlengthvec3(toSun)), nearest, farthest);
+				}
+				for (int i = 0; i < g_cascades.count; i++) {
+					const ShadowCascade *sc = &g_cascades.c[i];
+					Shadows_BeginCascade(i);
+					if (isEarth)
+						drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model, sc->lightSpace);
+					drawPlanetDepth(depthShader, &planetBody, sc->lightSpace, 0.5 * sc->texel,
+					                QT_TARGET_TRIANGLE_PX, 0);
+				}
+				Shadows_EndCascades();
+				glDisable(GL_POLYGON_OFFSET_FILL);
+			Prof_End(PROF_SHADOW);
+		}
 
 		/* Main pass: the multisampled float-depth scene target, reversed-Z
 		   (see setReversedDepth), resolved into the window before the UI. */
@@ -1343,9 +1391,11 @@ int main(int argc, char *argv[])
 		drawSkybox(skyboxTexture, skyboxProj, getViewRotation());
 
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
-		Prof_Begin(PROF_MOON);
-		drawOrbit(ringShader, moonTex, moon, lightPosition);
-		Prof_End(PROF_MOON);
+		if (moonFull) {
+			Prof_Begin(PROF_MOON);
+			drawOrbit(ringShader, moonTex, moon, lightPosition);
+			Prof_End(PROF_MOON);
+		}
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 		//Planet
 		//drawTess(quadCubeVAO, tessShader, qc.vertexNumber, textureColorBuffer, dxWaveTex, planetNorm, planetDisp, m, translation, lightPosition, lightSpaceMatrix);
@@ -1355,6 +1405,11 @@ int main(int argc, char *argv[])
 		mat4 sunView = getViewMatrix();
 		float sunGlowRadius = (float)(sun->radius * SUN_GLOW_RADII);
 		drawSunDisc(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
+
+		//Distant bodies: every planet not drawn in full this frame (gas
+		//giants always; terrain planets and the Moon while small or
+		//inactive).
+		Planets_Draw(sunProj, sunView, g_cam, planetFull ? activeId : -1, moonFull);
 
 		//Quadtree planet: LOD sphere built from six instanced face grids,
 		//centred camera-relative (the walk runs with the camera at the origin).
@@ -1369,62 +1424,66 @@ int main(int argc, char *argv[])
 		//shader then runs only where its fragment is the visible one (depth
 		//test >=, no depth writes, so early-Z holds). The second draw reuses
 		//the walk.
-		Prof_Begin(PROF_PLANET);
-		setBodyUniforms(quadDepthShader, fScale, model, lightPosition,
-		                0, dxWaveTex, 0, 0, 0, 0);
-		/* Per MSAA sample: a shader that writes gl_FragDepth writes one
-		   value for the whole pixel, and the colour pass's per-sample >=
-		   test would then fail on about half the samples of every sloped
-		   surface (resolving to see-through terrain). The prepass is cheap,
-		   so running it per sample costs little. */
-		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		glEnable(GL_SAMPLE_SHADING);
-		glMinSampleShading(1.0f);
-		QuadTree_DrawSphere(&planetBody, viewProj);
-		glDisable(GL_SAMPLE_SHADING);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		if (planetFull) {
+			Prof_Begin(PROF_PLANET);
+			setBodyUniforms(quadDepthShader, fScale, model, lightPosition,
+			                0, dxWaveTex, 0, 0, 0, 0);
+			/* Per MSAA sample: a shader that writes gl_FragDepth writes one
+			   value for the whole pixel, and the colour pass's per-sample >=
+			   test would then fail on about half the samples of every sloped
+			   surface (resolving to see-through terrain). The prepass is cheap,
+			   so running it per sample costs little. */
+			glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+			glEnable(GL_SAMPLE_SHADING);
+			glMinSampleShading(1.0f);
+			QuadTree_DrawSphere(&planetBody, viewProj);
+			glDisable(GL_SAMPLE_SHADING);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-		setBodyUniforms(quadShader, fScale, model, lightPosition,
-		                0, dxWaveTex, 0, 0, 0, 0);
-		setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
-		Rings_BindReceiver(quadShader);
-		glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */
-		glDepthMask(GL_FALSE);
-		QuadTree_DrawSphere(&planetBody, viewProj);
-		glDepthMask(GL_TRUE);
-		glDepthFunc(GL_GREATER);
-		Prof_End(PROF_PLANET);
+			setBodyUniforms(quadShader, fScale, model, lightPosition,
+			                0, dxWaveTex, 0, 0, 0, 0);
+			setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
+			Rings_BindReceiver(quadShader);
+			glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */
+			glDepthMask(GL_FALSE);
+			QuadTree_DrawSphere(&planetBody, viewProj);
+			glDepthMask(GL_TRUE);
+			glDepthFunc(GL_GREATER);
+			Prof_End(PROF_PLANET);
+		}
 
-		//Water: its own quadtree walk over the thin shell, FFT-
+		//Water (Earth only for now): its own quadtree walk over the thin shell, FFT-
 		//displaced sea-level shell that discards over land in-shader
 		//(waveHeight/Disp/Slope + tiled detail normals + skybox reflection in
 		//water.frag). Alpha-blended: water.frag fades to clear in the
 		//shallows from the per-pixel water depth.
-		Prof_Begin(PROF_WATER);
-		setBodyUniforms(waterShader, fScale, model, lightPosition,
-		                ocean.dyTexture, ocean.detailTexture,
-		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
-		/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
-		setAtmosphereExtinction(waterShader, atmoInner, &g_atmosphere);
-		/* Detail layers' slope variance (BRDF roughness, water.frag). */
-		glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
-		glUniform1f(glGetUniformLocation(waterShader, "waveGeomScale"), (float)waveGeomScale(earth->radius));
-		/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
-		setOceanUniforms(waterShader, 10);
-		Rings_BindReceiver(waterShader);
-		/* Water.frag's back-face early-out is only safe from outside the
-		   shell; the surface view (camera inside) must still see it. */
-		double shellCamDist = dlengthvec3(dsubvec3(g_cam, translation));
-		glUniform1f(glGetUniformLocation(waterShader, "outsideShell"),
-		            shellCamDist > fScale*1.05 ? 1.0f : 0.0f);
-		/* Its own walk and bounds: the thin shell (land footprints culled). */
-		QuadTree_Body waterBody = earthQuadTreeBody(earth, waterReliefBounds);
-		waterBody.trianglePx = QT_WATER_TRIANGLE_PX;
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		QuadTree_DrawSphere(&waterBody, viewProj);
-		glDisable(GL_BLEND);
-		Prof_End(PROF_WATER);
+		if (planetFull && isEarth) {
+			Prof_Begin(PROF_WATER);
+			setBodyUniforms(waterShader, fScale, model, lightPosition,
+			                ocean.dyTexture, ocean.detailTexture,
+			                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
+			/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
+			setAtmosphereExtinction(waterShader, atmoInner, &g_atmosphere);
+			/* Detail layers' slope variance (BRDF roughness, water.frag). */
+			glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
+			glUniform1f(glGetUniformLocation(waterShader, "waveGeomScale"), (float)waveGeomScale(planetB->radius));
+			/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
+			setOceanUniforms(waterShader, 10);
+			Rings_BindReceiver(waterShader);
+			/* Water.frag's back-face early-out is only safe from outside the
+			   shell; the surface view (camera inside) must still see it. */
+			double shellCamDist = dlengthvec3(dsubvec3(g_cam, translation));
+			glUniform1f(glGetUniformLocation(waterShader, "outsideShell"),
+			            shellCamDist > fScale*1.05 ? 1.0f : 0.0f);
+			/* Its own walk and bounds: the thin shell (land footprints culled). */
+			QuadTree_Body waterBody = planetQuadTreeBody(planetB, waterReliefBounds);
+			waterBody.trianglePx = QT_WATER_TRIANGLE_PX;
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			QuadTree_DrawSphere(&waterBody, viewProj);
+			glDisable(GL_BLEND);
+			Prof_End(PROF_WATER);
+		}
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 		//TEST: flat animated wave grid above the planet (debug for FFT water)
@@ -1437,19 +1496,23 @@ int main(int argc, char *argv[])
 		//Rings: opaque close-up rocks, then the analytic sheet and the dust
 		//(premultiplied, depth-tested, no depth write). Before the
 		//atmosphere dome, which takes the sheet's coverage out of its glow.
-		Prof_Begin(PROF_RINGS);
-		Rings_DrawRocks(sunProj, sunView);
-		Rings_DrawSheet(sunProj, sunView);
-		Rings_DrawDust(sunProj, sunView);
-		Prof_End(PROF_RINGS);
+		if (planetFull) {
+			Prof_Begin(PROF_RINGS);
+			Rings_DrawRocks(sunProj, sunView);
+			Rings_DrawSheet(sunProj, sunView);
+			Rings_DrawDust(sunProj, sunView);
+			Prof_End(PROF_RINGS);
+		}
 
 		//Atmosphere dome: OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//planet shell; params above with the planet extinction). Rays end at
 		//the scene depth, so this runs after everything opaque.
-		Prof_Begin(PROF_ATMOSPHERE);
-		drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
-		                   atmoInner, &g_atmosphere, lightPosition);
-		Prof_End(PROF_ATMOSPHERE);
+		if (planetFull && g_atmosphere.shellHeight > 0.0f) {
+			Prof_Begin(PROF_ATMOSPHERE);
+			drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
+			                   atmoInner, &g_atmosphere, lightPosition);
+			Prof_End(PROF_ATMOSPHERE);
+		}
 
 		//Sun corona halo — must be drawn LAST (additive, does not write depth)
 		drawSunGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);

@@ -18,6 +18,9 @@
      phase  <deg>                sub-solar phase offset (default 0)
      frames <n>                  run length (default 480, --frames wins)
      simtime <seconds>           simulation time at frame 0
+     bakeasync                   planets bake in the background as in
+                                 normal use (frames stop being repeatable;
+                                 default: they bake at once)
      key <frame> <dist> <yawDeg> <pitchDeg>   orbit pose (>= 2 keys)
      skey <frame> <altM>                      surface camera radius
 
@@ -29,7 +32,8 @@ double App_Time(void);
 
 void Bench_ParseArgs(int argc, char *argv[]);   /* before window creation */
 int Bench_Active(void);
-long Bench_Frame(void);                          /* 0-based, current frame */
+int Bench_BlockingBakes(void);                   /* bench run without bakeasync */
+long Bench_Frame(void);                         /* 0-based, current frame */
 
 /* Window.c consults this before creating the window: bench runs in a
    hidden fixed-size window so resolution and OS scaling cannot vary. */

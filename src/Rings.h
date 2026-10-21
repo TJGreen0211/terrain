@@ -21,11 +21,22 @@
    Receiver shaders (planet, water, moon/ship, atmosphere) sample it for the
    ring's shadow. */
 
+/* Ring extent in planet radii (sheet, rocks and Planets.c's stand-ins). */
+#define RING_INNER 1.30f
+#define RING_OUTER 2.30f
+
 /* rockVAO/rockVerts: the three rock meshes (initObjectBuffer layout:
    position at 0, normal at 1). */
 void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[3]);
 /* Re-bakes the radial profile from a new seed (H key re-roll). */
 void Rings_Regenerate(unsigned int seed);
+
+/* The active planet's rings (SolarSystem.c): enabled, profile seed (re-baked
+   only when it changes) and ring-plane normal (world). Disabled rings draw
+   nothing and receivers see no ring shadow. */
+void Rings_SetPlanet(int enabled, unsigned int seed, dvec3 normal);
+/* Earth's fixed ring plane (the original stylised tilt). */
+dvec3 Rings_DefaultNormal(void);
 
 /* Once per receiver program at startup: points ringProfile at its own
    texture unit (otherwise it aliases the program's unit-0 sampler2D, which

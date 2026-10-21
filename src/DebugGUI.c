@@ -6,7 +6,9 @@
 #include "Shadows.h"
 #include "Water.h"
 #include "Bodies.h"
+#include "SolarSystem.h"
 #include "Profiler.h"
+#include "WorldConfig.h"
 #include <limits.h>
 #include <math.h>
 #include <string.h>
@@ -54,6 +56,7 @@ static float frameMs;
 /* Set by the regenerate buttons, consumed by the main loop next frame (the
    bake runs there, outside the GUI pass). */
 static int regenerateRequested;
+static int newSystemRequested;
 
 /* Startup values, restored by the reset buttons. Snapshotted on the first
    frame rather than at init: Main.c sets some (g_waveParams) after
@@ -141,13 +144,80 @@ static void atmosphereSection(void)
 		*a = atmosphereDefaults();
 }
 
-/* Camera altitude above Earth's sea-level sphere, and the vertex precision
-   comparison: the legacy path places quadtree vertices the old float way
-   (unit sphere, then scaled), which jitters by ~0.5-1 m at Earth scale. */
+/* Focus body, time scale and the date. The time scale slider is log-mapped
+   from real time (1) to SIM_TIME_SCALE_MAX. */
+static void solarSystemSection(void)
+{
+	/* System seed: every planet but Earth (whose terrain seed is in
+	   Terrain > Generation). */
+	nk_layout_row_dynamic(ctx, rowHeight, 2);
+	static int seedEdit = -1;
+	if (seedEdit < 0)
+		seedEdit = (int)g_systemSeed;
+	nk_property_int(ctx, "System seed", 0, &seedEdit, INT_MAX, 1, 1.0f);
+	if (nk_button_label(ctx, "Generate")) {
+		g_systemSeed = (unsigned int)seedEdit;
+		newSystemRequested = 1;
+	}
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	if (nk_button_label(ctx, "New system seed")) {
+		seedEdit = (int)(g_systemSeed + 1u);
+		g_systemSeed = (unsigned int)seedEdit;
+		newSystemRequested = 1;
+	}
+	nk_labelf(ctx, NK_TEXT_LEFT, "Active (full detail): %s", g_bodies[SolarSystem_ActiveBody()].name);
+	{
+		float progress;
+		int baking = SolarSystem_BakingBody(&progress);
+		if (baking >= 0)
+			nk_labelf(ctx, NK_TEXT_LEFT, "Baking %s... %d%%", g_bodies[baking].name, (int)(progress * 100.0f));
+		else
+			nk_label(ctx, "Baking: -", NK_TEXT_LEFT);
+	}
+	nk_labelf(ctx, NK_TEXT_LEFT, "Day %.2f", g_simTime / 86400.0);
+	float lg = (float)log10(g_simTimeScale);
+	float lgMax = (float)log10(SIM_TIME_SCALE_MAX);
+	nk_layout_row(ctx, NK_DYNAMIC, rowHeight, 3, sliderRatios);
+	nk_label(ctx, "Time scale", NK_TEXT_LEFT);
+	nk_slider_float(ctx, 0.0f, &lg, lgMax, 0.01f);
+	g_simTimeScale = pow(10.0, lg);
+	if (g_simTimeScale < 86400.0)
+		nk_labelf(ctx, NK_TEXT_RIGHT, "%.0fx", g_simTimeScale);
+	else
+		nk_labelf(ctx, NK_TEXT_RIGHT, "%.1f d/s", g_simTimeScale / 86400.0);
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	if (nk_button_label(ctx, "Default time scale"))
+		g_simTimeScale = SIM_TIME_SCALE;
+
+	groupLabel("Focus (Tab / Shift+Tab)");
+	nk_layout_row_dynamic(ctx, rowHeight, 3);
+	for (int i = 0; i < BODY_COUNT; i++) {
+		int on = (i == g_focusBody);
+		if (nk_select_label(ctx, g_bodies[i].name, NK_TEXT_CENTERED, on) && !on)
+			g_focusBody = i;
+	}
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	const Body *f = &g_bodies[g_focusBody];
+	const Body *sun = &g_bodies[BODY_SUN];
+	double fromSun = dlengthvec3(dsubvec3(f->position, sun->position));
+	nk_labelf(ctx, NK_TEXT_LEFT, "%s: %.2f AU (x%.2g drawn), radius %.0f km",
+	          f->name, fromSun / AU_M / ORBIT_DISTANCE_SCALE, ORBIT_DISTANCE_SCALE, f->radius / 1000.0);
+	const PlanetInfo *pi = &g_planetInfo[g_focusBody];
+	if (pi->type != PLANET_NONE)
+		nk_labelf(ctx, NK_TEXT_LEFT, "%s%s%s%s%s", SolarSystem_TypeName(pi->type),
+		          pi->hasAtmosphere ? ", atmosphere" : "", pi->hasRings ? ", rings" : "",
+		          pi->hasWater ? ", water" : "",
+		          pi->type == PLANET_GAS ? "" : (pi->baked ? ", baked" : ", not baked"));
+}
+
+/* Camera altitude above the focus body's sea-level sphere, and the vertex
+   precision comparison: the legacy path places quadtree vertices the old
+   float way (unit sphere, then scaled), which jitters by ~0.5-1 m at Earth
+   scale. */
 static void cameraSection(void)
 {
-	const Body *earth = &g_bodies[BODY_EARTH];
-	double alt = dlengthvec3(dsubvec3(getCameraPosition(), earth->position)) - earth->radius;
+	const Body *focus = &g_bodies[g_focusBody];
+	double alt = dlengthvec3(dsubvec3(getCameraPosition(), focus->position)) - focus->radius;
 
 	nk_layout_row_dynamic(ctx, rowHeight, 1);
 	if (fabs(alt) < 1e4)
@@ -300,6 +370,10 @@ static void buildPanel(void)
 				          Prof_CpuMs((ProfSection)i), Prof_GpuMs((ProfSection)i));
 			nk_tree_pop(ctx);
 		}
+		if (nk_tree_push(ctx, NK_TREE_TAB, "Solar system", NK_MINIMIZED)) {
+			solarSystemSection();
+			nk_tree_pop(ctx);
+		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Camera", NK_MINIMIZED)) {
 			cameraSection();
 			nk_tree_pop(ctx);
@@ -378,6 +452,13 @@ void DebugGUI_Shutdown(void)
 void DebugGUI_ToggleVisible(void)
 {
 	visible = !visible;
+}
+
+int DebugGUI_ConsumeNewSystem(void)
+{
+	int r = newSystemRequested;
+	newSystemRequested = 0;
+	return r;
 }
 
 int DebugGUI_ConsumeRegenerate(void)

@@ -21,35 +21,88 @@
 #define AU_M 1.495978707e11
 
 /* ---- Bodies ------------------------------------------------------------
-   Read by the body table in Bodies.c. Earth is the scene origin for now;
-   the sun and moon are placed relative to it (heliocentric orbits come
-   later). Orbits are circles in the world XZ plane:
-       position = parent + radius * (cos(phase), 0, sin(phase)),
-       phase    = ORBIT_PHASE + 2*pi * t / ORBIT_PERIOD   (period 0 = fixed).
-   Rotation (body -> world) = rotateX(AXIAL_TILT - 90) * rotateZ(spin): the
-   body's local +Z pole is tipped up to world +Y, then leaned by the tilt.
-   spin = ROTATION_PHASE + 360 * t / ROTATION_PERIOD. */
+   The Sun is the world origin; every other body follows a Kepler ellipse
+   around its parent (Bodies.c). Earth (the Earth-like planet we build on)
+   and its Moon are fixed here; every other planet is generated from the
+   system seed (SolarSystem.c, "Procedural system" below).
 
-#define SUN_RADIUS_M              6.957e8
-#define SUN_DISTANCE_M            AU_M
-#define SUN_ORBIT_PHASE_DEG       225.0      /* direction (-1, 0, -1) from Earth */
+   _ORBIT lists: a (m), e, i, node, peri, L, period (s)
+     a       semi-major axis (before ORBIT_DISTANCE_SCALE)
+     e       eccentricity
+     i       inclination to the ecliptic (deg)
+     node    longitude of the ascending node (deg)
+     peri    longitude of perihelion (deg) = node + argument of perihelion
+     L       mean longitude at t = 0 (deg)
+     period  sidereal orbital period; 0 = from a by Kepler's third law
+   The ecliptic maps to the world XZ plane with its north at world +Y;
+   orbits run counter-clockwise seen from +Y.
+
+   Rotation (body -> world) = rotateX(AXIAL_TILT - 90) * rotateZ(spin): the
+   body's local +Z pole is tipped up to world +Y, then leaned about world X
+   by the tilt (> 90 = retrograde spin). spin = 360 * t / ROTATION_PERIOD. */
+
+/* Compression (look, not physics): the semi-major axes of bodies orbiting
+   the Sun, and the Sun's radius, are multiplied by this, so neighbours are
+   visible and quick to reach while the Sun keeps its apparent size seen
+   from each planet. Planet radii, the Moon's orbit and all periods are
+   unscaled. 1 = true scale. */
+#define ORBIT_DISTANCE_SCALE      0.1
+/* Where the Sun appears from Earth at t = 0 (world XZ angle; 225 = toward
+   (-1, 0, -1)): the ecliptic is turned about +Y to put it there. */
+#define SUN_ORBIT_PHASE_DEG       225.0
+/* Sidereal year: periods from Kepler's third law, P = year * (a/AU)^1.5. */
+#define SIDEREAL_YEAR_S           31558149.8
+
+#define SUN_RADIUS_M              6.957e8    /* drawn x ORBIT_DISTANCE_SCALE */
 
 #define EARTH_RADIUS_M            6.371e6
+#define EARTH_ORBIT               1.0*AU_M, 0.0167, 0.0, 0.0, 102.94, 100.46, 0.0
 #define EARTH_ROTATION_PERIOD_S   86164.0905 /* sidereal day */
 #define EARTH_AXIAL_TILT_DEG      23.44
 
 #define MOON_RADIUS_M             1.7374e6
-#define MOON_ORBIT_RADIUS_M       3.844e8
-#define MOON_ORBIT_PERIOD_S       2360591.5  /* 27.32 days, sidereal */
-#define MOON_ORBIT_PHASE_DEG      0.0
+/* Relative to Earth; not compressed. Period: 27.32 d sidereal. */
+#define MOON_ORBIT                3.844e8, 0.0549, 5.145, 125.045, 83.353, 218.316, 2360591.5
 #define MOON_AXIAL_TILT_DEG       1.54
 /* Tidally locked: one spin per orbit. */
-#define MOON_ROTATION_PERIOD_S    MOON_ORBIT_PERIOD_S
+#define MOON_ROTATION_PERIOD_S    2360591.5
+
+/* ---- Procedural system (SolarSystem.c) ----------------------------------
+   Generated from the system seed (debug panel; separate from Earth's
+   terrain seed). Planets keep their names and order outward from the Sun:
+   Mercury, Venus, [Earth], Mars, Ceres, Jupiter, Saturn, Uranus, Neptune,
+   Pluto, Haumea, Makemake. Major planets are spaced by a random ratio
+   from Earth's 1 AU, inward and outward; Ceres sits between the 4th and
+   5th planets (an asteroid-belt slot), and Pluto, Haumea and Makemake
+   beyond the last major planet, on eccentric, inclined orbits. */
+#define SYSTEM_SEED_DEFAULT       1u
+#define SYSTEM_SPACING_MIN        1.4        /* orbit ratio between neighbours */
+#define SYSTEM_SPACING_MAX        1.9
+/* A major planet is a gas giant with a chance rising from GAS_P_INNER at or
+   inside GAS_AU_INNER to GAS_P_OUTER at or beyond GAS_AU_OUTER (log a). */
+#define GAS_P_INNER               0.03
+#define GAS_P_OUTER               0.9
+#define GAS_AU_INNER              1.0
+#define GAS_AU_OUTER              5.0
+#define ROCKY_RADIUS_MIN_M        (0.3 * EARTH_RADIUS_M)
+#define ROCKY_RADIUS_MAX_M        (1.5 * EARTH_RADIUS_M)
+#define DWARF_RADIUS_MIN_M        3.0e5
+#define DWARF_RADIUS_MAX_M        1.2e6
+#define GAS_RADIUS_MIN_M          2.2e7
+#define GAS_RADIUS_MAX_M          7.5e7
+/* Rocky planets: atmosphere shell as a fraction of the radius (Earth's look
+   is ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M), times a random factor. */
+#define ROCKY_SHELL_FRACTION      (ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M)
+/* Water on every planet but Earth: generated (hasWater) but not drawn
+   until the water rendering is reworked. 0 = dry worlds. */
+#define OTHER_PLANET_WATER        0
 
 /* ---- Time --------------------------------------------------------------
    Simulation seconds per real second (R pauses). 1440 = one Earth day per
-   real minute, close to the old per-frame spin at 60 fps. */
+   real minute, close to the old per-frame spin at 60 fps. The default of
+   the debug panel's time-scale slider; bench runs always use it. */
 #define SIM_TIME_SCALE            1440.0
+#define SIM_TIME_SCALE_MAX        3.0e7      /* ~1 year per real second */
 
 /* ---- Camera (metres) ---------------------------------------------------- */
 
@@ -61,7 +114,9 @@
 /* Orbit pivot spawn, on +Z from the planet centre. */
 #define CAMERA_SPAWN_DISTANCE_M   (3.0 * EARTH_RADIUS_M)
 /* Scroll-out limit of the orbit radius behind the pivot. */
-#define CAMERA_DISTANCE_MAX_M     (20.0 * EARTH_RADIUS_M)
+#define CAMERA_DISTANCE_MAX_M     2.0e12   /* the whole generated system at ORBIT_DISTANCE_SCALE 0.1 */
+/* Orbit distance after Tab switches the focus body, in its radii. */
+#define CAMERA_FOCUS_DISTANCE_RADII 3.0
 /* WASD speed (m/s) and scroll step (m per wheel notch): defaults, and the
    log-mapped ranges of the two on-screen sliders. The minimums reach
    walking pace so the surface can be inspected up close. */

@@ -7,6 +7,7 @@
 #include <math.h>
 #include <float.h>
 #include <time.h>
+#include <process.h>
 
 /* The project builds without /O2; the bake's CPU erosion needs real
    optimization to stay inside the 1-3 s startup budget. Scoped to this
@@ -435,8 +436,8 @@ static void ensureBakeResources(void)
 	glEnableVertexAttribArray(0);
 	glBindVertexArray(0);
 
-	/* Working RGBA16F target + GL_RGBA/GL_FLOAT readback: the max-compat
-	   combination for a float shaping pass. */
+	/* Working RGBA16F target, read back as GL_RG / GL_FLOAT (the two
+	   channels the bake uses). */
 	glGenTextures(1, &workTex);
 	glBindTexture(GL_TEXTURE_2D, workTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, HEIGHTMAP_W, HEIGHTMAP_H, 0,
@@ -734,9 +735,31 @@ static unsigned char toByte(float v)
 	return (unsigned char)(v * 255.0f + 0.5f);
 }
 
-/* Builds and uploads the RGBA8 climate map (layout in TerrainGen.h). */
-static GLuint bakeClimate(const float *h, const float *anom, float *dep, float sea,
-                          int W, int H)
+/* Uploads an RGBA8 map (climate / ocean layout) with its mip chain. GL:
+   main thread only. */
+static GLuint uploadRGBA8(const unsigned char *px, int W, int H)
+{
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	return tex;
+}
+
+/* Builds the RGBA8 climate map's pixels (layout in TerrainGen.h). CPU only:
+   runs on the bake worker. */
+static unsigned char *climatePixels(const float *h, const float *anom, float *dep, float sea,
+                                    int W, int H)
 {
 	size_t n = (size_t)W * H;
 	float *moist = malloc(n * sizeof(float));
@@ -761,29 +784,13 @@ static GLuint bakeClimate(const float *h, const float *anom, float *dep, float s
 	}
 	free(moist); free(river); free(lake);
 
-	GLuint tex;
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, 0);
-
 	/* Debug: TERRAIN_DUMP_CLIMATE names a file for the raw RGBA8 map. */
 	const char *path = getenv("TERRAIN_DUMP_CLIMATE");
 	if (path && *path) {
 		FILE *f = fopen(path, "wb");
 		if (f) { fwrite(px, 1, n * 4, f); fclose(f); }
 	}
-	free(px);
-	return tex;
+	return px;
 }
 
 /* ---------------- Ocean map ---------------- */
@@ -828,7 +835,7 @@ static void prevailingWind(double absLat, float *zonal, float *pole, float *spee
    latitude row with the zonal wind, like the moisture: open water adds its
    length, land resets it, two laps converge the wrap. Lee coasts and the
    water behind islands stay calm; windward coasts face a developed sea. */
-static GLuint bakeOcean(const float *h, const float *anom, float sea, int W, int H)
+static unsigned char *oceanPixels(const float *h, const float *anom, float sea, int W, int H)
 {
 	size_t n = (size_t)W * H;
 	float *fetch = malloc(n * sizeof(float));
@@ -872,23 +879,7 @@ static GLuint bakeOcean(const float *h, const float *anom, float sea, int W, int
 		}
 	}
 	free(fetch);
-
-	GLuint tex;
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, 0);
-	free(px);
-	return tex;
+	return px;
 }
 
 void setOceanUniforms(unsigned int shader, int unit)
@@ -1087,36 +1078,46 @@ static void uploadShaping(const TerrainBakeSettings *bs)
    block of level k-1: the same footprint glGenerateMipmap averages, so any
    mip sample the shaders take lies inside the [min, max] of its block. */
 #define PYR_MAX_LEVELS 16
-static struct {
+struct TerrainPyramid {
 	int levels;
 	int w[PYR_MAX_LEVELS], h[PYR_MAX_LEVELS];
 	float *mn[PYR_MAX_LEVELS], *mx[PYR_MAX_LEVELS];   /* level 0: mn == mx == the field */
-} g_pyr;
+};
 
-static void freePyramid(void)
+static void freePyramid(TerrainPyramid *p)
 {
-	for (int k = 0; k < g_pyr.levels; k++) {
-		free(g_pyr.mn[k]);
+	if (!p)
+		return;
+	for (int k = 0; k < p->levels; k++) {
+		free(p->mn[k]);
 		if (k > 0)
-			free(g_pyr.mx[k]);
+			free(p->mx[k]);
 	}
-	memset(&g_pyr, 0, sizeof g_pyr);
+	free(p);
+}
+
+void TerrainGen_FreePlanet(PlanetGenParams *p)
+{
+	if (p->climateTex) glDeleteTextures(1, &p->climateTex);
+	if (p->oceanTex) glDeleteTextures(1, &p->oceanTex);
+	freePyramid(p->pyramid);
+	memset(p, 0, sizeof *p);
 }
 
 /* Takes ownership of h (W x H, the uploaded field). */
-static void buildPyramid(float *h, int W, int H)
+static TerrainPyramid *buildPyramid(float *h, int W, int H)
 {
-	freePyramid();
-	g_pyr.w[0] = W; g_pyr.h[0] = H;
-	g_pyr.mn[0] = g_pyr.mx[0] = h;
-	g_pyr.levels = 1;
-	while ((g_pyr.w[g_pyr.levels-1] > 1 || g_pyr.h[g_pyr.levels-1] > 1) && g_pyr.levels < PYR_MAX_LEVELS) {
-		int k = g_pyr.levels;
-		int pw = g_pyr.w[k-1], ph = g_pyr.h[k-1];
+	TerrainPyramid *pp = calloc(1, sizeof *pp);
+	pp->w[0] = W; pp->h[0] = H;
+	pp->mn[0] = pp->mx[0] = h;
+	pp->levels = 1;
+	while ((pp->w[pp->levels-1] > 1 || pp->h[pp->levels-1] > 1) && pp->levels < PYR_MAX_LEVELS) {
+		int k = pp->levels;
+		int pw = pp->w[k-1], ph = pp->h[k-1];
 		int w = pw > 1 ? pw / 2 : 1, hh = ph > 1 ? ph / 2 : 1;
 		float *mn = malloc((size_t)w * hh * sizeof(float));
 		float *mx = malloc((size_t)w * hh * sizeof(float));
-		const float *pmn = g_pyr.mn[k-1], *pmx = g_pyr.mx[k-1];
+		const float *pmn = pp->mn[k-1], *pmx = pp->mx[k-1];
 		for (int y = 0; y < hh; y++) {
 			int y0 = 2*y, y1 = 2*y + 1 < ph ? 2*y + 1 : ph - 1;
 			for (int x = 0; x < w; x++) {
@@ -1127,27 +1128,43 @@ static void buildPyramid(float *h, int W, int H)
 				mx[(size_t)y*w + x] = fmaxf(fmaxf(pmx[a], pmx[b]), fmaxf(pmx[c], pmx[d]));
 			}
 		}
-		g_pyr.w[k] = w; g_pyr.h[k] = hh;
-		g_pyr.mn[k] = mn; g_pyr.mx[k] = mx;
-		g_pyr.levels++;
+		pp->w[k] = w; pp->h[k] = hh;
+		pp->mn[k] = mn; pp->mx[k] = mx;
+		pp->levels++;
 	}
+	return pp;
+}
+
+/* The active planet's pyramid (an empty one before the first bake). */
+static const TerrainPyramid *activePyramid(void)
+{
+	static const TerrainPyramid empty;
+	return g_planetGen.pyramid ? g_planetGen.pyramid : &empty;
 }
 
 int TerrainGen_GlobalRange(float *hmin, float *hmax)
 {
-	if (g_pyr.levels == 0) {
+	return TerrainGen_PlanetRange(&g_planetGen, hmin, hmax);
+}
+
+int TerrainGen_PlanetRange(const PlanetGenParams *planet, float *hmin, float *hmax)
+{
+	static const TerrainPyramid empty;
+	const TerrainPyramid *P = planet->pyramid ? planet->pyramid : &empty;
+	if (P->levels == 0) {
 		*hmin = *hmax = 0.0f;
 		return 0;
 	}
-	int top = g_pyr.levels - 1;
-	*hmin = g_pyr.mn[top][0];
-	*hmax = g_pyr.mx[top][0];
+	int top = P->levels - 1;
+	*hmin = P->mn[top][0];
+	*hmax = P->mx[top][0];
 	return 1;
 }
 
 int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, float *hmin, float *hmax)
 {
-	if (g_pyr.levels == 0) {
+	const TerrainPyramid *P = activePyramid();
+	if (P->levels == 0) {
 		*hmin = *hmax = 0.0f;
 		return 0;
 	}
@@ -1174,7 +1191,7 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 	   columns, or at texel centres inside it. Evaluating just those gives
 	   the exact range: tight bounds for nodes far smaller than a texel. */
 	if (lod <= 0.0) {
-		int W = g_pyr.w[0], H = g_pyr.h[0];
+		int W = P->w[0], H = P->h[0];
 		double xa = u0 * W - 0.5, xb = u1 * W - 0.5;
 		double ya = v0 * H - 0.5, yb = v1 * H - 0.5;
 		if (xb - xa <= 16.0 && yb - ya <= 16.0) {
@@ -1187,7 +1204,7 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 			for (double g = floor(ya) + 1.0; g < yb; g += 1.0) ys[ny++] = g;
 			ys[ny++] = yb;
 
-			const float *f = g_pyr.mn[0];
+			const float *f = P->mn[0];
 			float lo = FLT_MAX, hi = -FLT_MAX;
 			for (int j = 0; j < ny; j++) {
 				/* GL clamp-to-edge in v, repeat in u. */
@@ -1220,15 +1237,15 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 	   may read there (a coarser block's min/max bounds every finer sample
 	   inside it), and coarse enough that the box spans a handful of
 	   texels. */
-	int top = g_pyr.levels - 1;
+	int top = P->levels - 1;
 	int k = (int)ceil(fmax(lod, 0.0));
 	if (k > top) k = top;
-	while (k < top && ((u1 - u0) * g_pyr.w[k] > 8.0 || (v1 - v0) * g_pyr.h[k] > 8.0))
+	while (k < top && ((u1 - u0) * P->w[k] > 8.0 || (v1 - v0) * P->h[k] > 8.0))
 		k++;
 
 	/* Texels bilinear filtering touches (texel coords u*W - 0.5), plus one
 	   more each side so the finer mip of a trilinear blend stays inside. */
-	int W = g_pyr.w[k], H = g_pyr.h[k];
+	int W = P->w[k], H = P->h[k];
 	int x0 = (int)floor(u0 * W - 0.5) - 1, x1 = (int)floor(u1 * W - 0.5) + 2;
 	int y0 = (int)floor(v0 * H - 0.5) - 1, y1 = (int)floor(v1 * H - 0.5) + 2;
 	if (x1 - x0 + 1 >= W) { x0 = 0; x1 = W - 1; }
@@ -1236,7 +1253,7 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 	if (y1 > H - 1) y1 = H - 1;
 
 	float lo = FLT_MAX, hi = -FLT_MAX;
-	const float *mn = g_pyr.mn[k], *mx = g_pyr.mx[k];
+	const float *mn = P->mn[k], *mx = P->mx[k];
 	for (int y = y0; y <= y1; y++) {
 		for (int x = x0; x <= x1; x++) {
 			int xi = ((x % W) + W) % W;   /* longitude wraps */
@@ -1250,56 +1267,179 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 	return 1;
 }
 
-unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenParams *out,
-                                     void (*step)(void))
+/* ---------------- Bake pipeline ----------------
+   Stages: shaping (the GPU pass and its readback), the CPU work (erosion,
+   normalization, climate / ocean pixels, bounds pyramid) and the upload.
+   A blocking bake runs them back to back. A background bake spreads the
+   GPU pass over frames in horizontal strips, reads it back through a
+   pixel buffer once a fence says it is done, runs the CPU work on a
+   worker thread and uploads when polled after that: each frame only pays
+   a strip, a copy or one texture upload. The CPU stage's scratch state (xsState, the
+   histograms, the drainage queue) and the shaping target are file-static,
+   so one bake runs at a time: a new one first completes the background
+   job's GPU stages and waits for its worker. */
+#define BAKE_SHAPE_STRIPS 32   /* background shaping: one strip per poll */
+
+typedef enum { STAGE_SHAPE, STAGE_READBACK, STAGE_CPU, STAGE_UPLOAD } BakeStage;
+
+struct TerrainBakeJob {
+	TerrainBakeSettings bs;
+	void (*step)(void);
+	BakeStage stage;
+	int strip;                    /* next strip to draw (STAGE_SHAPE) */
+	GLuint pbo;                   /* readback buffer (STAGE_READBACK) */
+	GLsync fence;
+	float *rg;                    /* shaping readback (W x H, R = height, G = anomaly); the CPU stage frees it */
+	/* CPU stage results, uploaded by the finish */
+	TerrainPyramid *pyramid;      /* level 0 is the final field */
+	unsigned char *climatePx, *oceanPx;
+	float seaLevel, oceanDepth;
+	/* Upload results (STAGE_UPLOAD: one per poll) */
+	GLuint climateTex, oceanTex, heightTex;
+	double uploadS;
+	clock_t t[7];
+	int background;
+	HANDLE thread;                /* the worker, until joined */
+	volatile LONG done;           /* CPU stage finished */
+};
+
+static TerrainBakeJob *bgJob;       /* the background job, until finished or cancelled */
+static volatile LONG workerSteps;   /* its progress, in step() calls */
+
+static void workerStep(void)
 {
-	const unsigned int seed = bs->seed;
+	InterlockedIncrement(&workerSteps);
+}
+
+/* Draws shaping strips [job->strip, end) into the working target. The
+   shader's uniforms (seed, plates, shaping) were set by the first call and
+   stay in the program between frames. */
+static void shapeStrips(TerrainBakeJob *job, int end)
+{
+	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
+	if (job->strip == 0) {
+		ensureBakeResources();
+		job->t[0] = clock();
+		glUseProgram(bakeProgram);
+		glUniform1f(glGetUniformLocation(bakeProgram, "seed"), (float)job->bs.seed);
+		uploadPlates(&job->bs);
+		uploadShaping(&job->bs);
+	}
+	GLboolean blend = glIsEnabled(GL_BLEND), scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glViewport(0, 0, W, H);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glEnable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
+	glUseProgram(bakeProgram);
+	glBindVertexArray(bakeQuadVAO);
+	for (; job->strip < end; job->strip++) {
+		int y0 = H * job->strip / BAKE_SHAPE_STRIPS, y1 = H * (job->strip + 1) / BAKE_SHAPE_STRIPS;
+		glScissor(0, y0, W, y1 - y0);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
+	glBindVertexArray(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, getWindowWidth(), getWindowHeight());
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_CULL_FACE);
+	if (blend) glEnable(GL_BLEND);
+	if (!scissor) glDisable(GL_SCISSOR_TEST);
+}
+
+#define READBACK_BYTES ((size_t)HEIGHTMAP_W * HEIGHTMAP_H * 2 * sizeof(float))
+
+static float *allocRG(void)
+{
+	float *p = malloc(READBACK_BYTES);
+	if (!p) {
+		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
+		exit(1);
+	}
+	return p;
+}
+
+/* Blocking readback of the whole target into job->rg (only the two
+   channels the bake uses: half the copy). */
+static void readbackNow(TerrainBakeJob *job)
+{
+	job->rg = allocRG();
+	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(0, 0, HEIGHTMAP_W, HEIGHTMAP_H, GL_RG, GL_FLOAT, job->rg);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	job->t[1] = clock();
+}
+
+/* Starts an asynchronous readback into a pixel buffer, fenced. */
+static void readbackStart(TerrainBakeJob *job)
+{
+	glGenBuffers(1, &job->pbo);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, job->pbo);
+	glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)READBACK_BYTES, NULL, GL_STREAM_READ);
+	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(0, 0, HEIGHTMAP_W, HEIGHTMAP_H, GL_RG, GL_FLOAT, (void *)0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	job->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+	glFlush();
+}
+
+static void readbackRelease(TerrainBakeJob *job)
+{
+	if (job->fence) glDeleteSync(job->fence);
+	if (job->pbo) glDeleteBuffers(1, &job->pbo);
+	job->fence = 0;
+	job->pbo = 0;
+}
+
+/* Copies a finished pixel-buffer readback into job->rg. wait: block for
+   the fence. Returns 1 once copied. */
+static int readbackCollect(TerrainBakeJob *job, int wait)
+{
+	GLenum r = glClientWaitSync(job->fence, wait ? GL_SYNC_FLUSH_COMMANDS_BIT : 0,
+	                            wait ? 10000000000ull : 0);
+	if (r != GL_ALREADY_SIGNALED && r != GL_CONDITION_SATISFIED)
+		return 0;
+	job->rg = allocRG();
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, job->pbo);
+	const void *src = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)READBACK_BYTES, GL_MAP_READ_BIT);
+	if (src)
+		memcpy(job->rg, src, READBACK_BYTES);
+	else
+		memset(job->rg, 0, READBACK_BYTES);
+	glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	readbackRelease(job);
+	job->t[1] = clock();
+	return 1;
+}
+
+/* 2-7. Everything between the readback and the upload. No GL. */
+static void bakeCPU(TerrainBakeJob *job)
+{
+	const TerrainBakeSettings *bs = &job->bs;
 	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
 	const size_t n = (size_t)W * H;
 	static Histo hf;   /* 32 KB: keep it off the stack */
 
-	ensureBakeResources();
+	xsState = bs->seed * 2654435761u | 1u;
 
-	clock_t t0 = clock();
-
-	GLuint heightTex;
-	glGenTextures(1, &heightTex);
-
-	xsState = seed * 2654435761u | 1u;
-
-	/* 1. GPU shaping pass */
-	glViewport(0, 0, W, H);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
-	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glUseProgram(bakeProgram);
-	glUniform1f(glGetUniformLocation(bakeProgram, "seed"), (float)seed);
-	uploadPlates(bs);
-	uploadShaping(bs);
-	glBindVertexArray(bakeQuadVAO);
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-	glFinish();
-	clock_t t1 = clock();
-
-	/* 2. Readback to a CPU float buffer (r channel holds the shaped h). */
-	float *rgba = malloc(n * 4 * sizeof(float));
+	/* 2. Split the readback (r = shaped h, g = climate anomaly). */
 	float *h = malloc(n * sizeof(float));
-	if (!rgba || !h) {
-		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
-		exit(1);
-	}
-	glReadPixels(0, 0, W, H, GL_RGBA, GL_FLOAT, rgba);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindVertexArray(0);
 	float *anom = malloc(n * sizeof(float));
 	float *dep = calloc(n, sizeof(float));
-	if (!anom || !dep) {
+	if (!h || !anom || !dep) {
 		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
 		exit(1);
 	}
-	for (size_t i = 0; i < n; i++) { h[i] = rgba[i * 4]; anom[i] = rgba[i * 4 + 1]; }
-	free(rgba);
+	for (size_t i = 0; i < n; i++) { h[i] = job->rg[i * 2]; anom[i] = job->rg[i * 2 + 1]; }
+	free(job->rg);
+	job->rg = NULL;
 	clampFinite(h, n);
 	clampFinite(anom, n);
 
@@ -1309,15 +1449,15 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenPar
 	float preLo = histoPctl(&hf, PRE_LO_PCT), preHi = histoPctl(&hf, PRE_HI_PCT);
 	stretch01(h, n, preLo, preHi);
 	float seaLevel0 = (0.0f - preLo) / fmaxf(preHi - preLo, 1e-6f);
-	clock_t t2 = clock();
+	job->t[2] = clock();
 
 	/* 3. Thermal erosion (weathering), then 4. hydraulic droplet erosion. */
-	thermalErode(h, W, H, bs->thermalPasses, bs->thermalTalus, step);
-	clock_t t3 = clock();
+	thermalErode(h, W, H, bs->thermalPasses, bs->thermalTalus, job->step);
+	job->t[3] = clock();
 
 	/* Droplets spawn only on land; reaching the sea is a river mouth. */
-	hydraulicErode(h, dep, W, H, seaLevel0, bs, step);
-	clock_t t4 = clock();
+	hydraulicErode(h, dep, W, H, seaLevel0, bs, job->step);
+	job->t[4] = clock();
 
 	/* 5. Percentile-stretch the relief to [0,1], carrying the sea level
 	   (raw 0, set by the plate crust) through it, + ocean depth (95th area
@@ -1364,25 +1504,108 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenPar
 	if (!(oceanDepth > 1e-3f)) oceanDepth = 1e-3f;
 
 	debugDump(h, n);
-	clock_t t5 = clock();
+	job->t[5] = clock();
 
-	/* 7. Climate map: moisture, rivers, alluvium, lakes. */
-	if (g_planetGen.climateTex) glDeleteTextures(1, &g_planetGen.climateTex);
-	out->climateTex = bakeClimate(h, anom, dep, seaLevel, W, H);
-	if (g_planetGen.oceanTex) glDeleteTextures(1, &g_planetGen.oceanTex);
-	out->oceanTex = bakeOcean(h, anom, seaLevel, W, H);
+	/* 7. Climate map (moisture, rivers, alluvium, lakes) and ocean map. */
+	job->climatePx = climatePixels(h, anom, dep, seaLevel, W, H);
+	job->oceanPx = oceanPixels(h, anom, seaLevel, W, H);
 	free(anom);
 	free(dep);
-	out->seaLevel = seaLevel;
-	out->oceanDepth = oceanDepth;
-	g_planetGen = *out;
-	clock_t t6 = clock();
+	job->seaLevel = seaLevel;
+	job->oceanDepth = oceanDepth;
+	/* Keeps h as level 0 of the quadtree's height-bounds pyramid. */
+	job->pyramid = buildPyramid(h, W, H);
+	job->t[6] = clock();
+}
 
-	/* 6. Upload the final field (same sampling params the body shaders
-	   expect) + a full mip chain. R32F: half floats would round heights to
-	   ~100 m steps at Earth scale, and the CPU bounds pyramid below must see
-	   exactly the values the GPU samples. */
-	glBindTexture(GL_TEXTURE_2D, heightTex);
+static unsigned __stdcall bakeWorker(void *arg)
+{
+	TerrainBakeJob *job = arg;
+	bakeCPU(job);
+	InterlockedExchange(&job->done, 1);
+	return 0;
+}
+
+/* The CPU stage of a background job: on a worker thread, below the render
+   thread's priority. */
+static void startWorker(TerrainBakeJob *job)
+{
+	job->stage = STAGE_CPU;
+	job->thread = (HANDLE)_beginthreadex(NULL, 0, bakeWorker, job, CREATE_SUSPENDED, NULL);
+	if (job->thread) {
+		SetThreadPriority(job->thread, THREAD_PRIORITY_BELOW_NORMAL);
+		ResumeThread(job->thread);
+	} else {
+		/* No thread: bake it here instead. */
+		bakeCPU(job);
+		job->done = 1;
+	}
+}
+
+/* Advances a background job's main-thread stages; wait: run them all now. */
+static void advanceJob(TerrainBakeJob *job, int wait)
+{
+	if (job->stage == STAGE_SHAPE) {
+		shapeStrips(job, wait ? BAKE_SHAPE_STRIPS : job->strip + 1);
+		if (job->strip < BAKE_SHAPE_STRIPS)
+			return;
+		readbackStart(job);
+		job->stage = STAGE_READBACK;
+		if (!wait)
+			return;   /* collect it next time: the GPU is still busy */
+	}
+	if (job->stage == STAGE_READBACK) {
+		if (!readbackCollect(job, wait))
+			return;
+		startWorker(job);
+	}
+}
+
+/* Runs a background job to the end of its CPU stage. */
+static void completeJob(TerrainBakeJob *job)
+{
+	advanceJob(job, 1);
+	if (job->thread) {
+		WaitForSingleObject(job->thread, INFINITE);
+		CloseHandle(job->thread);
+		job->thread = NULL;
+	}
+}
+
+static TerrainBakeJob *newJob(const TerrainBakeSettings *bs, void (*step)(void))
+{
+	if (bgJob)
+		completeJob(bgJob);   /* one bake at a time */
+	TerrainBakeJob *job = calloc(1, sizeof *job);
+	if (!job) {
+		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
+		exit(1);
+	}
+	job->bs = *bs;
+	job->step = step;
+	return job;
+}
+
+static void freeJob(TerrainBakeJob *job)
+{
+	if (bgJob == job)
+		bgJob = NULL;
+	readbackRelease(job);
+	free(job->rg);
+	free(job->climatePx);
+	free(job->oceanPx);
+	freePyramid(job->pyramid);
+	GLuint tex[3] = { job->climateTex, job->oceanTex, job->heightTex };
+	for (int k = 0; k < 3; k++)
+		if (tex[k]) glDeleteTextures(1, &tex[k]);
+	free(job);
+}
+
+static GLuint uploadHeight(const float *h, int W, int H)
+{
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, W, H, 0, GL_RED, GL_FLOAT, h);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1394,19 +1617,122 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenPar
 	glGenerateMipmap(GL_TEXTURE_2D);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	/* Keeps h as level 0 of the quadtree's height-bounds pyramid. */
-	buildPyramid(h, W, H);
+	return tex;
+}
 
-	glViewport(0, 0, getWindowWidth(), getWindowHeight());
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_CULL_FACE);
+/* 8. Upload: climate / ocean maps and the final field (the same sampling
+   params the body shaders expect) with full mip chains, one per call (all:
+   the rest at once). R32F: half floats would round heights to ~100 m
+   steps at Earth scale, and the CPU bounds pyramid must see exactly the
+   values the GPU samples. Returns 1 when all three are up. */
+static int uploadNext(TerrainBakeJob *job, int all)
+{
+	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
+	job->stage = STAGE_UPLOAD;
+	do {
+		clock_t u0 = clock();
+		if (!job->climateTex) {
+			job->climateTex = uploadRGBA8(job->climatePx, W, H);
+			free(job->climatePx);
+			job->climatePx = NULL;
+		} else if (!job->oceanTex) {
+			job->oceanTex = uploadRGBA8(job->oceanPx, W, H);
+			free(job->oceanPx);
+			job->oceanPx = NULL;
+		} else if (!job->heightTex) {
+			job->heightTex = uploadHeight(job->pyramid->mn[0], W, H);
+		}
+		job->uploadS += (double)(clock() - u0) / CLOCKS_PER_SEC;
+	} while (all && !job->heightTex);
+	return job->heightTex != 0;
+}
 
+/* Hands the uploaded planet to out (the pyramid moves there) and frees the
+   job. Returns the height texture. */
+static GLuint bakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
+{
+	uploadNext(job, 1);
+	out->climateTex = job->climateTex;
+	out->oceanTex = job->oceanTex;
+	out->seaLevel = job->seaLevel;
+	out->oceanDepth = job->oceanDepth;
+	out->pyramid = job->pyramid;
+	job->pyramid = NULL;
+	GLuint heightTex = job->heightTex;
+	job->climateTex = job->oceanTex = job->heightTex = 0;
+
+	const clock_t *t = job->t;
 	double s = (double)(CLOCKS_PER_SEC);
-	fprintf(stderr, "[terrain] bake seed %u: shape %.2f s, readback %.2f s, thermal %.2f s, hydro %.2f s, sea %.2f s, climate %.2f s -> seaLevel %.4f, oceanDepth %.4f\n",
-	        seed,
-	        (double)(t1 - t0) / s, (double)(t2 - t1) / s, (double)(t3 - t2) / s,
-	        (double)(t4 - t3) / s, (double)(t5 - t4) / s, (double)(t6 - t5) / s,
-	        seaLevel, oceanDepth);
+	fprintf(stderr, "[terrain] bake seed %u%s: shape+readback %.3f s, split %.2f s, thermal %.2f s, hydro %.2f s, sea %.2f s, climate %.2f s, upload %.3f s -> seaLevel %.4f, oceanDepth %.4f\n",
+	        job->bs.seed, job->background ? " (background)" : "",
+	        (double)(t[1] - t[0]) / s, (double)(t[2] - t[1]) / s, (double)(t[3] - t[2]) / s,
+	        (double)(t[4] - t[3]) / s, (double)(t[5] - t[4]) / s, (double)(t[6] - t[5]) / s,
+	        job->uploadS, job->seaLevel, job->oceanDepth);
 
+	freeJob(job);
 	return heightTex;
+}
+
+unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenParams *out,
+                                     void (*step)(void))
+{
+	TerrainBakeJob *job = newJob(bs, step);
+	shapeStrips(job, BAKE_SHAPE_STRIPS);
+	readbackNow(job);
+	bakeCPU(job);
+	GLuint heightTex = bakeFinish(job, out);
+	/* The new planet becomes the active one. */
+	g_planetGen = *out;
+	return heightTex;
+}
+
+TerrainBakeJob *TerrainGen_BakeStart(const TerrainBakeSettings *bs)
+{
+	TerrainBakeJob *job = newJob(bs, workerStep);
+	job->background = 1;
+	InterlockedExchange(&workerSteps, 0);
+	bgJob = job;
+	advanceJob(job, 0);
+	return job;
+}
+
+int TerrainGen_BakePoll(TerrainBakeJob *job)
+{
+	if (job->stage < STAGE_CPU)
+		advanceJob(job, 0);
+	else if (job->done) {
+		if (job->thread) {
+			CloseHandle(job->thread);   /* finished: nothing to wait for */
+			job->thread = NULL;
+		}
+		return uploadNext(job, 0);
+	}
+	return 0;
+}
+
+float TerrainGen_BakeProgress(const TerrainBakeJob *job)
+{
+	/* Shaping ~5%; the steps cover the erosion, the climate maps one more. */
+	if (job->stage < STAGE_CPU)
+		return 0.05f * (float)job->strip / (float)BAKE_SHAPE_STRIPS;
+	if (job->done)
+		return 1.0f;
+	float p = 0.05f + 0.95f * (float)workerSteps / (float)(TERRAIN_BAKE_STEPS + 1);
+	return p < 1.0f ? p : 1.0f;
+}
+
+unsigned int TerrainGen_BakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
+{
+	completeJob(job);
+	return bakeFinish(job, out);
+}
+
+void TerrainGen_BakeCancel(TerrainBakeJob *job)
+{
+	if (job->thread) {
+		WaitForSingleObject(job->thread, INFINITE);
+		CloseHandle(job->thread);
+		job->thread = NULL;
+	}
+	freeJob(job);
 }
