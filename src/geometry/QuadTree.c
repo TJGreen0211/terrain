@@ -39,13 +39,14 @@
 int g_qtLegacyPath = 0;
 QuadTree_Stats g_qtStats;
 
-/* One drawn leaf (shaders/patch.glsl, attribute locations 4-10). */
+/* One drawn leaf (shaders/patch.glsl, attribute locations 4-11). */
 typedef struct qtInstance {
 	float corner[4][4];   /* xyz: sphere corners (0,0) (1,0) (0,1) (1,1), camera-relative;
 	                         corner[0][3]: skirt drop (body radii) */
 	float q0[4];          /* xyz: cube-space corner (0,0); w: cell half-width (cube units) */
 	float eu[3];          /* cube-space edge along u */
 	float ev[3];          /* cube-space edge along v */
+	int addr[4];          /* face, level, x, y: terrain detail lattice (detail.glsl) */
 } qtInstance;
 
 typedef struct qtNode {
@@ -192,7 +193,7 @@ void QuadTree_InitGL(void)
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4*sizeof(float), BUFFER_OFFSET(0));
 
-	/* Patch instance attributes, locations 4-10 (shaders/patch.glsl). */
+	/* Patch instance attributes, locations 4-11 (shaders/patch.glsl). */
 	glGenBuffers(1, &instanceVBO);
 	glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(qtInstance)*QT_INSTANCE_CAP, NULL, GL_STREAM_DRAW);
@@ -211,6 +212,9 @@ void QuadTree_InitGL(void)
 	glEnableVertexAttribArray(10);
 	glVertexAttribPointer(10, 3, GL_FLOAT, GL_FALSE, stride, BUFFER_OFFSET(offsetof(qtInstance, ev)));
 	glVertexAttribDivisor(10, 1);
+	glEnableVertexAttribArray(11);
+	glVertexAttribIPointer(11, 4, GL_INT, stride, BUFFER_OFFSET(offsetof(qtInstance, addr)));
+	glVertexAttribDivisor(11, 1);
 
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -289,13 +293,16 @@ static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int u
 	}
 }
 
-/* Skirt drop (body radii) of a patch `width` metres wide whose surface
-   spans relief [lo, hi]: a seam opens at most as far as heights differ
-   along the edge (QT_SKIRT_*, WorldConfig.h). Shipped per patch to the
-   shaders (patchSkirt), so the culling bounds and the walls agree. */
-static double skirtDrop(double lo, double hi, double width, double radius)
+/* Skirt drop (body radii) of a patch `width` metres wide whose coarse
+   surface spans `range` (body radii) and reaches `hi`: a seam opens at
+   most as far as heights differ along the edge (QT_SKIRT_*, WorldConfig.h),
+   plus `seam` (body radii) for terrain detail, whose amplitude the range
+   leaves out (it bounds the absolute height, not how far it can differ
+   across an edge). Shipped per patch to the shaders (patchSkirt), so the
+   culling bounds and the walls agree. */
+static double skirtDrop(double range, double hi, double seam, double width, double radius)
 {
-	double drop = QT_SKIRT_RANGE_FACTOR * (hi - lo) + QT_SKIRT_WIDTH_FRACTION * width / radius;
+	double drop = QT_SKIRT_RANGE_FACTOR * range + QT_SKIRT_WIDTH_FRACTION * width / radius + seam;
 	return fmin(drop, QT_SKIRT_MAX * (1.0 + hi));
 }
 
@@ -326,6 +333,10 @@ static void emitLeaf(const dmat4 *model, int f, const qtNode *nd, double skirt)
 		inst->eu[k] = (float)(faceA[f][k] * size);
 		inst->ev[k] = (float)(faceB[f][k] * size);
 	}
+	inst->addr[0] = f;
+	inst->addr[1] = nd->level;
+	inst->addr[2] = nd->x;
+	inst->addr[3] = nd->y;
 }
 
 /* Visits one node: 0 = culled, 1 = leaf, 2 = split. Bounds come from the
@@ -365,7 +376,16 @@ static int visitNode(const qtWalk *w, int f, const qtNode *nd, int canSplit, dou
 		if(lo > hi)
 			return 0;   /* nothing drawn over this footprint */
 	}
-	*skirt = skirtDrop(lo, hi, width, R);
+	/* Terrain detail on land (relief > 0): up to detailAmp either way, but
+	   never below sea level (detail.glsl's coastal envelope). */
+	double range = hi - lo, seam = 0.0;
+	if(b->detailAmp > 0.0 && hi > 0.0) {
+		if(lo > 0.0)
+			lo = fmax(lo - b->detailAmp, 0.0);
+		hi += b->detailAmp;
+		seam = b->detailSeam * width / R;
+	}
+	*skirt = skirtDrop(range, hi, seam, width, R);
 	double loS = lo - *skirt;
 
 	/* Frustum: sphere around the shell [R(1+loS), R(1+hi)] over the cap. A
@@ -443,7 +463,7 @@ static void traverseFace(const qtWalk *w, int f)
    drops it, so live relief edits (bounds) always take effect next frame. */
 typedef struct qtKey {
 	dmat4 model;
-	double radius, occluderRelief, minSpacing, trianglePx;
+	double radius, occluderRelief, minSpacing, trianglePx, detailAmp, detailSeam;
 	QuadTree_ReliefFn relief;
 	mat4 viewProj;
 	int horizon;
@@ -461,6 +481,8 @@ static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, d
 	k.occluderRelief = body->occluderRelief;
 	k.minSpacing = minSpacing;
 	k.trianglePx = trianglePx;
+	k.detailAmp = body->detailAmp;
+	k.detailSeam = body->detailSeam;
 	k.relief = body->relief;
 	k.viewProj = viewProj;
 	k.horizon = useHorizon;

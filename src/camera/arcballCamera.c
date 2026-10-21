@@ -29,8 +29,8 @@ static int dragging = 0;
 static dvec3 Pivot = { 0.0, 0.0, CAMERA_SPAWN_DISTANCE_M };
 
 /* Sub-solar surface preset. When active the camera stands above the planet
-   surface at the sub-solar point — the spot where the fixed sun
-   (SUN_ORBIT_PHASE_DEG in WorldConfig.h) is directly overhead — looking
+   surface at the sub-solar point ??? the spot where the fixed sun
+   (SUN_ORBIT_PHASE_DEG in WorldConfig.h) is directly overhead ??? looking
    across a local tangent tilted SURFACE_TILT below the horizon, up = the
    radial direction. That gives a lit daytime interior: blue sky dome up top,
    bright horizon, sunlit fog-ground below. Press G to toggle (see Input.c). */
@@ -39,6 +39,9 @@ static int surfaceView = 0;
 #define SURFACE_MAX ((float)SURFACE_CAMERA_MAX_RADIUS_M)
 #define SURFACE_TILT ((float)SURFACE_CAMERA_TILT_DEG)
 static float surfAlt = SURFACE_RAD;
+/* TEMP-PROF */ void testSetSurfaceRadius(float r) { surfAlt = r; }
+/* TEMP-PROF */ #include <stdlib.h>
+/* TEMP-PROF */ static double testPhase(void) { const char *e = getenv("QT_TEST_PHASE"); return e ? atof(e) : 0.0; }
 
 static vec3 Front = {0.0f, 0.0f, -1.0f};
 static vec3 Up = {0.0f, 1.0f, 0.0f};
@@ -131,6 +134,7 @@ mat4 getViewRotation()
 static vec3 surfaceSun(void)
 {
     double a = SUN_ORBIT_PHASE_DEG * (M_PI / 180.0);
+    /* TEMP-PROF */ a += testPhase() * (M_PI / 180.0);
     vec3 s = { (float)cos(a), 0.0f, (float)sin(a) };
     return s;
 }
@@ -162,6 +166,7 @@ static int surfaceViewActive(void) { return surfaceView; }
 static dvec3 surfaceEye(void)
 {
     double a = SUN_ORBIT_PHASE_DEG * (M_PI / 180.0);
+    /* TEMP-PROF */ a += testPhase() * (M_PI / 180.0);
     dvec3 e;
     e.x = cos(a) * surfAlt;
     e.y = 0.0;

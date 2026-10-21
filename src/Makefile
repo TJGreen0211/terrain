@@ -13,6 +13,7 @@ SRCS = Main.c \
 	GUI.c \
 	DebugGUI.c \
 	TerrainGen.c \
+	TerrainDetail.c \
 	glad.c \
 	LoadShader.c \
 	math/LinearAlg.c \

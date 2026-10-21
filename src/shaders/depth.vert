@@ -5,8 +5,10 @@
 // (lightSpace). Hardware depth is what gets stored; receivers compare their
 // own lightSpace-projected depth against it (see sunVisibility in quad.frag).
 layout (location = 0) in vec4 vPosition;
-// Quadtree patch instance (locations 4-10) + patchDir/patchSphere.
+// Quadtree patch instance (locations 4-11) + patchDir/patchSphere.
 #include "patch.glsl"
+// Terrain detail noise (step 3b), as in quad.vert.
+#include "detail.glsl"
 
 uniform mat4 model;
 uniform mat4 lightSpace;
@@ -48,6 +50,13 @@ void main()
 			float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
 			lift = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
 			     - oceanRelief * s * s;
+			// Detail as quad.vert, faded for this walk's coarser triangles
+			// (detailTriPx = QT_SHADOW_TRIANGLE_PX).
+			float alt01 = max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
+			float env = detailEnvelope(landRelief * alt01 * detailRadius, alt01);
+			vec2 gradCube;
+			lift += detailVertex(pAddr, uv, length(patchCube(uv)),
+			                     length(sphere - lodCameraPos) * detailPix, env, gradCube) / detailRadius;
 		}
 		// Skirt: same drop as quad.vert, as an offset from 1.
 		if (vPosition.w > 0.5)

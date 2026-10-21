@@ -22,7 +22,7 @@
 
 /* Build the shared base grid and the patch instance buffer. Every body
    program's vertex shader includes shaders/patch.glsl (vPosition at
-   location 0, patch instance attributes at 4-10). */
+   location 0, patch instance attributes at 4-11). */
 void QuadTree_InitGL(void);
 
 /* Height range a body's patches can reach over a spherical cap, as offsets
@@ -41,6 +41,12 @@ typedef struct QuadTree_Body {
 	QuadTree_ReliefFn relief; /* NULL = smooth sphere */
 	double occluderRelief;    /* lowest SOLID surface, body radii (<= 0): the horizon occluder */
 	double trianglePx;        /* LOD target (px per triangle edge); 0 = QT_TARGET_TRIANGLE_PX */
+	/* Terrain detail the program adds on top of `relief` where it is above
+	   0 (land), never pushing it below 0 (TerrainDetail.c). The walk widens
+	   such bounds by detailAmp (body radii) and deepens skirts by
+	   detailSeam x the patch width. 0 = none. */
+	double detailAmp;
+	double detailSeam;
 } QuadTree_Body;
 
 /* Draw one LOD sphere with the currently bound program: each cube face is

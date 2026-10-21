@@ -6,10 +6,15 @@
 #include "GUI.h"
 #include "DebugGUI.h"
 #include "TerrainGen.h"
+#include "TerrainDetail.h"
 #include "Rings.h"
 #include "WorldConfig.h"
 #include "Bodies.h"
 #include "Profiler.h"
+/* TEMP-PROF */ #define STB_IMAGE_WRITE_IMPLEMENTATION
+/* TEMP-PROF */ #include <stb_image_write.h>
+/* TEMP-PROF */ void testSetSurfaceRadius(float r);
+/* TEMP-PROF */ static double g_testTerrainM;
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -558,6 +563,8 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glUniform1f(glGetUniformLocation(shader, "depthNear"), CAMERA_NEAR);
 	/* Climate map (unit 8) + surface style for quad.frag's biome shading. */
 	setPlanetSurfaceUniforms(shader, 8);
+	/* Terrain detail (quad.vert/quad.frag), faded for the main walk. */
+	TerrainDetail_SetUniforms(shader, lodRadius, QT_TARGET_TRIANGLE_PX);
 	glActiveTexture(GL_TEXTURE0);
 }
 
@@ -823,6 +830,8 @@ void drawPlanetDepth(GLuint shader, const QuadTree_Body *body) {
 	   matches the drawn surface vertex for vertex. */
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*getWindowHeight()));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
+	/* Terrain detail faded for the caster walk's coarser triangles. */
+	TerrainDetail_SetUniforms(shader, lodRadius, QT_SHADOW_TRIANGLE_PX);
 	/* No finer than half a shadow texel: smaller detail cannot show in it. */
 	QuadTree_DrawShadowCasters(body, g_lightSpaceMatrix, 0.5 * g_shadowTexel);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
@@ -1079,6 +1088,7 @@ int main(int argc, char *argv[])
 	LoadingScreen_Finish();
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
+	/* TEMP-PROF */ if (getenv("QT_TEST_SURFACE")) toggleSurfaceCamera();
 	while(!glfwWindowShouldClose(window))
 	{
 		/*if(checkShaderChange(tessShader, vertCheck, fragCheck, vertTime, fragTime)) {
@@ -1118,6 +1128,9 @@ int main(int argc, char *argv[])
 		   first frame after loading, a re-bake) does not jump hours ahead. */
 		if (!getRotationPaused())
 			simTime += fmin(deltaTime, 0.1) * SIM_TIME_SCALE;
+		/* TEMP-PROF */ if (getenv("QT_TEST_SIMTIME")) simTime = atof(getenv("QT_TEST_SIMTIME"));
+		/* TEMP-PROF */ if (getenv("QT_TEST_NODETAIL")) g_terrainDetail = 0;
+		/* TEMP-PROF */ if (getenv("QT_TEST_FINDLAND")) { static double found = -1.0; double want = atof(getenv("QT_TEST_FINDLAND")); if (found < 0.0) { for (double t = 0.0; t < 86164.0 && found < 0.0; t += 120.0) { Bodies_Update(t); double a = (SUN_ORBIT_PHASE_DEG + (getenv("QT_TEST_PHASE") ? atof(getenv("QT_TEST_PHASE")) : 0.0)) * M_PI / 180.0, w[3] = { cos(a), 0.0, sin(a) }, dl[3]; for (int j = 0; j < 3; j++) dl[j] = g_bodies[BODY_EARTH].rotation.m[0][j]*w[0] + g_bodies[BODY_EARTH].rotation.m[1][j]*w[1] + g_bodies[BODY_EARTH].rotation.m[2][j]*w[2]; float lo, hi; TerrainGen_HeightRange(dl, 0.0, 0.0, &lo, &hi); double r = reliefOf(lo) * g_bodies[BODY_EARTH].radius; if (r > want && r < want * 3.0) found = t; } fprintf(stderr, "[prof] land at simtime %.0f\n", found); } simTime = found; }
 		Bodies_Update(simTime);
 		const Body *earth = &g_bodies[BODY_EARTH];
 		const Body *sun = &g_bodies[BODY_SUN];
@@ -1129,6 +1142,7 @@ int main(int argc, char *argv[])
 		if(currentFrame - lastTime >= 1.0)
 		{
 			//printf("%f\n", fpsFrames);
+			/* TEMP-PROF */ fprintf(stderr, "[prof] fps %.0f planet %.2f water %.2f shadow %.2f patches %d maxlvl %d walk %.2f terrain %.1f m\n", fpsFrames, Prof_GpuMs(PROF_PLANET), Prof_GpuMs(PROF_WATER), Prof_GpuMs(PROF_SHADOW), g_qtStats.leaves, g_qtStats.maxLevel, g_qtStats.walkMs, g_testTerrainM);
 			fpsFrames = 0.0;
 			lastTime += 1.0;
 		}
@@ -1164,7 +1178,12 @@ int main(int argc, char *argv[])
 		/* Planet model (scale * spin/tilt, camera-relative), composed in
 		   double and downcast once; shared by the shadow casters and the
 		   main pass. */
+		/* TEMP-PROF */ if (getenv("QT_TEST_ALT")) { double a = (SUN_ORBIT_PHASE_DEG + (getenv("QT_TEST_PHASE") ? atof(getenv("QT_TEST_PHASE")) : 0.0)) * M_PI / 180.0, w[3] = { cos(a), 0.0, sin(a) }, dl[3]; for (int j = 0; j < 3; j++) dl[j] = earth->rotation.m[0][j]*w[0] + earth->rotation.m[1][j]*w[1] + earth->rotation.m[2][j]*w[2]; float lo, hi; TerrainGen_HeightRange(dl, 0.0, 0.0, &lo, &hi); g_testTerrainM = reliefOf(lo) * earth->radius; testSetSurfaceRadius((float)(earth->radius + fmax(g_testTerrainM, 0.0) + atof(getenv("QT_TEST_ALT")))); }
 		QuadTree_Body planetBody = earthQuadTreeBody(earth, earthReliefBounds);
+		/* Land carries detail noise (quad.vert, depth.vert): widen its
+		   bounds and skirts. The water shell does not. */
+		planetBody.detailAmp = TerrainDetail_Amplitude(earth->radius);
+		planetBody.detailSeam = TerrainDetail_Seam(earth->radius);
 		mat4 planetModel = dmat4tomat4(planetBody.model);
 		/* New frame: the walk cache must not outlive this frame's inputs. */
 		QuadTree_BeginFrame();
@@ -1267,6 +1286,7 @@ int main(int argc, char *argv[])
 		setBodyUniforms(quadShader, fScale, model, lightPosition,
 		                0, dxWaveTex, 0, 0, 0, 0);
 		setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
+		/* TEMP-PROF */ if (getenv("QT_TEST_NOATMO")) glUniform1f(glGetUniformLocation(quadShader, "hasAtmosphere"), 0.0f);
 		Rings_BindReceiver(quadShader);
 		glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */
 		glDepthMask(GL_FALSE);
@@ -1286,6 +1306,7 @@ int main(int argc, char *argv[])
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
 		/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
 		setAtmosphereExtinction(waterShader, atmoInner, &g_atmosphere);
+		/* TEMP-PROF */ if (getenv("QT_TEST_NOATMO")) glUniform1f(glGetUniformLocation(waterShader, "hasAtmosphere"), 0.0f);
 		/* Detail layers' slope variance (BRDF roughness, water.frag). */
 		glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
 		glUniform1f(glGetUniformLocation(waterShader, "waveGeomScale"), (float)waveGeomScale(earth->radius));
@@ -1326,6 +1347,7 @@ int main(int argc, char *argv[])
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//scaled planet shell; params above with the planet extinction)
 		Prof_Begin(PROF_ATMOSPHERE);
+		/* TEMP-PROF */ if (!getenv("QT_TEST_NOATMO"))
 		drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
 		                   atmoInner, &g_atmosphere, lightPosition);
 		Prof_End(PROF_ATMOSPHERE);
@@ -1349,6 +1371,7 @@ int main(int argc, char *argv[])
 			glfwGetWindowSize(window, &ww, &wh);
 			uiLayoutSliders(ww, wh, UI_SLIDER_COUNT);
 		}
+		/* TEMP-PROF */ { static int shot; const char *sp = getenv("QT_TEST_SHOT"); if (sp && !shot && glfwGetTime() > 14.0) { shot = 1; int w = sceneW, h = sceneH; unsigned char *px = malloc((size_t)w * h * 4); glReadBuffer(GL_BACK); glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px); stbi_flip_vertically_on_write(1); stbi_write_png(sp, w, h, 4, px, w * 4); free(px); } }
 		uiDrawAll();
 
 		//Debug panel (F1): drawn last, over the sliders.

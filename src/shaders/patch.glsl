@@ -26,10 +26,19 @@ layout (location = 7) in vec4 pC3;   // (1,1)
 layout (location = 8) in vec4 pQ0;   // xyz: cube-space corner (0,0); w: cell half-width (cube units)
 layout (location = 9) in vec3 pEu;   // cube-space edge along u
 layout (location = 10) in vec3 pEv;  // cube-space edge along v
+// Integer node address (face, level, x, y): exact lattice maths for the
+// terrain detail noise (detail.glsl).
+layout (location = 11) in ivec4 pAddr;
 
 // 1 = the old float path (normalize, then the model matrix): debug panel
 // comparison only. It loses ~1e-7 of the radius (~0.5-1 m on Earth).
 uniform int patchLegacy;
+
+// Body-local cube-space point of patch point uv (not normalised).
+vec3 patchCube(vec2 uv)
+{
+	return pQ0.xyz + uv.x * pEu + uv.y * pEv;
+}
 
 // Patch cell half-width in cube units: the height-map mip for the node.
 float patchCell()

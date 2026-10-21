@@ -4,8 +4,10 @@ layout (location = 0) in vec4 vPosition;
 layout (location = 1) in vec3 vNormal;
 layout (location = 2) in vec2 vTexCoords;
 layout (location = 3) in vec3 vTangent;
-// Quadtree patch instance (locations 4-10) + patchDir/patchSphere.
+// Quadtree patch instance (locations 4-11) + patchDir/patchSphere.
 #include "patch.glsl"
+// Terrain detail noise (step 3b).
+#include "detail.glsl"
 
 uniform mat4 model;
 uniform mat4 view;
@@ -40,6 +42,12 @@ out vec3 fSurfDir;
 // that coarse triangles lift above the water back behind the shell.
 out float fRadius;
 out mat3 fNormalMat;
+// Terrain detail: the patch address and uv for quad.frag's per-pixel
+// octaves, and the slope of the octaves the vertices carry (body-local,
+// m/m; detail.glsl).
+flat out ivec4 fPatchAddr;
+out vec2 fPatchUV;
+out vec3 fDetailSlope;
 
 const float PI = 3.14159265359;
 
@@ -70,13 +78,25 @@ void main()
 
 	// Boundary skirt: wall vertices (w = 1) sit just under the DISPLACED
 	// planet surface so they hide T-junction seams along LOD patch edges
-	// without z-fighting it (the relief is a function of direction only, so
-	// the skirt follows the surface across the whole edge). The drop is
+	// without z-fighting it (relief and detail are functions of the surface
+	// point only, so the skirt follows the surface across the whole edge). The drop is
 	// sized per patch from its height range (patchSkirt); kept as the small
 	// offset from 1 so it never rounds against the unit radius.
-	float lift = relief;
+	// Detail noise on land, faded by this vertex's distance (the same for
+	// every patch sharing it, so no cracks), in metres -> body radii.
+	float alt01 = max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
+	float env = detailEnvelope(landRelief * alt01 * detailRadius, alt01);
+	vec3 q = patchCube(uv);
+	vec2 gradCube;
+	float detail = detailVertex(pAddr, uv, length(q),
+	                            length(sphere - lodCameraPos) * detailPix, env, gradCube);
+	fDetailSlope = detailSlope(pAddr.x, q, gradCube);
+	fPatchAddr = pAddr;
+	fPatchUV = uv;
+
+	float lift = relief + detail / detailRadius;
 	if(vPosition.w > 0.5)
-		lift = relief - patchSkirt();
+		lift -= patchSkirt();
 	float radius = 1.0 + lift;
 
 	vec3 world = sphere + patchOffset(d * lift, model);

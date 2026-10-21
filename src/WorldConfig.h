@@ -105,6 +105,26 @@
 #define QT_SKIRT_RANGE_FACTOR     1.5
 #define QT_SKIRT_WIDTH_FRACTION   0.02
 
+/* ---- Terrain detail (shaders/detail.glsl, TerrainDetail.c) ---------------
+   Fractal noise on land below the baked height map's resolution (~20 km
+   per texel on Earth). Each octave halves the wavelength; octaves fade in
+   with camera distance, as geometry while the triangles can carry them and
+   as shading normals down to ~2 px. Noise stays off the seafloor and ramps
+   in above the shore so land never dips below sea level. */
+/* Coarsest octave's wavelength (m); snapped to a power-of-two lattice on
+   the cube face (12.4 km on Earth). */
+#define TERRAIN_DETAIL_WAVELENGTH_M     12000.0
+/* Its amplitude (m). Peak detail is about twice this (all octaves). */
+#define TERRAIN_DETAIL_AMPLITUDE_M      400.0
+/* Amplitude ratio from one octave to the next (0.5 keeps the slope
+   similar at every scale; higher = rougher close up). */
+#define TERRAIN_DETAIL_GAIN             0.5
+/* Finest octave's wavelength (m); no finer than ~QT_MIN_VERTEX_SPACING_M
+   matters for geometry, finer still only for close-up shading. */
+#define TERRAIN_DETAIL_MIN_WAVELENGTH_M 1.0
+/* Amplitude on low land (plains, coasts) relative to high ground. */
+#define TERRAIN_DETAIL_PLAINS           0.3
+
 /* ---- Ocean ---------------------------------------------------------------
    Geometric swell: rms height (m) the water shell's vertices are displaced
    by at "Wave height" 1.0 (debug panel). Shading (slopes, foam) uses the

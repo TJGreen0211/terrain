@@ -24,6 +24,12 @@ in vec3 vColor;
 in vec3 fSurfDir;
 in float fRadius;
 in mat3 fNormalMat;
+// Terrain detail (quad.vert, detail.glsl): patch address + uv for the
+// per-pixel octaves, and the vertices' share of the slope.
+flat in ivec4 fPatchAddr;
+in vec2 fPatchUV;
+in vec3 fDetailSlope;
+#include "detail.glsl"
 
 out vec4 FragColor;
 
@@ -408,6 +414,24 @@ void main()
 
 	float e = clamp(h, 0.0, 1.0);
 	vec3 grad = (T * hT + B * hB) / (2.0 * eps);   // central differences
+
+	// Terrain detail slope (body-local, m/m; land only): the share the
+	// vertices carry plus the shorter octaves per pixel (down to ~2 px,
+	// wider when grazing), with the geometry's envelope. Done before the
+	// material code so little else is live while it runs.
+	vec3 gDetail = vec3(0.0);
+	if (e >= seaLevel) {
+		float altD = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
+		gDetail = fDetailSlope;
+		float envD = detailEnvelope(landRelief * altD * detailRadius, altD);
+		if (envD > 0.0) {
+			vec3 qD = detailCubePoint(fPatchAddr, fPatchUV);
+			float footM = length(camDir) * detailPix;
+			gDetail += envD * detailSlope(fPatchAddr.x, qD,
+				detailPixel(fPatchAddr, fPatchUV, length(qD), footM, footM / graz));
+		}
+	}
+
 	vec4 color = vec4(1.0);
 	vec3 albedo;
 	float rough, waterMask;
@@ -432,6 +456,7 @@ void main()
 
 		// Temperature: latitude, altitude lapse, planet offset, a little noise.
 		float alt01 = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
+
 		float cosLatS = sqrt(max(1.0 - dObj.z*dObj.z, 0.0));
 		// Calibrated so sea-level ice starts near 72 deg and the equatorial
 	// snowline sits near 90 % of the relief. The altitude term is curved
@@ -454,7 +479,7 @@ void main()
 		rough = mix(0.62, 0.9, moist);   // desert smoother, forest canopy rough
 
 		// Slope: rise/run of the displaced surface; cliffs show bare rock.
-		float slope = length(grad) * landRelief / max(1.0 - seaLevel, 1e-3);
+		float slope = length(grad * (landRelief / max(1.0 - seaLevel, 1e-3)) + gDetail);
 		float steep = smoothstep(rockSlope, rockSlope * 1.6, slope);
 		float coldness = 1.0 - smoothstep(snowTemp - 0.06, snowTemp + 0.06, temp);
 
@@ -502,7 +527,7 @@ void main()
 	// Bump relief scaled by material: water keeps a coherent sun glint
 	// instead of scattering it into per-texel glitter; land keeps full relief.
 	float bump = mix(NORMAL_STRENGTH, NORMAL_STRENGTH * 0.2, waterMask);
-	vec3 Nobj = normalize(dObj - bump * grad);
+	vec3 Nobj = normalize(dObj - bump * grad - gDetail);
 	vec3 N = normalize(fNormalMat * Nobj);
 
 	vec3 V = normalize(cameraPos - fragPos);

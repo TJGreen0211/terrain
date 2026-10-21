@@ -3,7 +3,7 @@
 layout (location = 0) in vec4 vPosition;
 layout (location = 1) in vec3 vNormal;
 layout (location = 2) in vec2 vTexCoords;
-// Quadtree patch instance (locations 4-10) + patchDir/patchSphere.
+// Quadtree patch instance (locations 4-11) + patchDir/patchSphere.
 #include "patch.glsl"
 
 uniform mat4 model;
