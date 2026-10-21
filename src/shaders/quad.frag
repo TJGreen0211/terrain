@@ -423,6 +423,7 @@ void main()
 	if (e >= seaLevel) {
 		float altD = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
 		gDetail = fDetailSlope;
+#if DETAIL_PIXEL_OCTAVES > 0
 		float envD = detailEnvelope(landRelief * altD * detailRadius, altD);
 		if (envD > 0.0) {
 			vec3 qD = detailCubePoint(fPatchAddr, fPatchUV);
@@ -430,6 +431,7 @@ void main()
 			gDetail += envD * detailSlope(fPatchAddr.x, qD,
 				detailPixel(fPatchAddr, fPatchUV, length(qD), footM, footM / graz));
 		}
+#endif
 	}
 
 	vec4 color = vec4(1.0);

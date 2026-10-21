@@ -46,14 +46,17 @@ const ivec3 DETAIL_SHIFT = ivec3(17, 31, 47);
 // - vertex slope: the slope is interpolated between vertices for octaves
 //   of 4+ triangle edges, and fades to per-pixel below that.
 // - per-pixel slope: from there down to half a triangle edge (and never
-//   below 2 px), at most DETAIL_PIXEL_OCTAVES octaves. Every octave per
-//   pixel costs roughly what the ~50 cheapest lines of quad.frag do, so
-//   the band stops short of the pixel; finer detail is left flat.
+//   below 2 px), at most DETAIL_PIXEL_OCTAVES octaves (the band holds 3).
+//   Set from TERRAIN_DETAIL_PIXEL_OCTAVES (WorldConfig.h) when the program
+//   is built; per-pixel octaves are expensive on integrated GPUs, so the
+//   band stops short of the pixel and finer detail is left flat.
 #define DETAIL_GEOM_FADE   vec2(1.5, 3.0)
 #define DETAIL_VERT_FADE   vec2(2.0, 4.0)
 #define DETAIL_FINE_FADE   vec2(0.5, 1.0)
 #define DETAIL_PIX_FADE    vec2(1.0, 2.0)
+#ifndef DETAIL_PIXEL_OCTAVES
 #define DETAIL_PIXEL_OCTAVES 3
+#endif
 
 // Cube axes (0 = x, 1 = y, 2 = z) along a face's s and t node coordinates
 // (faceA / faceB in QuadTree.c). The third axis is constant on the face:

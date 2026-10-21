@@ -12,10 +12,9 @@
 #include "Bodies.h"
 #include "Profiler.h"
 #include "Bench.h"
-/* TEMP-PROF */ #define STB_IMAGE_WRITE_IMPLEMENTATION
-/* TEMP-PROF */ #include <stb_image_write.h>
-/* TEMP-PROF */ void testSetSurfaceRadius(float r);
-/* TEMP-PROF */ static double g_testTerrainM;
+/* stb_image_write lives here; Bench.c uses it for its PNG captures. */
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 #include <stdio.h>
 //#include <unistd.h>
 #include <time.h>
@@ -80,8 +79,12 @@ static mat4 camRelTranslate(dvec3 world) {
    quad.frag). */
 GLuint initQuadShader(int depthPrepass) {
 	GLuint shader;
-	createShaderDefines(&shader, "shaders/quad.vert",
-		"shaders/quad.frag", depthPrepass ? "#define DEPTH_PREPASS\n" : NULL);
+	/* Per-pixel terrain detail octaves (detail.glsl) are compiled in or out:
+	   even a skipped loop costs the large planet shader registers. */
+	char defines[128];
+	snprintf(defines, sizeof defines, "%s#define DETAIL_PIXEL_OCTAVES %d\n",
+	         depthPrepass ? "#define DEPTH_PREPASS\n" : "", TERRAIN_DETAIL_PIXEL_OCTAVES);
+	createShaderDefines(&shader, "shaders/quad.vert", "shaders/quad.frag", defines);
 	return shader;
 }
 
@@ -1094,7 +1097,6 @@ int main(int argc, char *argv[])
 	LoadingScreen_Finish();
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
-	/* TEMP-PROF */ if (getenv("QT_TEST_SURFACE")) toggleSurfaceCamera();
 	while(!glfwWindowShouldClose(window))
 	{
 		/*if(checkShaderChange(tessShader, vertCheck, fragCheck, vertTime, fragTime)) {
@@ -1137,9 +1139,6 @@ int main(int argc, char *argv[])
 			simTime = Bench_SimTimeStart() + (double)Bench_Frame() * (1.0 / 60.0) * SIM_TIME_SCALE;
 		else if (!getRotationPaused())
 			simTime += fmin(deltaTime, 0.1) * SIM_TIME_SCALE;
-		/* TEMP-PROF */ if (getenv("QT_TEST_SIMTIME")) simTime = atof(getenv("QT_TEST_SIMTIME"));
-		/* TEMP-PROF */ if (getenv("QT_TEST_NODETAIL")) g_terrainDetail = 0;
-		/* TEMP-PROF */ if (getenv("QT_TEST_FINDLAND")) { static double found = -1.0; double want = atof(getenv("QT_TEST_FINDLAND")); if (found < 0.0) { for (double t = 0.0; t < 86164.0 && found < 0.0; t += 120.0) { Bodies_Update(t); double a = (SUN_ORBIT_PHASE_DEG + (getenv("QT_TEST_PHASE") ? atof(getenv("QT_TEST_PHASE")) : 0.0)) * M_PI / 180.0, w[3] = { cos(a), 0.0, sin(a) }, dl[3]; for (int j = 0; j < 3; j++) dl[j] = g_bodies[BODY_EARTH].rotation.m[0][j]*w[0] + g_bodies[BODY_EARTH].rotation.m[1][j]*w[1] + g_bodies[BODY_EARTH].rotation.m[2][j]*w[2]; float lo, hi; TerrainGen_HeightRange(dl, 0.0, 0.0, &lo, &hi); double r = reliefOf(lo) * g_bodies[BODY_EARTH].radius; if (r > want && r < want * 3.0) found = t; } fprintf(stderr, "[prof] land at simtime %.0f\n", found); } simTime = found; }
 		Bodies_Update(simTime);
 		Bench_UpdateCamera();
 		const Body *earth = &g_bodies[BODY_EARTH];
@@ -1152,7 +1151,6 @@ int main(int argc, char *argv[])
 		if(currentFrame - lastTime >= 1.0)
 		{
 			//printf("%f\n", fpsFrames);
-			/* TEMP-PROF */ fprintf(stderr, "[prof] fps %.0f planet %.2f water %.2f shadow %.2f patches %d maxlvl %d walk %.2f terrain %.1f m\n", fpsFrames, Prof_GpuMs(PROF_PLANET), Prof_GpuMs(PROF_WATER), Prof_GpuMs(PROF_SHADOW), g_qtStats.leaves, g_qtStats.maxLevel, g_qtStats.walkMs, g_testTerrainM);
 			fpsFrames = 0.0;
 			lastTime += 1.0;
 		}
@@ -1188,7 +1186,6 @@ int main(int argc, char *argv[])
 		/* Planet model (scale * spin/tilt, camera-relative), composed in
 		   double and downcast once; shared by the shadow casters and the
 		   main pass. */
-		/* TEMP-PROF */ if (getenv("QT_TEST_ALT")) { double a = (SUN_ORBIT_PHASE_DEG + (getenv("QT_TEST_PHASE") ? atof(getenv("QT_TEST_PHASE")) : 0.0)) * M_PI / 180.0, w[3] = { cos(a), 0.0, sin(a) }, dl[3]; for (int j = 0; j < 3; j++) dl[j] = earth->rotation.m[0][j]*w[0] + earth->rotation.m[1][j]*w[1] + earth->rotation.m[2][j]*w[2]; float lo, hi; TerrainGen_HeightRange(dl, 0.0, 0.0, &lo, &hi); g_testTerrainM = reliefOf(lo) * earth->radius; testSetSurfaceRadius((float)(earth->radius + fmax(g_testTerrainM, 0.0) + atof(getenv("QT_TEST_ALT")))); }
 		QuadTree_Body planetBody = earthQuadTreeBody(earth, earthReliefBounds);
 		/* Land carries detail noise (quad.vert, depth.vert): widen its
 		   bounds and skirts. The water shell does not. */
@@ -1296,7 +1293,6 @@ int main(int argc, char *argv[])
 		setBodyUniforms(quadShader, fScale, model, lightPosition,
 		                0, dxWaveTex, 0, 0, 0, 0);
 		setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
-		/* TEMP-PROF */ if (getenv("QT_TEST_NOATMO")) glUniform1f(glGetUniformLocation(quadShader, "hasAtmosphere"), 0.0f);
 		Rings_BindReceiver(quadShader);
 		glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */
 		glDepthMask(GL_FALSE);
@@ -1316,7 +1312,6 @@ int main(int argc, char *argv[])
 		                ocean.slopeTexture, ocean.dispTexture, ocean.jacobTexture, skyboxTexture);
 		/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
 		setAtmosphereExtinction(waterShader, atmoInner, &g_atmosphere);
-		/* TEMP-PROF */ if (getenv("QT_TEST_NOATMO")) glUniform1f(glGetUniformLocation(waterShader, "hasAtmosphere"), 0.0f);
 		/* Detail layers' slope variance (BRDF roughness, water.frag). */
 		glUniform1f(glGetUniformLocation(waterShader, "detailVar"), ocean.detailVar);
 		glUniform1f(glGetUniformLocation(waterShader, "waveGeomScale"), (float)waveGeomScale(earth->radius));
@@ -1357,7 +1352,6 @@ int main(int argc, char *argv[])
 		//Atmosphere dome: exact OpenGLSolar port (GPU Gems ch.16 scattering on the
 		//scaled planet shell; params above with the planet extinction)
 		Prof_Begin(PROF_ATMOSPHERE);
-		/* TEMP-PROF */ if (!getenv("QT_TEST_NOATMO"))
 		drawAtmosphereDome(atmosphereShader, sunProj, sunView, camRelTranslate(translation),
 		                   atmoInner, &g_atmosphere, lightPosition);
 		Prof_End(PROF_ATMOSPHERE);
@@ -1381,7 +1375,6 @@ int main(int argc, char *argv[])
 			glfwGetWindowSize(window, &ww, &wh);
 			uiLayoutSliders(ww, wh, UI_SLIDER_COUNT);
 		}
-		/* TEMP-PROF */ { static int shot; const char *sp = getenv("QT_TEST_SHOT"); if (sp && !shot && glfwGetTime() > 14.0) { shot = 1; int w = sceneW, h = sceneH; unsigned char *px = malloc((size_t)w * h * 4); glReadBuffer(GL_BACK); glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px); stbi_flip_vertically_on_write(1); stbi_write_png(sp, w, h, 4, px, w * 4); free(px); } }
 		Bench_MaybeCapture();
 		uiDrawAll();
 

@@ -124,6 +124,12 @@
 #define TERRAIN_DETAIL_MIN_WAVELENGTH_M 1.0
 /* Amplitude on low land (plains, coasts) relative to high ground. */
 #define TERRAIN_DETAIL_PLAINS           0.3
+/* Detail shaded per pixel below the triangle size (normals only, up to 3
+   octaves, down to half a triangle edge). 0 = the vertices' slope only.
+   The most expensive part of the detail: about +9 ms for the first octave
+   and +4 ms for each further one with land filling the screen on an
+   integrated GPU at 2880x1880. Compiled into quad.frag (restart to change). */
+#define TERRAIN_DETAIL_PIXEL_OCTAVES    0
 
 /* ---- Ocean ---------------------------------------------------------------
    Geometric swell: rms height (m) the water shell's vertices are displaced
