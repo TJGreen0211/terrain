@@ -7,7 +7,6 @@ in float fWave;
 out vec4 FragColor;
 
 uniform mat4 model;
-uniform mat4 lightSpace;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 // FFT ocean (Water.c): slopes and displacement derivatives per patch length.
@@ -17,8 +16,9 @@ uniform float waveAmp;
 uniform float waveChoppy;
 uniform sampler2D detailNormal;
 uniform samplerCube skybox;
-uniform sampler2DShadow depthMap;   // see quad.frag sunVisibility
-uniform float shadowTexel;
+// Sun shadows: cascades + the global map (shadow.glsl), 4-tap filter.
+#define SHADOW_TAPS 4
+#include "shadow.glsl"
 uniform float waveNormalStrength;
 uniform float waveTiling;
 uniform float time;
@@ -153,24 +153,6 @@ vec3 sunTransmittance(vec3 p, vec3 l, float sunAngle)
 float skyFraction(float sunUp)
 {
 	return smoothstep(-0.2, 0.3, sunUp);
-}
-
-// Sun visibility from the shadow map (quad.frag's lookup and offsets): 1 =
-// lit. Four bilinear-PCF taps half a texel out cover the same ~3x3-texel
-// footprint as quad.frag's nine, at under half the cost.
-float sunVisibility(vec3 p, vec3 n, vec3 l) {
-	float ndl = clamp(dot(n, l), 0.0, 1.0);
-	p += n * shadowTexel * (1.0 + 2.0 * (1.0 - ndl)) + l * shadowTexel;
-	vec4 c = vec4(p, 1.0) * lightSpace;
-	vec3 s = c.xyz / c.w * 0.5 + 0.5;
-	if (s.z >= 1.0)
-		return 1.0;
-	vec2 texel = 0.5 / vec2(textureSize(depthMap, 0));
-	float lit = texture(depthMap, vec3(s.xy + vec2(-texel.x, -texel.y), s.z))
-	          + texture(depthMap, vec3(s.xy + vec2( texel.x, -texel.y), s.z))
-	          + texture(depthMap, vec3(s.xy + vec2(-texel.x,  texel.y), s.z))
-	          + texture(depthMap, vec3(s.xy + vec2( texel.x,  texel.y), s.z));
-	return lit * 0.25;
 }
 
 // Ring shadow (same analytic lookup as quad.frag).

@@ -129,7 +129,7 @@
    The most expensive part of the detail: about +9 ms for the first octave
    and +4 ms for each further one with land filling the screen on an
    integrated GPU at 2880x1880. Compiled into quad.frag (restart to change). */
-#define TERRAIN_DETAIL_PIXEL_OCTAVES    0
+#define TERRAIN_DETAIL_PIXEL_OCTAVES    3
 
 /* ---- Atmosphere (Atmosphere.c, atmosphere.frag) -------------------------
    A stylised single-scattering shell (O'Neill, GPU Gems 2 ch. 16), tuned
@@ -171,6 +171,21 @@
    moon's orbit on both sides so eclipses work both ways. */
 #define SHADOW_MAP_SIZE           4096
 #define SHADOW_BOUND_MARGIN       1.02
+
+/* Cascades (Shadows.c, shaders/shadow.glsl): finer maps around the camera,
+   each fitted to a slice of the view distance, from the nearest visible
+   terrain out to SHADOW_CASCADE_MAX_DIST_M with logarithmic splits (every
+   cascade covers the same distance ratio). Past them, and from far orbit
+   where the range is too short to beat the global map, the global map
+   above is used. Casters are drawn again per cascade with the main pass's
+   LOD, so each cascade costs about a planet depth pass over its area.
+   Memory: CASCADES x SIZE^2 x 4 bytes (64 MB at 4 x 2048). */
+#define SHADOW_CASCADES             4      /* 0-4; 0 = global map only */
+#define SHADOW_CASCADE_SIZE         2048
+#define SHADOW_CASCADE_MAX_DIST_M   1.5e6  /* last cascade ~1.1 km texels */
+/* Never start the splits nearer than this (m): standing on the ground the
+   first cascade then spans ~60 m at ~4 cm texels. */
+#define SHADOW_CASCADE_MIN_DIST_M   2.0
 
 /* ---- Rings: close-up field (metres) -------------------------------------
    Rock + dust streaming around the camera (Rings.c). The ring radii

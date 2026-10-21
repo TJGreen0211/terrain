@@ -29,6 +29,7 @@ in mat3 fNormalMat;
 flat in ivec4 fPatchAddr;
 in vec2 fPatchUV;
 in vec3 fDetailSlope;
+in vec3 fShadowPos;      // surface point for shadow lookups (quad.vert)
 #include "detail.glsl"
 
 out vec4 FragColor;
@@ -36,13 +37,9 @@ out vec4 FragColor;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
-// Shadow map (Main.c initDepthbuffer): hardware depth compare, rendered
-// from the sun's position with lightSpace = projection * view applied to
-// camera-relative positions. shadowTexel is one texel's world size at the
-// planet, used to scale the receiver offsets.
-uniform sampler2DShadow depthMap;
-uniform mat4 lightSpace;
-uniform float shadowTexel;
+// Sun shadows: cascades + the global map (shadow.glsl, Shadows.c, Main.c).
+#define SHADOW_TAPS 9
+#include "shadow.glsl"
 // Camera-relative rendering: fragPos, lightPosition and bodyCenter (the
 // planet centre) are all relative to the camera, which sits at the origin
 // (cameraPos = lodCameraPos = 0). Planet-local positions are fragPos -
@@ -285,27 +282,6 @@ float hadleyFactor(float absLatDeg) {
 	float subtrop = exp(-pow((absLatDeg - 27.0) / 9.0, 2.0));
 	float midlat  = exp(-pow((absLatDeg - 55.0) / 12.0, 2.0));
 	return 0.65 + 0.75 * equatorLush * itcz - 0.35 * subtrop + 0.2 * midlat;
-}
-
-// Sun visibility from the shadow map: 1 = lit, 0 = fully shadowed.
-// p is the camera-relative position, n the geometric normal and l the unit
-// direction to the sun. The receiver is pushed out along the normal (more at
-// grazing light, where acne starts) and toward the sun by about a texel, so
-// it never tests against its own rasterized depth. 3x3 hardware-filtered
-// taps one texel apart give a smooth ~4-texel penumbra.
-float sunVisibility(vec3 p, vec3 n, vec3 l) {
-	float ndl = clamp(dot(n, l), 0.0, 1.0);
-	p += n * shadowTexel * (1.0 + 2.0 * (1.0 - ndl)) + l * shadowTexel;
-	vec4 c = vec4(p, 1.0) * lightSpace;
-	vec3 s = c.xyz / c.w * 0.5 + 0.5;
-	if (s.z >= 1.0)
-		return 1.0;
-	vec2 texel = 1.0 / vec2(textureSize(depthMap, 0));
-	float lit = 0.0;
-	for (int x = -1; x <= 1; ++x)
-		for (int y = -1; y <= 1; ++y)
-			lit += texture(depthMap, vec3(s.xy + vec2(x, y) * texel, s.z));
-	return lit / 9.0;
 }
 
 // Ring shadow (Rings.c). Analytic rather than shadow-mapped: the ring is
@@ -569,13 +545,27 @@ void main()
 		// test out there so sunlit peaks past the terminator are not cut
 		// off by a hard self-shadow edge.
 		float shadowWeight = smoothstep(-0.06, 0.0, sunUp);
-		float vis = mix(1.0, sunVisibility(fragPos, upGeo, L), shadowWeight);
+		// Offset along the triangle's own normal (oriented outward), not
+		// the sphere's up: on steep slopes up runs into the surface, and
+		// the fine cascades resolve the difference. Near-vertical faces
+		// (skirt walls glimpsed through patch-edge cracks, which lie under
+		// the neighbouring surface) keep up, or they would show as shadowed
+		// lines along every patch edge.
+		vec3 faceN = normalize(cross(dFdx(fragPos), dFdy(fragPos)));
+		float faceUp = dot(faceN, upGeo);
+		faceN *= sign(faceUp + 1e-6);
+		vec3 shadowN = normalize(mix(upGeo, faceN, smoothstep(0.25, 0.5, abs(faceUp))));
+		float vis = mix(1.0, sunVisibility(fShadowPos, shadowN, L), shadowWeight);
 		vis *= ringTransmittance(fragPos - ringCenter, L, length(lightPosition - fragPos));
 		// Sunlight reddened by its long path through the air near the
 		// terminator, and cut off as the sun sets behind the limb.
 		vec3 sunCol = sunTransmittance(fragPos - bodyCenter, L, ringSunAngle);
 		lit += (diff + spec) * sunRadiance * sunCol * vis;
 	}
+
+	// Debug panel: which shadow level serves each pixel.
+	if (shadowDebug == 1)
+		lit *= shadowDebugTint(fragPos);
 
 	// Surface extinction only (linear radiance, before the tone map); the
 	// atmosphere dome owns all in-scattered radiance.

@@ -232,6 +232,7 @@ typedef struct qtWalk {
 	double splitK;          /* split while distance < splitK * node width */
 	int maxLevel;
 	int useHorizon;
+	int cullNear;           /* 0: skip the frustum's near plane (shadow cascades) */
 	double camDist;         /* |centre| */
 	dvec3 camDir;           /* unit, centre -> camera */
 	double occluder;        /* horizon occluder radius, m */
@@ -266,8 +267,10 @@ double QuadTree_SplitK(double trianglePx)
 	return getWindowHeight() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
 }
 
-static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
+static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, int cullNear,
+                      double minSpacing, double trianglePx)
 {
+	w->cullNear = cullNear;
 	const double (*m)[4] = body->model.m;
 	w->body = body;
 	w->center.x = m[0][3]; w->center.y = m[1][3]; w->center.z = m[2][3];
@@ -402,6 +405,8 @@ static int visitNode(const qtWalk *w, int f, const qtNode *nd, int canSplit, dou
 	double bound = sqrt(half*half + rTop * mid * chord * chord);
 	dvec3 s = daddvec3(w->center, dscalarvec3(up, mid));
 	for(int p = 0; p < 6; p++) {
+		if(p == 4 && !w->cullNear)
+			continue;   /* near plane (row 3 + row 2) */
 		const double *pl = w->frustum[p];
 		if(pl[0]*s.x + pl[1]*s.y + pl[2]*s.z + pl[3] < -bound)
 			return 0;
@@ -471,13 +476,14 @@ typedef struct qtKey {
 	double radius, occluderRelief, minSpacing, trianglePx, detailAmp, detailSeam;
 	QuadTree_ReliefFn relief;
 	mat4 viewProj;
-	int horizon;
+	int horizon, cullNear;
 	float windowHeight;
 } qtKey;
 static qtKey lastKey;
 static int lastValid;
 
-static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
+static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, int cullNear,
+                     double minSpacing, double trianglePx)
 {
 	qtKey k;
 	memset(&k, 0, sizeof k);   /* padding too: keys compare with memcmp */
@@ -491,13 +497,15 @@ static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, d
 	k.relief = body->relief;
 	k.viewProj = viewProj;
 	k.horizon = useHorizon;
+	k.cullNear = cullNear;
 	k.windowHeight = getWindowHeight();
 	return k;
 }
 
-static void walkFaces(const QuadTree_Body *body, mat4 viewProj, int useHorizon, double minSpacing, double trianglePx)
+static void walkFaces(const QuadTree_Body *body, mat4 viewProj, int useHorizon, int cullNear,
+                      double minSpacing, double trianglePx)
 {
-	qtKey key = makeKey(body, viewProj, useHorizon, minSpacing, trianglePx);
+	qtKey key = makeKey(body, viewProj, useHorizon, cullNear, minSpacing, trianglePx);
 	if(lastValid && memcmp(&key, &lastKey, sizeof key) == 0)
 		return;
 
@@ -505,7 +513,7 @@ static void walkFaces(const QuadTree_Body *body, mat4 viewProj, int useHorizon, 
 	QueryPerformanceCounter(&t0);
 
 	qtWalk w;
-	buildWalk(&w, body, viewProj, useHorizon, minSpacing, trianglePx);
+	buildWalk(&w, body, viewProj, useHorizon, cullNear, minSpacing, trianglePx);
 	instanceCount = 0;
 	for(int f = 0; f < 6; f++)
 		traverseFace(&w, f);
@@ -563,20 +571,21 @@ void QuadTree_BeginFrame(void)
 	memset(&g_qtStats, 0, sizeof g_qtStats);
 }
 
-void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing)
+void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing,
+                                double trianglePx, int cullNear)
 {
-	/* Camera-centred LOD like the main pass but coarser (it resolves the
-	   shadow map, not the screen; the receiver offsets in sunVisibility
-	   cover the caster/receiver mesh difference), culled against the light
-	   frustum, and without the camera horizon cull: terrain past the
-	   horizon can still shadow what the camera sees. */
-	walkFaces(body, lightViewProj, 0, fmax(minSpacing, QT_MIN_VERTEX_SPACING_M), QT_SHADOW_TRIANGLE_PX);
+	/* Camera-centred LOD like the main pass (the split depends only on the
+	   camera, so at the same trianglePx the leaves that survive culling are
+	   exactly the main pass's), culled against the light frustum, and
+	   without the camera horizon cull: terrain past the horizon can still
+	   shadow what the camera sees. */
+	walkFaces(body, lightViewProj, 0, cullNear, fmax(minSpacing, QT_MIN_VERTEX_SPACING_M), trianglePx);
 	drawPatches();
 }
 
 void QuadTree_DrawSphere(const QuadTree_Body *body, mat4 viewProj)
 {
-	walkFaces(body, viewProj, 1, QT_MIN_VERTEX_SPACING_M,
+	walkFaces(body, viewProj, 1, 1, QT_MIN_VERTEX_SPACING_M,
 	          body->trianglePx > 0.0 ? body->trianglePx : QT_TARGET_TRIANGLE_PX);
 	drawPatches();
 }

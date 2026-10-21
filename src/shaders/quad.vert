@@ -51,6 +51,11 @@ out mat3 fNormalMat;
 flat out ivec4 fPatchAddr;
 out vec2 fPatchUV;
 out vec3 fDetailSlope;
+// Where this fragment takes its shadow from: the surface point, also for
+// skirt walls (the edge they hang from). A wall glimpsed through a patch-
+// edge crack lies under the neighbouring surface, and the fine shadow
+// cascades would otherwise draw it as a dark line along every edge.
+out vec3 fShadowPos;
 
 const float PI = 3.14159265359;
 
@@ -103,6 +108,7 @@ void main()
 	float radius = 1.0 + lift;
 
 	vec3 world = sphere + patchOffset(d * lift, model);
+	fShadowPos = sphere + patchOffset(d * (relief + detail / detailRadius), model);
 
 	vec3 n = d;
 	fSurfDir = d;

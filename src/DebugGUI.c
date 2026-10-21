@@ -3,6 +3,7 @@
 #include "Atmosphere.h"
 #include "TerrainGen.h"
 #include "TerrainDetail.h"
+#include "Shadows.h"
 #include "Water.h"
 #include "Bodies.h"
 #include "Profiler.h"
@@ -155,6 +156,11 @@ static void cameraSection(void)
 		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
 	nk_checkbox_label(ctx, "Legacy float vertex path", &g_qtLegacyPath);
 	nk_checkbox_label(ctx, "Terrain detail noise", &g_terrainDetail);
+	nk_checkbox_label(ctx, "Tint shadow cascades", &g_shadowDebug);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Shadow cascades: %d", g_cascades.count);
+	for (int i = 0; i < g_cascades.count; i++)
+		nk_labelf(ctx, NK_TEXT_LEFT, "  %d: radius %.0f m, texel %.2f m", i,
+		          g_cascades.c[i].radius, g_cascades.c[i].texel);
 
 	/* Totals over this frame's walks (shadow casters, moon, planet, water). */
 	groupLabel("Terrain LOD (frame)");

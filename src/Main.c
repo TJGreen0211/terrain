@@ -7,6 +7,7 @@
 #include "DebugGUI.h"
 #include "TerrainGen.h"
 #include "TerrainDetail.h"
+#include "Shadows.h"
 #include "Rings.h"
 #include "WorldConfig.h"
 #include "Bodies.h"
@@ -350,6 +351,9 @@ static void bindShadowMap(GLuint shader, int unit) {
 	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
 	glUniform1f(glGetUniformLocation(shader, "shadowTexel"), g_shadowTexel);
 	glActiveTexture(GL_TEXTURE0);
+	/* Cascades (shadow.glsl; programs without them ignore the uniforms).
+	   Unit 13: 0-12 are taken (atmosphere depth uses 12). */
+	Shadows_BindReceiver(shader, 13);
 }
 
 /* ---- Main-pass depth: reversed-Z into a float depth buffer ----
@@ -452,6 +456,30 @@ static double reliefOf(double h)
 static double lodCellKFor(double radius)
 {
 	return 2048.0 / (M_PI * 2.0 * QuadTree_SplitK(QT_TARGET_TRIANGLE_PX) * radius);
+}
+
+/* View distances the terrain can be seen over, for fitting the shadow
+   cascades. nearest: the camera's height above the highest terrain within
+   its horizon (no ground is closer); farthest: the distance to the horizon
+   plus as far as that terrain's peaks can peek over it. */
+static void terrainViewRange(const Body *earth, double *nearest, double *farthest)
+{
+	dvec3 rel = dsubvec3(g_cam, earth->position);
+	double d = dlengthvec3(rel), R = earth->radius;
+	float gmin, gmax;
+	TerrainGen_GlobalRange(&gmin, &gmax);
+	double topGlobal = R * (1.0 + reliefOf(gmax));
+	double cap = d > topGlobal ? acos(R / d) + acos(R / topGlobal) : M_PI;
+	/* Body-local nadir: rotation is body -> world, so its transpose. */
+	double w[3] = { rel.x / d, rel.y / d, rel.z / d }, dl[3];
+	const double (*m)[4] = earth->rotation.m;
+	for (int j = 0; j < 3; j++)
+		dl[j] = m[0][j] * w[0] + m[1][j] * w[1] + m[2][j] * w[2];
+	float lo, hi;
+	TerrainGen_HeightRange(dl, fmin(cap, M_PI), 6.0, &lo, &hi);
+	double top = R * (1.0 + fmax(reliefOf(hi), 0.0));
+	*nearest = fmax(d - top, 0.0);
+	*farthest = sqrt(fmax(d * d - R * R, 0.0)) + sqrt(fmax(top * top - R * R, 0.0));
 }
 
 /* QuadTree_ReliefFn for Earth's land + seafloor (quad.vert, depth.vert):
@@ -820,30 +848,32 @@ void drawOrbit(GLuint shader, GLuint texture, const Body *moon, vec4 lightPositi
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
-/* Shadow casters, rendered into the bound shadow FBO with g_lightSpaceMatrix.
+/* Shadow casters, rendered into the bound shadow target with lightSpace
+   (the global map's g_lightSpaceMatrix or a cascade's).
    drawDepth: a plain (undisplaced) mesh, e.g. the moon sphere.
-   drawPlanetDepth: the planet through the same quadtree LOD walk, height
-   displacement and skirts as the quad.vert main pass, so the terrain casts
-   from exactly the surface that receives (no mismatch acne). */
-void drawDepth(GLuint vao, GLuint shader, int vertices, mat4 m) {
+   drawPlanetDepth: the planet through the quadtree LOD walk with the main
+   pass's height displacement and skirts (depth.vert), at trianglePx and no
+   finer than minSpacing; cullNear as QuadTree_DrawShadowCasters. */
+void drawDepth(GLuint vao, GLuint shader, int vertices, mat4 m, mat4 lightSpace) {
 	glUseProgram(shader);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 	glUniform1f(glGetUniformLocation(shader, "displace"), 0.0f);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
-	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &lightSpace.m[0][0]);
 	glBindVertexArray(vao);
 	glDrawArrays(GL_TRIANGLES, 0, vertices);
 	glBindVertexArray(0);
 }
 
-void drawPlanetDepth(GLuint shader, const QuadTree_Body *body) {
+void drawPlanetDepth(GLuint shader, const QuadTree_Body *body, mat4 lightSpace, double minSpacing,
+                     double trianglePx, int cullNear) {
 	mat4 m = dmat4tomat4(body->model);
 	float lodRadius = (float)body->radius;
 	glUseProgram(shader);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 1);
 	glUniform1f(glGetUniformLocation(shader, "displace"), 1.0f);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, &m.m[0][0]);
-	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &g_lightSpaceMatrix.m[0][0]);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &lightSpace.m[0][0]);
 	glActiveTexture(GL_TEXTURE6);
 	glBindTexture(GL_TEXTURE_2D, planetHeightTex);
 	glUniform1i(glGetUniformLocation(shader, "heightMap"), 6);
@@ -859,10 +889,9 @@ void drawPlanetDepth(GLuint shader, const QuadTree_Body *body) {
 	   sample the very heights the receivers do. */
 	glUniform1f(glGetUniformLocation(shader, "lodCellK"), (float)lodCellKFor(lodRadius));
 	glUniform3f(glGetUniformLocation(shader, "lodCameraPos"), 0.0f, 0.0f, 0.0f);
-	/* Terrain detail faded for the caster walk's coarser triangles. */
-	TerrainDetail_SetUniforms(shader, lodRadius, QT_SHADOW_TRIANGLE_PX);
-	/* No finer than half a shadow texel: smaller detail cannot show in it. */
-	QuadTree_DrawShadowCasters(body, g_lightSpaceMatrix, 0.5 * g_shadowTexel);
+	/* Terrain detail faded for this walk's triangles. */
+	TerrainDetail_SetUniforms(shader, lodRadius, trianglePx);
+	QuadTree_DrawShadowCasters(body, lightSpace, minSpacing, trianglePx, cullNear);
 	glUniform1i(glGetUniformLocation(shader, "instanced"), 0);
 }
 
@@ -1053,6 +1082,7 @@ int main(int argc, char *argv[])
 	LoadingScreen_Step();
 
 	GLuint depthbuffer = initDepthbuffer();
+	Shadows_InitGL();
 	GLuint sunFramebuffer = initFramebuffer(&sunNoiseTexture, 512, 512);
 	LoadingScreen_Step();
 	//GLuint quadVAO = initQuadVAO();
@@ -1253,8 +1283,33 @@ int main(int argc, char *argv[])
 			glEnable(GL_POLYGON_OFFSET_FILL);
 			glPolygonOffset(1.5f, 2.0f);
 			model = dmat4tomat4(Body_ModelMatrix(moon, g_cam));
-			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model);
-			drawPlanetDepth(depthShader, &planetBody);
+			drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model, g_lightSpaceMatrix);
+			/* Coarse walk, no finer than half a texel: smaller detail cannot
+			   show in this map. */
+			drawPlanetDepth(depthShader, &planetBody, g_lightSpaceMatrix, 0.5 * g_shadowTexel,
+			                QT_SHADOW_TRIANGLE_PX, 1);
+
+			/* Cascades: finer maps around the camera (Shadows.c), fitted
+			   between the nearest and farthest terrain in view. Casters use
+			   the main pass's LOD, so they are the very mesh that receives
+			   (minus what each box culls), and keep everything up-sun of the
+			   box (clamped onto its near plane). */
+			{
+				double nearest, farthest;
+				terrainViewRange(earth, &nearest, &farthest);
+				mat4 view = getViewMatrix();
+				dvec3 forward = { -view.m[2][0], -view.m[2][1], -view.m[2][2] };
+				dvec3 toSun = dsubvec3(lightWorld, translation);
+				Shadows_Fit(g_cam, forward, dscalarvec3(toSun, 1.0 / dlengthvec3(toSun)), nearest, farthest);
+			}
+			for (int i = 0; i < g_cascades.count; i++) {
+				const ShadowCascade *sc = &g_cascades.c[i];
+				Shadows_BeginCascade(i);
+				drawDepth(quadCubeVAO, depthShader, qc.vertexNumber, model, sc->lightSpace);
+				drawPlanetDepth(depthShader, &planetBody, sc->lightSpace, 0.5 * sc->texel,
+				                QT_TARGET_TRIANGLE_PX, 0);
+			}
+			Shadows_EndCascades();
 			glDisable(GL_POLYGON_OFFSET_FILL);
 		Prof_End(PROF_SHADOW);
 

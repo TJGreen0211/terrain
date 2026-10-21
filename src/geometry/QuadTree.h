@@ -58,12 +58,16 @@ typedef struct QuadTree_Body {
    bounds. Back-to-back calls with identical inputs reuse the last walk. */
 void QuadTree_DrawSphere(const QuadTree_Body *body, mat4 viewProj);
 
-/* Shadow-map caster pass for the same body: a coarser camera-centred LOD
-   (QT_SHADOW_TRIANGLE_PX), culled against the light's projection * view
-   instead of the camera frustum and without the camera horizon cull, and
-   no finer than minSpacing (m) between vertices: detail below a shadow
-   texel only costs time. */
-void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing);
+/* Shadow-map caster pass for the same body: camera-centred LOD at
+   trianglePx (QT_SHADOW_TRIANGLE_PX for the coarse global map; the main
+   pass's target for cascades, so casters are the very mesh that receives),
+   culled against the light's projection * view instead of the camera
+   frustum and without the camera horizon cull, and no finer than
+   minSpacing (m) between vertices: detail below a shadow texel only costs
+   time. cullNear = 0 keeps nodes up-sun of the light box (cascades clamp
+   them onto its near plane, where they still cast). */
+void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, double minSpacing,
+                                double trianglePx, int cullNear);
 
 /* The split rule's K for a LOD target of trianglePx (px per triangle edge)
    at the current window height: a node of width W splits while the camera
