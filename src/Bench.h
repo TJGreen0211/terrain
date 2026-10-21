@@ -39,6 +39,9 @@ int Bench_FixedWindowSize(int *w, int *h);
    Bodies_Update() (it reads the earth's position). No-op when not benching. */
 void Bench_UpdateCamera(void);
 double Bench_SimTimeStart(void);
+/* The sim clock for the current frame: start + frame time x SIM_TIME_SCALE
+   x the scene's 'timescale' (0 freezes the bodies). */
+double Bench_SimTime(void);
 
 /* Capture any PNG requested for the current frame. Call after the scene
    resolve blit, before the UI draws. No-op when not benching. */

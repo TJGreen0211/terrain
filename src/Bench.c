@@ -22,6 +22,7 @@
 #include <stb_image_write.h>
 
 void testSetSurfaceRadius(float r);
+double Earth_GroundRadius(dvec3 worldDir, double capAngle);   /* Main.c */
 
 #define MAX_KEYS 128
 #define MAX_SHOTS 16
@@ -41,12 +42,16 @@ static char shotDir[512] = "../bench/cand";
 static int viewSurface;           /* 0 orbit, 1 surface preset */
 static int pivotSubsolar;
 static double pivotOff, phaseDeg, simStart;
+static int pivotGround;           /* poff ground: pivotOff is above the terrain */
+static double timeScale = 1.0;
 static PoseKey keys[MAX_KEYS]; static int nKeys;
 static AltKey akeys[MAX_KEYS];  static int nAKeys;
 static long shots[MAX_SHOTS];   static int nShots;
 static int winW = 1280, winH = 720;
 
 static long leavesMax; static int levelMax;
+/* Quadtree walk totals over the run (CPU ms, nodes visited / built). */
+static double walkMsSum, nodesSum, builtSum;
 
 /* ---------------- clock ---------------- */
 
@@ -115,11 +120,16 @@ static int loadScene(const char *path)
 			sscanf(line, "%*s %63s", v);
 			pivotSubsolar = strcmp(v, "subsolar") == 0;
 		} else if (strcmp(tok, "poff") == 0) {
-			sscanf(line, "%*s %lf", &pivotOff);
+			char v[64] = "";
+			sscanf(line, "%*s %63s", v);
+			pivotGround = strcmp(v, "ground") == 0;
+			sscanf(line, pivotGround ? "%*s %*s %lf" : "%*s %lf", &pivotOff);
 		} else if (strcmp(tok, "phase") == 0) {
 			sscanf(line, "%*s %lf", &phaseDeg);
 		} else if (strcmp(tok, "frames") == 0) {
 			sscanf(line, "%*s %ld", &sceneFrames);
+		} else if (strcmp(tok, "timescale") == 0) {
+			sscanf(line, "%*s %lf", &timeScale);
 		} else if (strcmp(tok, "simtime") == 0) {
 			sscanf(line, "%*s %lf", &simStart);
 		} else if (strcmp(tok, "key") == 0 && nKeys < MAX_KEYS) {
@@ -220,6 +230,7 @@ void Bench_ParseArgs(int argc, char *argv[])
 int Bench_Active(void) { return active; }
 long Bench_Frame(void) { return frame; }
 double Bench_SimTimeStart(void) { return simStart; }
+double Bench_SimTime(void) { return simStart + (double)frame * BENCH_DT * SIM_TIME_SCALE * timeScale; }
 
 int Bench_FixedWindowSize(int *w, int *h)
 {
@@ -259,7 +270,10 @@ void Bench_UpdateCamera(void)
 		u.x = cos(el) * (cos(phi) * east.x + sin(phi) * dir.x);
 		u.y = sin(el);
 		u.z = cos(el) * (cos(phi) * east.z + sin(phi) * dir.z);
-		pivot = daddvec3(e->position, dscalarvec3(dir, e->radius + pivotOff));
+		/* poff ground: from the highest terrain within ~1 km instead of
+		   sea level (use with timescale 0, or the ground slides under). */
+		double base = pivotGround ? Earth_GroundRadius(dir, 1000.0 / e->radius) : e->radius;
+		pivot = daddvec3(e->position, dscalarvec3(dir, base + pivotOff));
 		setCameraPivot(pivot);
 		benchSetOrbitEyeDir(u.x, u.y, u.z, (float)dist);
 		return;
@@ -294,6 +308,9 @@ int Bench_NoteFrame(void)
 	if (!active) return 0;
 	if (g_qtStats.leaves > leavesMax) leavesMax = g_qtStats.leaves;
 	if (g_qtStats.maxLevel > levelMax) levelMax = g_qtStats.maxLevel;
+	walkMsSum += g_qtStats.walkMs;
+	nodesSum += g_qtStats.nodes;
+	builtSum += g_qtStats.built;
 	frame++;
 	return frame >= totalFrames;
 }
@@ -301,16 +318,18 @@ int Bench_NoteFrame(void)
 void Bench_Finalize(void)
 {
 	if (!active) return;
-	double simEnd = simStart + (double)frame * BENCH_DT * SIM_TIME_SCALE;
+	double simEnd = Bench_SimTime();
 	const char *renderer = (const char *)glGetString(GL_RENDERER);
 	const char *version = (const char *)glGetString(GL_VERSION);
 	char extra[1024];
 	snprintf(extra, sizeof extra,
 	         "\"width\":%d,\"height\":%d,\"renderer\":\"%s\",\"glVersion\":\"%s\","
 	         "\"framesRun\":%ld,\"simTimeStart\":%.1f,\"simTimeEnd\":%.1f,"
-	         "\"leavesMax\":%ld,\"maxLevel\":%d",
+	         "\"leavesMax\":%ld,\"maxLevel\":%d,"
+	         "\"walkMsAvg\":%.3f,\"nodesAvg\":%.0f,\"builtAvg\":%.0f",
 	         winW, winH, renderer ? renderer : "?", version ? version : "?",
-	         frame, simStart, simEnd, leavesMax, levelMax);
+	         frame, simStart, simEnd, leavesMax, levelMax,
+	         walkMsSum / fmax(frame, 1), nodesSum / fmax(frame, 1), builtSum / fmax(frame, 1));
 	if (Prof_WriteJson(outPath, sceneName, extra))
 		fprintf(stderr, "[bench] wrote %s\n", outPath);
 	else

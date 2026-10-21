@@ -482,6 +482,20 @@ static void terrainViewRange(const Body *earth, double *nearest, double *farthes
 	*farthest = sqrt(fmax(d * d - R * R, 0.0)) + sqrt(fmax(top * top - R * R, 0.0));
 }
 
+/* Radius (m) of the highest terrain within capAngle of a world direction,
+   detail noise included: Bench.c's 'poff ground'. */
+double Earth_GroundRadius(dvec3 worldDir, double capAngle)
+{
+	const Body *earth = &g_bodies[BODY_EARTH];
+	double w[3] = { worldDir.x, worldDir.y, worldDir.z }, dl[3];
+	const double (*m)[4] = earth->rotation.m;
+	for (int j = 0; j < 3; j++)
+		dl[j] = m[0][j] * w[0] + m[1][j] * w[1] + m[2][j] * w[2];
+	float lo, hi;
+	TerrainGen_HeightRange(dl, capAngle, 0.0, &lo, &hi);
+	return earth->radius * (1.0 + fmax(reliefOf(hi), 0.0)) + TerrainDetail_Amplitude(earth->radius);
+}
+
 /* QuadTree_ReliefFn for Earth's land + seafloor (quad.vert, depth.vert):
    the terrain the shaders can place over the cap, same mip selection (the
    coarsest any vertex there uses, at maxDist: the pyramid range at a mip
@@ -1191,7 +1205,7 @@ int main(int argc, char *argv[])
 		   first frame after loading, a re-bake) does not jump hours ahead.
 		   Bench runs pin simTime to the frame index: repeatable lighting. */
 		if (Bench_Active())
-			simTime = Bench_SimTimeStart() + (double)Bench_Frame() * (1.0 / 60.0) * SIM_TIME_SCALE;
+			simTime = Bench_SimTime();
 		else if (!getRotationPaused())
 			simTime += fmin(deltaTime, 0.1) * SIM_TIME_SCALE;
 		Bodies_Update(simTime);

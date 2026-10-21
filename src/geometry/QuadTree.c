@@ -49,10 +49,6 @@ typedef struct qtInstance {
 	int addr[4];          /* face, level, x, y: terrain detail lattice (detail.glsl) */
 } qtInstance;
 
-typedef struct qtNode {
-	int level, x, y;
-} qtNode;
-
 static qtInstance instances[QT_INSTANCE_CAP];
 static int instanceCount;
 
@@ -314,23 +310,92 @@ static double skirtDrop(double range, double hi, double seam, double width, doub
 	return fmin(drop, QT_SKIRT_MAX * (1.0 + hi));
 }
 
-/* Appends the instance for a leaf: its four sphere corners in double,
+/* ---- Shared LOD tree ------------------------------------------------------
+   The split rule depends only on the camera, so every walk of a body at the
+   same LOD target (the main pass, each shadow cascade) refines the same tree
+   and differs only in what it culls and how deep it may go. The tree is
+   built lazily: a node's footprint, relief bounds, skirt and split decision
+   are computed the first time any walk reaches it, then reused by the
+   others. It lives until its inputs change (in practice every frame, as the
+   camera moves; QuadTree_BeginFrame also drops it, so live relief edits
+   take effect). */
+
+typedef struct qtTreeNode {
+	int f, level, x, y;
+	int built;              /* bounds below computed */
+	int empty;              /* relief: nothing drawn over the footprint */
+	int split;              /* the split rule wants children (before a walk's maxLevel) */
+	int child;              /* first of 4 consecutive children, -1 = not created */
+	int inst;               /* leafCache index, -1 = not built */
+	double skirt;           /* body radii */
+	dvec3 s;                /* frustum sphere centre, camera-relative */
+	double bound;           /* and radius */
+	dvec3 up;               /* footprint centre direction (world) */
+	double capAngle, rTop;  /* horizon test */
+} qtTreeNode;
+
+#define QT_TREE_CAP 65536
+static qtTreeNode tree[QT_TREE_CAP];
+static int treeCount;
+static qtInstance leafCache[QT_TREE_CAP];
+static int leafCount;
+
+/* What the tree depends on: walks with equal keys share it. */
+typedef struct qtTreeKey {
+	dmat4 model;
+	double radius, trianglePx, detailAmp, detailSeam;
+	QuadTree_ReliefFn relief;
+	float windowHeight;
+} qtTreeKey;
+static qtTreeKey treeKey;
+static int treeValid;
+
+static void initTreeNode(qtTreeNode *c, int f, int level, int x, int y)
+{
+	c->f = f; c->level = level; c->x = x; c->y = y;
+	c->built = 0;
+	c->child = -1;
+	c->inst = -1;
+}
+
+static void useTree(const QuadTree_Body *body, double trianglePx)
+{
+	qtTreeKey k;
+	memset(&k, 0, sizeof k);   /* padding too: keys compare with memcmp */
+	k.model = body->model;
+	k.radius = body->radius;
+	k.trianglePx = trianglePx;
+	k.detailAmp = body->detailAmp;
+	k.detailSeam = body->detailSeam;
+	k.relief = body->relief;
+	k.windowHeight = getWindowHeight();
+	if(treeValid && memcmp(&k, &treeKey, sizeof k) == 0)
+		return;
+	treeKey = k;
+	treeValid = 1;
+	leafCount = 0;
+	for(int f = 0; f < 6; f++)
+		initTreeNode(&tree[f], f, 0, 0, 0);
+	treeCount = 6;
+}
+
+/* Fills in a leaf instance: its four sphere corners in double,
    camera-relative, then downcast (shaders/patch.glsl rebuilds the surface
    from them), and its skirt drop (body radii). */
-static void emitLeaf(const dmat4 *model, int f, const qtNode *nd, double skirt)
+static void buildLeaf(qtInstance *inst, const dmat4 *model, const qtTreeNode *c)
 {
-	qtInstance *inst = &instances[instanceCount++];
-	double size = ldexp(1.0, -nd->level);
+	int f = c->f;
+	double size = ldexp(1.0, -c->level);
 
 	for(int i = 0; i < 4; i++) {
-		dvec3 c = spherePoint(model, cubePoint(f, nd->level, nd->x + (i & 1), nd->y + (i >> 1)));
-		inst->corner[i][0] = (float)c.x;
-		inst->corner[i][1] = (float)c.y;
-		inst->corner[i][2] = (float)c.z;
+		dvec3 p = spherePoint(model, cubePoint(f, c->level, c->x + (i & 1), c->y + (i >> 1)));
+		inst->corner[i][0] = (float)p.x;
+		inst->corner[i][1] = (float)p.y;
+		inst->corner[i][2] = (float)p.z;
 		inst->corner[i][3] = 0.0f;
 	}
-	inst->corner[0][3] = (float)skirt;
-	dvec3 q0 = cubePoint(f, nd->level, nd->x, nd->y);
+	inst->corner[0][3] = (float)c->skirt;
+	dvec3 q0 = cubePoint(f, c->level, c->x, c->y);
 	inst->q0[0] = (float)q0.x;
 	inst->q0[1] = (float)q0.y;
 	inst->q0[2] = (float)q0.z;
@@ -342,31 +407,35 @@ static void emitLeaf(const dmat4 *model, int f, const qtNode *nd, double skirt)
 		inst->ev[k] = (float)(faceB[f][k] * size);
 	}
 	inst->addr[0] = f;
-	inst->addr[1] = nd->level;
-	inst->addr[2] = nd->x;
-	inst->addr[3] = nd->y;
+	inst->addr[1] = c->level;
+	inst->addr[2] = c->x;
+	inst->addr[3] = c->y;
 }
 
-/* Visits one node: 0 = culled, 1 = leaf, 2 = split. Bounds come from the
-   node's footprint on the unit sphere (body-local, exact in double) and the
-   body's relief over it:
+/* Computes a tree node's bounds from its footprint on the unit sphere
+   (body-local, exact in double) and the body's relief over it:
    - frustum: a sphere around the node's height shell;
    - horizon: the node's highest point against the occluder;
    - split: distance to the node's vertical extent (so standing on a
      mountain refines the mountain), against K node widths. */
-static int visitNode(const qtWalk *w, int f, const qtNode *nd, int canSplit, double *skirt)
+static void buildNode(const qtWalk *w, qtTreeNode *c)
 {
 	const QuadTree_Body *b = w->body;
 	double R = w->radius;
-	double cell = ldexp(1.0, -nd->level);
+	double cell = ldexp(1.0, -c->level);
+	int f = c->f;
+
+	c->built = 1;
+	c->empty = 0;
+	c->split = 0;
 
 	/* Footprint: centre direction, corner directions, cap and width. */
-	dvec3 qc = cubePoint(f, nd->level, nd->x + 0.5, nd->y + 0.5);
+	dvec3 qc = cubePoint(f, c->level, c->x + 0.5, c->y + 0.5);
 	dvec3 nc = normd(qc);
 	dvec3 n[4];
 	double chord = 0.0;
 	for(int i = 0; i < 4; i++) {
-		n[i] = normd(cubePoint(f, nd->level, nd->x + (i & 1), nd->y + (i >> 1)));
+		n[i] = normd(cubePoint(f, c->level, c->x + (i & 1), c->y + (i >> 1)));
 		chord = fmax(chord, dlengthvec3(dsubvec3(n[i], nc)));
 	}
 	double capAngle = 2.0 * asin(fmin(0.5 * chord, 1.0));
@@ -381,8 +450,10 @@ static int visitNode(const qtWalk *w, int f, const qtNode *nd, int canSplit, dou
 	double lo = 0.0, hi = 0.0;
 	if(b->relief) {
 		b->relief(dirv, capAngle, cell, maxDist, &lo, &hi);
-		if(lo > hi)
-			return 0;   /* nothing drawn over this footprint */
+		if(lo > hi) {
+			c->empty = 1;   /* nothing drawn over this footprint */
+			return;
+		}
 	}
 	/* Terrain detail on land (relief > 0): up to detailAmp either way, but
 	   never below sea level (detail.glsl's coastal envelope). */
@@ -393,77 +464,95 @@ static int visitNode(const qtWalk *w, int f, const qtNode *nd, int canSplit, dou
 		hi += b->detailAmp;
 		seam = b->detailSeam * width / R;
 	}
-	*skirt = skirtDrop(range, hi, seam, width, R);
-	double loS = lo - *skirt;
+	c->skirt = skirtDrop(range, hi, seam, width, R);
+	double loS = lo - c->skirt;
 
-	/* Frustum: sphere around the shell [R(1+loS), R(1+hi)] over the cap. A
+	/* Frustum sphere around the shell [R(1+loS), R(1+hi)] over the cap. A
 	   point at radius r, angle a from the centre line, lies within
 	   sqrt((r - mid)^2 + r*mid*chord^2) of the mid point. */
 	double mid = R * (1.0 + 0.5 * (loS + hi));
-	double rTop = R * (1.0 + hi);
+	c->rTop = R * (1.0 + hi);
 	double half = 0.5 * R * (hi - loS);
-	double bound = sqrt(half*half + rTop * mid * chord * chord);
-	dvec3 s = daddvec3(w->center, dscalarvec3(up, mid));
+	c->bound = sqrt(half*half + c->rTop * mid * chord * chord);
+	c->s = daddvec3(w->center, dscalarvec3(up, mid));
+	c->up = up;
+	c->capAngle = capAngle;
+
+	/* Closest point of the node's vertical extent through its centre. */
+	double t = fmax(fmin(-dotd(w->center, up), R * (1.0 + hi)), R * (1.0 + lo));
+	double dist = dlengthvec3(daddvec3(w->center, dscalarvec3(up, t)));
+	c->split = dist < w->splitK * width;
+}
+
+/* 1 if this walk culls the node: outside its frustum, or (main pass) past
+   the horizon. */
+static int culled(const qtWalk *w, const qtTreeNode *c)
+{
 	for(int p = 0; p < 6; p++) {
 		if(p == 4 && !w->cullNear)
 			continue;   /* near plane (row 3 + row 2) */
 		const double *pl = w->frustum[p];
-		if(pl[0]*s.x + pl[1]*s.y + pl[2]*s.z + pl[3] < -bound)
-			return 0;
+		if(pl[0]*c->s.x + pl[1]*c->s.y + pl[2]*c->s.z + pl[3] < -c->bound)
+			return 1;
 	}
-
 	if(w->useHorizon) {
-		double cosA = fmax(fmin(dotd(up, w->camDir), 1.0), -1.0);
+		double cosA = fmax(fmin(dotd(c->up, w->camDir), 1.0), -1.0);
 		double limit = acos(fmin(w->occluder / w->camDist, 1.0))
-		             + acos(fmin(w->occluder / rTop, 1.0));
-		if(acos(cosA) - capAngle > limit)
-			return 0;
+		             + acos(fmin(w->occluder / c->rTop, 1.0));
+		if(acos(cosA) - c->capAngle > limit)
+			return 1;
 	}
-
-	if(canSplit && nd->level < w->maxLevel) {
-		/* Closest point of the node's vertical extent through its centre. */
-		double t = fmax(fmin(-dotd(w->center, up), R * (1.0 + hi)), R * (1.0 + lo));
-		double dist = dlengthvec3(daddvec3(w->center, dscalarvec3(up, t)));
-		if(dist < w->splitK * width)
-			return 2;
-	}
-	return 1;
+	return 0;
 }
 
-/* One frame's quadtree walk over a single face (breadth first): appends
-   the visible leaf instances (split parents and culled nodes emit
-   nothing). */
+/* One walk over a single face of the shared tree (breadth first, creating
+   and building nodes on first use): appends the visible leaf instances
+   (split parents and culled nodes emit nothing). */
 static void traverseFace(const qtWalk *w, int f)
 {
-	static qtNode nodes[QT_NODE_CAP];
+	static int queue[QT_NODE_CAP];
 
-	nodes[0].level = 0; nodes[0].x = 0; nodes[0].y = 0;
+	queue[0] = f;   /* the face's root */
 	int numNodes = 1;
 
 	for(int k = 0; k < numNodes; k++) {
-		const qtNode *nd = &nodes[k];
+		qtTreeNode *c = &tree[queue[k]];
+		if(!c->built) {
+			buildNode(w, c);
+			g_qtStats.built++;
+		}
+		g_qtStats.nodes++;
+		if(c->empty || culled(w, c))
+			continue;
+
 		/* Room for this node's children, and for every node already
 		   queued to become a leaf. */
 		int canSplit = numNodes + 4 <= QT_NODE_CAP
-		            && instanceCount + (numNodes - k) + 4 <= QT_INSTANCE_CAP;
-		double skirt;
-		int v = visitNode(w, f, nd, canSplit, &skirt);
-		g_qtStats.nodes++;
-		if(v == 0)
-			continue;
-		if(v == 2) {
-			for(int j = 0; j < 4; j++) {
-				qtNode *child = &nodes[numNodes++];
-				child->level = nd->level + 1;
-				child->x = 2*nd->x + (j & 1);
-				child->y = 2*nd->y + (j >> 1);
+		            && instanceCount + (numNodes - k) + 4 <= QT_INSTANCE_CAP
+		            && (c->child >= 0 || treeCount + 4 <= QT_TREE_CAP);
+		if(canSplit && c->split && c->level < w->maxLevel) {
+			if(c->child < 0) {
+				c->child = treeCount;
+				for(int j = 0; j < 4; j++)
+					initTreeNode(&tree[treeCount + j], f, c->level + 1,
+					             2*c->x + (j & 1), 2*c->y + (j >> 1));
+				treeCount += 4;
 			}
+			for(int j = 0; j < 4; j++)
+				queue[numNodes++] = c->child + j;
 			continue;
 		}
 		if(instanceCount < QT_INSTANCE_CAP) {
-			emitLeaf(&w->body->model, f, nd, skirt);
-			if(nd->level > g_qtStats.maxLevel)
-				g_qtStats.maxLevel = nd->level;
+			if(c->inst < 0 && leafCount < QT_TREE_CAP) {
+				c->inst = leafCount++;
+				buildLeaf(&leafCache[c->inst], &w->body->model, c);
+			}
+			if(c->inst >= 0)
+				instances[instanceCount++] = leafCache[c->inst];
+			else
+				buildLeaf(&instances[instanceCount++], &w->body->model, c);
+			if(c->level > g_qtStats.maxLevel)
+				g_qtStats.maxLevel = c->level;
 		}
 	}
 }
@@ -514,6 +603,7 @@ static void walkFaces(const QuadTree_Body *body, mat4 viewProj, int useHorizon, 
 
 	qtWalk w;
 	buildWalk(&w, body, viewProj, useHorizon, cullNear, minSpacing, trianglePx);
+	useTree(body, trianglePx);
 	instanceCount = 0;
 	for(int f = 0; f < 6; f++)
 		traverseFace(&w, f);
@@ -568,6 +658,7 @@ static void drawPatches(void)
 void QuadTree_BeginFrame(void)
 {
 	lastValid = 0;
+	treeValid = 0;
 	memset(&g_qtStats, 0, sizeof g_qtStats);
 }
 

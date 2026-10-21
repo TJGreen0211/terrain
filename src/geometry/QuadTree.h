@@ -84,6 +84,7 @@ typedef struct QuadTree_Stats {
 	int walks;       /* walks run (cached redraws excluded) */
 	int leaves;      /* drawn patches */
 	int nodes;       /* nodes visited */
+	int built;       /* nodes whose bounds were computed (walks share them) */
 	int maxLevel;    /* deepest drawn level */
 	double walkMs;   /* CPU time of the walks */
 } QuadTree_Stats;

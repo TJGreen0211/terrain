@@ -165,7 +165,7 @@ static void cameraSection(void)
 	/* Totals over this frame's walks (shadow casters, moon, planet, water). */
 	groupLabel("Terrain LOD (frame)");
 	nk_layout_row_dynamic(ctx, rowHeight, 1);
-	nk_labelf(ctx, NK_TEXT_LEFT, "Patches: %d   nodes: %d", g_qtStats.leaves, g_qtStats.nodes);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Patches: %d   nodes: %d (%d built)", g_qtStats.leaves, g_qtStats.nodes, g_qtStats.built);
 	nk_labelf(ctx, NK_TEXT_LEFT, "Deepest level: %d", g_qtStats.maxLevel);
 	nk_labelf(ctx, NK_TEXT_LEFT, "Walks: %d   CPU: %.2f ms", g_qtStats.walks, g_qtStats.walkMs);
 }
