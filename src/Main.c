@@ -11,6 +11,7 @@
 #include "WorldConfig.h"
 #include "Bodies.h"
 #include "Profiler.h"
+#include "Bench.h"
 /* TEMP-PROF */ #define STB_IMAGE_WRITE_IMPLEMENTATION
 /* TEMP-PROF */ #include <stb_image_write.h>
 /* TEMP-PROF */ void testSetSurfaceRadius(float r);
@@ -521,7 +522,7 @@ void setBodyUniforms(GLuint shader, float lodRadius, mat4 m, vec4 lightPosition,
 	glUniform1f(glGetUniformLocation(shader, "waveNormalStrength"), g_waveParams[2]);
 	glUniform1f(glGetUniformLocation(shader, "waveTiling"), g_waveParams[3]);
 	glUniform1f(glGetUniformLocation(shader, "waveChoppy"), g_waveParams[4]);
-	glUniform1f(glGetUniformLocation(shader, "time"), glfwGetTime()/100.0);
+	glUniform1f(glGetUniformLocation(shader, "time"), (float)(App_Time()/100.0));
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, tex0);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
@@ -677,7 +678,7 @@ void draw(GLuint vao, GLuint shader, int vertices, GLuint texture, GLuint normal
 	// is exactly the origin.
 	glUniform3f(glGetUniformLocation(shader, "cameraPos"), 0.0f, 0.0f, 0.0f);
 	glUniform3f(glGetUniformLocation(shader, "lightPosition"), lightPosition.x, lightPosition.y, lightPosition.z);
-	glUniform1f(glGetUniformLocation(shader, "time"), glfwGetTime()/100.0);
+	glUniform1f(glGetUniformLocation(shader, "time"), (float)(App_Time()/100.0));
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glUniform1i(glGetUniformLocation(shader, "texture1"), 0);
@@ -931,6 +932,7 @@ int main(int argc, char *argv[])
 		if(slash) *slash = '\0';
 		chdir(exePath);
 	}
+	Bench_ParseArgs(argc, argv);
 	GLFWwindow *window = setupGLFW();
 	if (window == NULL)
     {
@@ -950,6 +952,8 @@ int main(int argc, char *argv[])
 		glfwTerminate();
 		return -1;
 	}
+	if (Bench_Active())
+		glfwSwapInterval(0);   /* no vsync: frames run as fast as they can */
 
 	// Show the loading screen before the first blocking load, so the window
 	// never sits blank/unresponsive while shaders compile, textures and models
@@ -986,6 +990,8 @@ int main(int argc, char *argv[])
 	   the instance matrix at 4-7). */
 	QuadTree_InitGL();
 	Prof_Init();
+	if (Bench_Active())
+		Prof_EnableRawRecording();
 	LoadingScreen_Step();
 
 	initSun();
@@ -1119,19 +1125,23 @@ int main(int argc, char *argv[])
 		generateWaves(&ocean);
 		Prof_End(PROF_WAVES);
 
-		GLfloat currentFrame = glfwGetTime();
+		GLfloat currentFrame = (GLfloat)App_Time();
 		deltaTime = currentFrame - lastFrame;
 		lastFrame = currentFrame;
 		doMovement(deltaTime);
 
 		/* Advance the bodies (R pauses). The step is capped so a hitch (the
-		   first frame after loading, a re-bake) does not jump hours ahead. */
-		if (!getRotationPaused())
+		   first frame after loading, a re-bake) does not jump hours ahead.
+		   Bench runs pin simTime to the frame index: repeatable lighting. */
+		if (Bench_Active())
+			simTime = Bench_SimTimeStart() + (double)Bench_Frame() * (1.0 / 60.0) * SIM_TIME_SCALE;
+		else if (!getRotationPaused())
 			simTime += fmin(deltaTime, 0.1) * SIM_TIME_SCALE;
 		/* TEMP-PROF */ if (getenv("QT_TEST_SIMTIME")) simTime = atof(getenv("QT_TEST_SIMTIME"));
 		/* TEMP-PROF */ if (getenv("QT_TEST_NODETAIL")) g_terrainDetail = 0;
 		/* TEMP-PROF */ if (getenv("QT_TEST_FINDLAND")) { static double found = -1.0; double want = atof(getenv("QT_TEST_FINDLAND")); if (found < 0.0) { for (double t = 0.0; t < 86164.0 && found < 0.0; t += 120.0) { Bodies_Update(t); double a = (SUN_ORBIT_PHASE_DEG + (getenv("QT_TEST_PHASE") ? atof(getenv("QT_TEST_PHASE")) : 0.0)) * M_PI / 180.0, w[3] = { cos(a), 0.0, sin(a) }, dl[3]; for (int j = 0; j < 3; j++) dl[j] = g_bodies[BODY_EARTH].rotation.m[0][j]*w[0] + g_bodies[BODY_EARTH].rotation.m[1][j]*w[1] + g_bodies[BODY_EARTH].rotation.m[2][j]*w[2]; float lo, hi; TerrainGen_HeightRange(dl, 0.0, 0.0, &lo, &hi); double r = reliefOf(lo) * g_bodies[BODY_EARTH].radius; if (r > want && r < want * 3.0) found = t; } fprintf(stderr, "[prof] land at simtime %.0f\n", found); } simTime = found; }
 		Bodies_Update(simTime);
+		Bench_UpdateCamera();
 		const Body *earth = &g_bodies[BODY_EARTH];
 		const Body *sun = &g_bodies[BODY_SUN];
 		const Body *moon = &g_bodies[BODY_MOON];
@@ -1372,16 +1382,20 @@ int main(int argc, char *argv[])
 			uiLayoutSliders(ww, wh, UI_SLIDER_COUNT);
 		}
 		/* TEMP-PROF */ { static int shot; const char *sp = getenv("QT_TEST_SHOT"); if (sp && !shot && glfwGetTime() > 14.0) { shot = 1; int w = sceneW, h = sceneH; unsigned char *px = malloc((size_t)w * h * 4); glReadBuffer(GL_BACK); glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px); stbi_flip_vertically_on_write(1); stbi_write_png(sp, w, h, 4, px, w * 4); free(px); } }
+		Bench_MaybeCapture();
 		uiDrawAll();
 
 		//Debug panel (F1): drawn last, over the sliders.
 		DebugGUI_Frame();
 		Prof_End(PROF_OVERLAY);
 		Prof_EndFrame();
+		if (Bench_NoteFrame())
+			glfwSetWindowShouldClose(window, GL_TRUE);
 
 		glfwPollEvents();
 		glfwSwapBuffers(window);
 	}
+	Bench_Finalize();
 	DebugGUI_Shutdown();
 	glfwTerminate();
 	return 0;

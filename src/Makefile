@@ -9,6 +9,7 @@ SRCS = Main.c \
 	Rings.c \
 	Bodies.c \
 	Profiler.c \
+	Bench.c \
 	LoadingScreen.c \
 	GUI.c \
 	DebugGUI.c \

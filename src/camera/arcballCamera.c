@@ -211,6 +211,83 @@ static mat4 surfaceViewRotation(void)
     return r;
 }
 
+/* Rotation matrix (rows r0/r1/u, right-handed) -> unit quaternion, inverse
+   of quaternionToRotation's row layout. */
+static quaternion quatFromRows(const float m[4][4])
+{
+    quaternion q;
+    float tr = m[0][0] + m[1][1] + m[2][2];
+    if (tr > 0.0f) {
+        float S = sqrtf(tr + 1.0f) * 2.0f;
+        q.w = 0.25f * S;
+        q.x = (m[2][1] - m[1][2]) / S;
+        q.y = (m[0][2] - m[2][0]) / S;
+        q.z = (m[1][0] - m[0][1]) / S;
+    } else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+        float S = sqrtf(1.0f + m[0][0] - m[1][1] - m[2][2]) * 2.0f;
+        q.w = (m[2][1] - m[1][2]) / S;
+        q.x = 0.25f * S;
+        q.y = (m[0][1] + m[1][0]) / S;
+        q.z = (m[0][2] + m[2][0]) / S;
+    } else if (m[1][1] > m[2][2]) {
+        float S = sqrtf(1.0f + m[1][1] - m[0][0] - m[2][2]) * 2.0f;
+        q.w = (m[0][2] - m[2][0]) / S;
+        q.x = (m[0][1] + m[1][0]) / S;
+        q.y = 0.25f * S;
+        q.z = (m[1][2] + m[2][1]) / S;
+    } else {
+        float S = sqrtf(1.0f + m[2][2] - m[0][0] - m[1][1]) * 2.0f;
+        q.w = (m[1][0] - m[0][1]) / S;
+        q.x = (m[0][2] + m[2][0]) / S;
+        q.y = (m[1][2] + m[2][1]) / S;
+        q.z = 0.25f * S;
+    }
+    return quatNormalize(q);
+}
+
+/* Pose the orbit camera by the unit direction from the pivot to the eye:
+   the orientation is any rotation whose row 2 (the eye direction through
+   getCameraPosition) is exactly u. Used by bench subsolar scenes, where the
+   local "up" is not world +Y. */
+void benchSetOrbitEyeDir(double ux, double uy, double uz, float distMeters)
+{
+    float len = (float)sqrt(ux * ux + uy * uy + uz * uz);
+    if (len < 1e-9f)
+        return;
+    vec3 u = { (float)(ux / len), (float)(uy / len), (float)(uz / len) };
+    vec3 w = fabsf(u.y) > 0.99f ? (vec3){ 0.0f, 0.0f, 1.0f } : (vec3){ 0.0f, 1.0f, 0.0f };
+    vec3 r0 = normalizevec3(crossvec3(w, u));
+    vec3 r1 = crossvec3(u, r0);
+
+    float m[4][4] = { 0 };
+    m[0][0] = r0.x; m[0][1] = r0.y; m[0][2] = r0.z;
+    m[1][0] = r1.x; m[1][1] = r1.y; m[1][2] = r1.z;
+    m[2][0] = u.x;  m[2][1] = u.y;  m[2][2] = u.z;
+    orientation = quatFromRows(m);
+
+    CameraDistance = distMeters;
+    if (CameraDistance < 0.0f)
+        CameraDistance = 0.0f;
+    if (CameraDistance > CameraDistanceMax)
+        CameraDistance = CameraDistanceMax;
+    dragging = 0;
+}
+
+void benchSetOrbitPose(double yawDeg, double pitchDeg, float distMeters)
+{
+    float yr = (float)(yawDeg * M_PI / 180.0);
+    float pr = (float)(pitchDeg * M_PI / 180.0);
+    quaternion qy = { cosf(yr * 0.5f), 0.0f, sinf(yr * 0.5f), 0.0f };
+    quaternion qx = { cosf(pr * 0.5f), sinf(pr * 0.5f), 0.0f, 0.0f };
+    orientation = normalizeOrIdentity(quatMultiply(qx, qy));
+    CameraDistance = distMeters;
+    if (CameraDistance < 0.0f)
+        CameraDistance = 0.0f;
+    if (CameraDistance > CameraDistanceMax)
+        CameraDistance = CameraDistanceMax;
+    dragging = 0;
+}
+
 void toggleSurfaceCamera(void)
 {
     surfaceView = !surfaceView;

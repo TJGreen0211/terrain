@@ -39,4 +39,12 @@ void arcballEnd(void);
 int arcballDragging(void);
 void processMouseScroll(float yoffset);
 
+/* Benchmark path pose: orientation = pitch (world X) * yaw (world Y), orbit
+   radius distMeters, drag state cleared. (See Bench.h scene format.) */
+void benchSetOrbitPose(double yawDeg, double pitchDeg, float distMeters);
+
+/* Benchmark subsolar pose: eye direction from the pivot given as a unit
+   vector, so the pivot's local frame (not world +Y) can drive the camera. */
+void benchSetOrbitEyeDir(double ux, double uy, double uz, float distMeters);
+
 #endif

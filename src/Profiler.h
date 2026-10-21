@@ -27,4 +27,18 @@ const char *Prof_Name(ProfSection s);
 float Prof_CpuMs(ProfSection s);
 float Prof_GpuMs(ProfSection s);
 
+/* Raw per-frame samples for the benchmark harness (off unless enabled):
+   one GPU + CPU millisecond sample per section per frame, plus the frame's
+   wall-clock time. GPU samples whose timer query came back on a disjoint
+   interval are stored as -1. Samples arrive PROF_LAG frames late, so the
+   harness must discard a warm-up window at the head of the run. */
+#define PROF_WARMUP 60
+
+void Prof_EnableRawRecording(void);
+/* Write stats JSON: median/p95/p99 of the raw frame times plus per-pass
+   medians/percentiles, skipping the warm-up frames. extraJson is a JSON
+   fragment (without surrounding braces) appended as extra fields, or NULL.
+   Returns 0 if the file could not be opened. */
+int Prof_WriteJson(const char *path, const char *scene, const char *extraJson);
+
 #endif

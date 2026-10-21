@@ -1,4 +1,5 @@
 #include "Window.h"
+#include "Bench.h"
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -29,11 +30,21 @@ GLFWwindow *setupGLFW() {
 	   4x MSAA float-depth target (Main.c) and is resolved into this one. */
 	glfwWindowHint(GLFW_SAMPLES, 0);
 	
-	/* Initial size: the primary monitor's mode (the only video-mode query). */
-	const GLFWvidmode *mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-	windowWidth = (float)mode->width;
-	windowHeight = (float)mode->height;
-	GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, "Shadows", NULL, NULL);
+	/* Bench runs render into a hidden, fixed-size window: identical
+	   resolution and pixel budget for every build. */
+	int width, height;
+	int benchSize = Bench_FixedWindowSize(&width, &height);
+	if (benchSize)
+		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	else {
+		/* Initial size: the primary monitor's mode (the only video-mode query). */
+		const GLFWvidmode *mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+		width = mode->width;
+		height = mode->height;
+	}
+	windowWidth = (float)width;
+	windowHeight = (float)height;
+	GLFWwindow* window = glfwCreateWindow(width, height, benchSize ? "Bench" : "Shadows", NULL, NULL);
 	if (window == NULL)
 		return NULL;
 	

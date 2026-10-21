@@ -9,6 +9,7 @@
 #include "Water.h"
 #include "Common.h"
 #include "ComplexMath.h"
+#include "Bench.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -363,7 +364,7 @@ static void generateWavesGPU(waves *water) {
 	/* Spectrum at time t into pair 0. */
 	glBindFramebuffer(GL_FRAMEBUFFER, s_pingFBO[0]);
 	glUseProgram(s_specProg);
-	glUniform1f(s_specTime, (float)glfwGetTime());
+	glUniform1f(s_specTime, (float)App_Time());
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, s_h0Tex);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
