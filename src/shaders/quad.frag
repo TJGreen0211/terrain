@@ -120,8 +120,19 @@ uniform float hadleyStrength;
 uniform float riverThreshold;
 uniform float rockSlope;
 
+// Swash on the beaches: the shore waves (shorewaves.glsl, as water.frag)
+// running up the sand. The sea state from the baked wind map (unit 10).
+uniform samplerCube oceanMap;
+uniform float windMax;
+uniform float planetRadiusM;
+uniform float time;
+#include "wavecube.glsl"
+uniform float waveCascadeScales[WAVE_CASCADES];
+#include "seastate.glsl"
+#include "shorewaves.glsl"
+
 float heightAt(vec3 d, float lod) {
-	return planetMapFine(heightMap, d, lod);
+	return planetMapFine(heightMap, d, lod, seaCoastBand());
 }
 
 // Seafloor albedo under the water (which adds its own tint): pale sand on
@@ -133,12 +144,8 @@ vec3 seafloorColor(float e) {
 	return mix(silt, sand, smoothstep(seaLevel * 0.6, seaLevel, e));
 }
 
-// Cheap 3D value noise for colour variation (sampled on the unit sphere).
-float hash13(vec3 p) {
-	p = fract(p * 0.1031);
-	p += dot(p, p.zyx + 31.32);
-	return fract((p.x + p.y) * p.z);
-}
+// Cheap 3D value noise for colour variation (sampled on the unit sphere;
+// hash13 from seastate.glsl).
 float vnoise(vec3 p) {
 	vec3 i = floor(p), f = fract(p);
 	f = f*f*(3.0 - 2.0*f);
@@ -384,6 +391,33 @@ void main()
 		albedo = mix(albedo, sandC, beach);
 		rough = mix(rough, mix(0.75, 0.3, wet), beach);
 
+		// Swash (shorewaves.glsl): each wave's sheet of water running up
+		// the beach and sliding back, the foam on its leading edge, and the
+		// sand it wets. Exposure from the sea state just offshore (the
+		// wind map is the sea's), as water.frag's surf.
+		float sheet = 0.0, swashEdge = 0.0, swashWet = 0.0;
+		float swashOn = coastal * (1.0 - steep);
+		// Cheap reach test first, from the baked slope: the swash needs the
+		// smooth height's own slope (two more height reads), only within
+		// the wet sand's reach of the waterline.
+		float inlandEst = (e - seaLevel) / max(length(grad - dObj * dot(grad, dObj)), 1e-6) * planetRadiusM;
+		float reachMax = SHORE_RUNUP_M * SHORE_WET_REACH * shoreScale() * 1.8;
+		if (oceanRelief > 0.0 && swashOn > 0.0 && e < seaLevel + BEACH_OFF && inlandEst < 2.0 * reachMax) {
+			vec3 Tq = normalize(vec3(-dObj.y, dObj.x, 1e-4));
+			vec3 Bq = normalize(cross(dObj, Tq));
+			vec3 seaward;
+			float inland = -shoreCoast(dObj, h, lod, Tq, Bq, seaward);
+			vec4 seaS = textureLod(oceanMap, normalize(dObj + seaward * (2.0 * planetMapTexel(heightMap))), lod);
+			float strength = mix(0.2, 1.0, smoothstep(0.1, 0.6, seaS.a) * smoothstep(2.0, 8.0, seaS.r * windMax))
+			               * seaIceCalm(dObj) * swashOn;
+			float footS = length(camDir) * lodK * planetMapTexel(heightMap) / graz * planetRadiusM;
+			shoreSwash(max(inland, 0.0), dObj, strength, footS, sheet, swashEdge, swashWet);
+			swashWet *= strength;
+		}
+		// Wet sand: darker and glossier.
+		albedo *= mix(1.0, 0.6, swashWet);
+		rough = mix(rough, 0.3, swashWet);
+
 		vec3 rockC = rockColor * (0.8 + 0.4 * n3);
 		albedo = mix(albedo, rockC, steep);
 		rough = mix(rough, 0.7, steep);
@@ -402,6 +436,12 @@ void main()
 		waterMask = max(lake * wetBasin, river);
 		albedo = mix(albedo, inlandWaterColor, waterMask);
 		rough = mix(rough, 0.06, waterMask);
+		// The swash sheet: a film of water over the sand (its colour stays
+		// the wet sand's), foam on its edge.
+		rough = mix(rough, 0.06, sheet);
+		waterMask = max(waterMask, sheet);
+		albedo = mix(albedo, vec3(0.75, 0.78, 0.80), swashEdge);
+		rough = mix(rough, 0.8, swashEdge);
 
 		// Snow/ice: cold enough and not too steep to hold it; freezes water.
 		float snow = coldness * (1.0 - smoothstep(rockSlope * 1.2, rockSlope * 2.0, slope) * (1.0 - waterMask));

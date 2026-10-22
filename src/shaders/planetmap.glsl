@@ -32,17 +32,26 @@ float planetMapLodBias(vec3 d)
 // ~12 km texels at Earth's size the field it returns is a staircase of
 // ~50 m steps, which drew the coastline (the height field's sea-level
 // contour) as stair steps and broke the shore foam into dots. Below
-// lod 1 this blends the base level's 2x2 texels by hand (textureGather,
-// weights from the face coordinate, GL's cube face table); from lod 1 up
-// the steps are below a pixel and the hardware filter stands. quad.frag
-// and water.frag both read the height through this, so the land and the
-// water discard keep meeting on the same contour.
+// lod 1 this filters the base level's 4x4 texels by hand (four
+// textureGathers, weights from the face coordinate, GL's cube face table);
+// from lod 1 up the steps are below a pixel and the hardware filter stands.
+// quad.frag and water.frag both read the height through this, so the land
+// and the water discard keep meeting on the same contour.
 //
-// The 2x2 block is chosen here and gathered at the exact point between its
+// Catmull-Rom, not bilinear, in texels whose 2x2 block reaches into band
+// (heights; the coast band, seastate.glsl seaCoastBand): it still passes
+// through the texel values, but its slope is continuous. The shore effects
+// measure the distance to the coast as depth / seabed slope, and the
+// bilinear slope jumps at every texel edge, which bent the surf's wave
+// fronts into kinks every ~12 km. Elsewhere the one gather's bilinear
+// result stands (4x cheaper; the choice is per texel and the same in every
+// shader, so the land and water still agree pixel for pixel).
+//
+// Each 2x2 block is chosen here and gathered at the exact point between its
 // texels: gathering at d itself let the hardware's fixed-point coordinate
 // pick a different block than floor() along texel rows and columns, which
 // drew the texel grid as thin dark lines. Blocks stay inside the face (the
-// weights extrapolate the last half texel at a face edge).
+// last texel and a half at a face edge is held flat).
 vec3 planetMapFaceDir(int face, vec2 st)
 {
 	// GL's cube face table, inverted: st = (sc, tc) / |ma| in [-1, 1].
@@ -54,7 +63,7 @@ vec3 planetMapFaceDir(int face, vec2 st)
 	return vec3(-st.x, -st.y, -1.0);
 }
 
-float planetMapFine(samplerCube map, vec3 d, float lod)
+float planetMapFine(samplerCube map, vec3 d, float lod, vec2 band)
 {
 	float hw = textureLod(map, d, lod).r;
 	if (lod >= 1.0)
@@ -79,12 +88,36 @@ float planetMapFine(samplerCube map, vec3 d, float lod)
 	float size = float(textureSize(map, 0).x);
 	// Texel space: texel centres at integers.
 	vec2 uv = (st / ma * 0.5 + 0.5) * size - 0.5;
+	// Bilinear over the 2x2 block around the sample. Gather order:
+	// (i0, j1), (i1, j1), (i1, j0), (i0, j0).
 	vec2 i0 = clamp(floor(uv), vec2(0.0), vec2(size - 2.0));
 	vec2 f = clamp(uv - i0, 0.0, 1.0);
-	// The point midway between texels i0 and i0 + 1, back on the face.
-	vec2 mid = ((i0 + 1.0) / size) * 2.0 - 1.0;
-	// Gather order: (i0, j1), (i1, j1), (i1, j0), (i0, j0).
-	vec4 g = textureGather(map, planetMapFaceDir(face, mid), 0);
-	float hf = mix(mix(g.w, g.z, f.x), mix(g.x, g.y, f.x), f.y);
-	return mix(hf, hw, smoothstep(0.5, 1.0, lod));
+	vec4 g = textureGather(map, planetMapFaceDir(face, ((i0 + 1.0) / size) * 2.0 - 1.0), 0);
+	float lodW = smoothstep(0.5, 1.0, lod);
+	if (min(min(g.x, g.y), min(g.z, g.w)) > band.y || max(max(g.x, g.y), max(g.z, g.w)) < band.x)
+		return mix(mix(mix(g.w, g.z, f.x), mix(g.x, g.y, f.x), f.y), hw, lodW);
+	// Catmull-Rom: the 4x4 block's first texel is o; the sample lies
+	// between texels o + 1 and o + 2.
+	vec2 o = clamp(floor(uv) - 1.0, vec2(0.0), vec2(size - 4.0));
+	vec2 t = clamp(uv - (o + 1.0), 0.0, 1.0);
+	// Catmull-Rom weights for texels o .. o + 3, per axis.
+	vec2 w0 = t * (-0.5 + t * (1.0 - 0.5 * t));
+	vec2 w1 = 1.0 + t * t * (-2.5 + 1.5 * t);
+	vec2 w2 = t * (0.5 + t * (2.0 - 1.5 * t));
+	vec2 w3 = t * t * (-0.5 + 0.5 * t);
+	// Four 2x2 gathers, each at the point midway between its texels (o + 1
+	// and o + 3 in texel units -> face coordinates).
+	vec2 m0 = ((o + 1.0) / size) * 2.0 - 1.0;
+	vec2 m1 = ((o + 3.0) / size) * 2.0 - 1.0;
+	vec4 g00 = textureGather(map, planetMapFaceDir(face, vec2(m0.x, m0.y)), 0);
+	vec4 g10 = textureGather(map, planetMapFaceDir(face, vec2(m1.x, m0.y)), 0);
+	vec4 g01 = textureGather(map, planetMapFaceDir(face, vec2(m0.x, m1.y)), 0);
+	vec4 g11 = textureGather(map, planetMapFaceDir(face, vec2(m1.x, m1.y)), 0);
+	// Rows j = o.y .. o.y + 3, each filtered along x.
+	float r0 = w0.x * g00.w + w1.x * g00.z + w2.x * g10.w + w3.x * g10.z;
+	float r1 = w0.x * g00.x + w1.x * g00.y + w2.x * g10.x + w3.x * g10.y;
+	float r2 = w0.x * g01.w + w1.x * g01.z + w2.x * g11.w + w3.x * g11.z;
+	float r3 = w0.x * g01.x + w1.x * g01.y + w2.x * g11.x + w3.x * g11.y;
+	float hf = w0.y * r0 + w1.y * r1 + w2.y * r2 + w3.y * r3;
+	return mix(hf, hw, lodW);
 }

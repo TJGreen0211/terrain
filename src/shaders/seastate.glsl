@@ -107,6 +107,20 @@ float seaDepthM(float depthT)
 	return oceanRelief * depthT * depthT * planetRadiusM;
 }
 
+// Heights (height-map units) where the shore effects need the smooth
+// height filter (planetmap.glsl planetMapFine): from the deepest water the
+// surf reaches (twice the swell's calm depth, as shorewaves.glsl's gate)
+// to the top of quad.frag's beaches (BEACH_OFF). Needs seaLevel and
+// oceanDepth. Every shader passes this same band, so they all filter the
+// coast alike.
+vec2 seaCoastBand()
+{
+	if (oceanRelief <= 0.0)
+		return vec2(1.0, -1.0);   // no sea: an empty band, plain bilinear
+	float dT = sqrt(2.0 * waveShoreDepths[0] / max(oceanRelief * planetRadiusM, 1e-3));
+	return vec2(seaLevel - dT * oceanDepth, seaLevel + 0.012);
+}
+
 // Amplitude of each cascade (largest first). U: wind speed (m/s), fetchF:
 // 0 in the lee of land to 1 over open ocean (oceanMap), depthT: normalized
 // depth (0 at the coast), gust: seaGust, swellN: seaSwell (1, 1 for the

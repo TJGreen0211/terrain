@@ -1498,6 +1498,7 @@ int main(int argc, char *argv[])
 
 			setBodyUniforms(quadShader, fScale, model, lightPosition,
 			                0, dxWaveTex, 0, 0, 0, 0);
+			setOceanUniforms(quadShader, 10);   /* beach swash exposure */
 			setAtmosphereExtinction(quadShader, atmoInner, &g_atmosphere);
 			Rings_BindReceiver(quadShader);
 			Clouds_BindReceiver(quadShader, activeId);

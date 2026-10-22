@@ -120,23 +120,10 @@ const float WHITECAP_GAIN = 1.5;
 // Displacement Jacobian range over which the shading slope hands over from
 // the plain height field (folded crest, J <= x) to the choppy one (J >= y).
 const vec2 FOLD_J = vec2(0.0, 0.3);
-// Shore foam, in metres from the coastline (depth / seabed slope, from the
-// baked maps). It used to be sized in height-map depth units, so its width
-// on the ground followed the seabed slope: on a gentle shelf the "thin" wet
-// line was a wide glowing ribbon, and the surf bands packed below a pixel
-// apart and aliased into hatching.
-// Swash: the wet foam line where the water meets the beach.
-const float WASH_WIDTH_M = 25.0;
-// Breaking waves: crest lines along the shore within SURF_ZONE_M of it,
-// SURF_SPACING_M apart, rolling shoreward at SURF_SPEED_MPS. These are
-// true-size values; the surf belongs to the swell, so it is drawn at the
-// swell's Wave scale (Froude: lengths x s, speed x sqrt(s)). At true size
-// the bands were below a pixel from any altitude the coast is seen from.
-const float SURF_ZONE_M = 400.0;
-const float SURF_SPACING_M = 60.0;
-const float SURF_SPEED_MPS = 6.0;
-// Mean of the crest band profile (below), what bands below a pixel average to.
-const float SURF_BAND_MEAN = 0.22;
+// Surf water: sand the breaking waves stir up (linear albedo-ish body
+// colour) and how much of the column's clarity it takes.
+const vec3 SURF_SILT_COL = vec3(0.045, 0.075, 0.060);
+const float SURF_SILT_OPACITY = 0.7;
 
 // ---- Sea ice ----
 // Same temperature as quad.frag's land (latitude, planet offset, noise),
@@ -151,6 +138,9 @@ const vec3 ICE_AMBIENT = vec3(0.10, 0.12, 0.16); // quad.frag's ambientSky
 // Per-cascade wave strength over the planet, and the value noise (same as
 // water.vert).
 #include "seastate.glsl"
+// Waves that run in along the coast, break and foam (shared with water.vert
+// and quad.frag's swash).
+#include "shorewaves.glsl"
 
 float erfcApprox(float x)
 {
@@ -283,7 +273,7 @@ void main()
 	float cosLat = max(sqrt(max(1.0 - zc*zc, 1e-4)), 0.02);
 	float graz = max(abs(dot(normalize(localPos), normalize(Vv))), 0.15);
 	float lod = log2(max(length(Vv)*lodK, 1e-4)) - log2(graz) + planetMapLodBias(dObj);
-	float h = planetMapFine(heightMap, dObj, clamp(lod, 0.0, planetMapMaxLod(heightMap)));
+	float h = planetMapFine(heightMap, dObj, clamp(lod, 0.0, planetMapMaxLod(heightMap)), seaCoastBand());
 	float e = clamp(h, 0.0, 1.0);
 	if (e > seaLevel)
 		discard;
@@ -326,6 +316,22 @@ void main()
 	float iceCalm = seaIceCalm(dObj);
 	vec3 gain = waveCascadeGains(depthT, U, fetchF, iceCalm, gust, seaSwell(dObj));
 	vec3 gainS = waveCascadeGains(depthT, U, fetchF, iceCalm, 1.0, 1.0);
+	float footM = pixelAngle * planetRadiusM;
+
+	// Shore waves (shorewaves.glsl), in water shallow enough for the swell
+	// to break: no deeper than about where the FFT swell calms
+	// (seastate.glsl). depth / seabed slope extrapolates a "coast" beside
+	// any underwater rise, and the gate keeps surf off those shoals. Open
+	// sea, most pixels, skips it all. Strongest on windward coasts facing a
+	// long fetch, small on lee shores.
+	ShoreWave sw = ShoreWave(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	vec3 seaward = vec3(0.0);
+	float shoreGate = (1.0 - smoothstep(1.0, 2.0, seaDepthM(depthT) / max(waveShoreDepths[0], 1e-3))) * iceCalm;
+	if (shoreGate > 0.0) {
+		float surfStrength = mix(0.2, 1.0, smoothstep(0.1, 0.6, fetchF) * smoothstep(2.0, 8.0, U));
+		float coastM = shoreCoast(dObj, h, clamp(lod, 0.0, planetMapMaxLod(heightMap)), T, B, seaward);
+		sw = shoreWaves(coastM, dObj, surfStrength * shoreGate, footM);
+	}
 
 	// Wave slopes, summed over the cube faces covering this point
 	// (wavecube.glsl; one face except in the narrow edge bands) and the
@@ -334,14 +340,9 @@ void main()
 	float waveRes = float(textureSize(waveSlope, 0).x);
 	vec3 fw = waveFaceWeights(dObj);
 	float fNorm = waveFaceNorm(fw);
-	// Finest cascade's rms slope (its top mip), to normalize the surf
-	// breakup noise taken from it.
-	vec4 fineMs = textureLod(waveSlope, vec3(0.5, 0.5, float(WAVE_CASCADES - 1)), 16.0);
-	float fineRms = sqrt(max(fineMs.b + fineMs.a, 1e-12));
 	vec3 slope = vec3(0.0);   // body-local surface gradient
 	vec2 S = vec2(0.0);       // slope variance the pixel averages away (east, north)
 	float J = 0.0;            // displacement Jacobian - 1
-	float breakupN = 0.0;     // finest cascade's slope, for the surf crests
 	for (int k = 0; k < 3; k++) {
 		if (fw[k] <= 0.0)
 			continue;
@@ -376,8 +377,6 @@ void main()
 			vec2 vr = max(slTex.ba - slTex.rg * slTex.rg, 0.0) * (Ks * Ks);
 			vec2 r2 = vec2(R[0][0] * R[0][0], R[0][1] * R[0][1]);   // cos^2, sin^2
 			Sq += vec2(r2.x * vr.x + r2.y * vr.y, r2.y * vr.x + r2.x * vr.y);
-			if (c == WAVE_CASCADES - 1)
-				breakupN += fw[k] * (slTex.r + slTex.g) / fineRms;
 		}
 		float jxx = jm[0][0], jzz = jm[1][1], jxz = jm[0][1];
 		// Jacobian of the choppy displacement: < 1 where crests pinch, < 0 folds.
@@ -405,12 +404,12 @@ void main()
 	}
 	slope *= fNorm;
 	J = 1.0 + J * fNorm;
-	breakupN *= fNorm;
+	// The shore waves' slope, along the seaward direction.
+	slope += sw.slope * seaward;
 
 	// Unresolved wind waves: slope variance is spread evenly over log
 	// wavelength (k^-4 height spectrum), so the share below the pixel
 	// footprint is its log position in the wind-wave band.
-	float footM = pixelAngle * planetRadiusM;
 	float unresolved = clamp(log2(footM / WIND_WAVE_MIN_M) / log2(WIND_WAVE_MAX_M / WIND_WAVE_MIN_M), 0.0, 1.0);
 	// Local wind (the baked field, without the gust noise, as gainS): short
 	// wind waves develop within a few km, so fetch only trims the roughness
@@ -424,6 +423,9 @@ void main()
 	vec2 w2 = wdir * wdir;
 	S += unresolved * vec2(coxMunk.x * w2.x + coxMunk.y * w2.y,
 	                       coxMunk.x * w2.y + coxMunk.y * w2.x) + 1e-4;
+	// Shore waves below a pixel, along the seaward axis.
+	vec2 sea2 = vec2(dot(seaward, T), dot(seaward, B));
+	S += sw.slopeVar * sea2 * sea2;
 
 	vec3 Nobj = normalize(dObj - slope);
 	// model is uniform scale * rotation, so inverse(mat3(model)) * n is
@@ -495,6 +497,9 @@ void main()
 	vec3 deepCol = vec3(0.003, 0.015, 0.040);
 	vec3 shallowCol = vec3(0.012, 0.100, 0.130);
 	vec3 waterCol = mix(shallowCol, deepCol, depthT);
+	// Surf: sandy, clouded water where the waves break.
+	waterCol = mix(waterCol, SURF_SILT_COL, sw.turbid * SURF_SILT_OPACITY);
+	transmit *= 1.0 - sw.turbid * SURF_SILT_OPACITY;
 
 	// Hemispheric sky irradiance: the night side of an ocean is lit by the
 	// whole sky dome, not just the sun. Weighted toward shadow so the lit
@@ -523,6 +528,8 @@ void main()
 	// Fast subsurface scattering: sun light through wave crests toward
 	// the viewer (Jensen/Uncharted approximation).
 	float crest = clamp(fWave / 0.008, 0.0, 1.0) * (0.4 + 0.6 * depthT);
+	// Steep shoaling crests glow through too.
+	crest = max(crest, sw.crest);
 	vec3 sssDir = normalize(L + N * 0.3);
 	vec3 sssSun = pow(clamp(dot(V, sssDir), 0.0, 1.0), 3.0) * sunCol;
 	float sssSky = pow(clamp(dot(V, up), 0.0, 1.0), 2.0) * (1.0 - sun) * sky;
@@ -562,43 +569,9 @@ void main()
 	// (radians of the unit sphere per pixel): visible from low altitude,
 	// gone from orbit, where real surf is far below a pixel.
 	float surfVis = 1.0 - smoothstep(2e-5, 1.5e-4, pixelAngle);
-	// Distance to the coastline (m): the depth over the seabed slope, the
-	// slope by differences of the very height samples the depth (and the
-	// land discard) come from, half a texel of their mip apart. Within a
-	// texel the filtered field is near linear, so this is the true distance
-	// to the drawn waterline; the baked slope map disagrees with it inside
-	// texels and left the swash line as a row of dots at texel centres.
-	float hLod = clamp(lod, 0.0, planetMapMaxLod(heightMap));
-	float hEps = 0.5 * planetMapTexel(heightMap) * exp2(hLod);
-	float hE = planetMapFine(heightMap, normalize(dObj + T * hEps), hLod);
-	float hN = planetMapFine(heightMap, normalize(dObj + B * hEps), hLod);
-	float seabed = length(vec2(hE - h, hN - h)) / hEps;
-	float coastM = depth / max(seabed, 1e-6) * planetRadiusM;
-	// Breaking waves roll in parallel to the shore; strongest on windward
-	// coasts facing a long fetch, small on lee shores. The finest cascade
-	// breaks the crest lines up along the coast. Bands closer than ~2 px
-	// fade to their mean instead of aliasing.
-	float surfStrength = smoothstep(0.1, 0.6, fetchF) * smoothstep(2.0, 8.0, U);
-	float surfScale = waveCascadeScales[0];
-	float surfZoneM = SURF_ZONE_M * surfScale;
-	float surfSpacingM = SURF_SPACING_M * surfScale;
-	float surfSpeed = SURF_SPEED_MPS * sqrt(surfScale);
-	float surfZone = 1.0 - smoothstep(0.5 * surfZoneM, surfZoneM, coastM);
-	// Only where the swell can break: water no deeper than about where it
-	// calms (seastate.glsl). depth / slope extrapolates a "coast" beside
-	// any underwater rise, which lit shoals with triangular surf patches
-	// (the bilinear height field's tents) far out from the real shore.
-	surfZone *= 1.0 - smoothstep(1.0, 2.0, seaDepthM(depthT) / max(waveShoreDepths[0], 1e-3));
-	float surfW = fract(coastM / surfSpacingM + fract(time * 100.0 * surfSpeed / surfSpacingM));
-	float crestBand = smoothstep(0.0, 0.06, surfW) * (1.0 - smoothstep(0.06, 0.45, surfW));
-	crestBand = mix(SURF_BAND_MEAN, crestBand, 1.0 - smoothstep(0.25, 0.5, footM / surfSpacingM));
-	float breakup = smoothstep(-0.4, 0.4, breakupN);
-	float surf = crestBand * surfZone * mix(0.15, 1.0, surfStrength) * mix(0.4, 1.0, breakup);
-	// Swash line. Narrower than a pixel, it covers the pixel at its share
-	// of it rather than widening to a full pixel of foam.
-	float washW = max(WASH_WIDTH_M, footM);
-	float wash = (1.0 - smoothstep(0.0, washW, coastM)) * (WASH_WIDTH_M / washW);
-	float shore = clamp(wash * 0.8 + surf, 0.0, 1.0) * surfVis;
+	// Shore whitewater: breaking crests, their trails and the bores, as
+	// foam lace (shorewaves.glsl).
+	float shore = shoreLace(dObj, sw.foam, footM) * surfVis;
 	// Whitecaps: where the waves are resolved, where the choppy
 	// displacement pinches (low Jacobian) in a strong, developed sea; where
 	// they are not (most views at planet scale), the Monahan area fraction.

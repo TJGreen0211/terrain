@@ -45,6 +45,9 @@ uniform float tempOffset;
 uniform float snowTemp;
 // Per-cascade wave strength over the planet (same as water.frag).
 #include "seastate.glsl"
+// Waves running in along the coast (as water.frag).
+uniform float time;
+#include "shorewaves.glsl"
 
 const float PI = 3.14159265359;
 // Mesh spacing in pixels: the water walk keeps triangle edges between
@@ -87,7 +90,7 @@ void main()
 		// coast where the seafloor rises.
 		float mapLod = clamp(log2(max(cell / texel, 1.0)) + planetMapLodBias(p),
 		                     0.0, planetMapMaxLod(heightMap));
-		float th = textureLod(heightMap, p, mapLod).r;
+		float th = planetMapFine(heightMap, p, mapLod, seaCoastBand());
 		float depthT = clamp((seaLevel - th) / max(oceanDepth, 1e-4), 0.0, 1.0);
 		// Sea state (seastate.glsl): waves die out toward the shore (at the
 		// coastline the shell sits exactly at sea level, where the planet's
@@ -95,8 +98,22 @@ void main()
 		// doldrums and lee coasts, heavy seas under the westerlies), vary
 		// with swell trains and gusts, and lie flat under the sea ice.
 		vec4 sea = textureLod(oceanMap, p, mapLod);
+		float iceCalm = seaIceCalm(p);
 		vec3 gain = waveCascadeGains(depthT, sea.r * windMax, sea.a,
-		                             seaIceCalm(p), seaGust(p, cell), seaSwell(p));
+		                             iceCalm, seaGust(p, cell), seaSwell(p));
+		// Shore waves (shorewaves.glsl, gated as water.frag): their crests
+		// lift the shell once the mesh resolves them, close up.
+		float shoreH = 0.0;
+		float shoreGate = (1.0 - smoothstep(1.0, 2.0, seaDepthM(depthT) / max(waveShoreDepths[0], 1e-3))) * iceCalm;
+		if (shoreGate > 0.0) {
+			vec3 T = normalize(vec3(-p.y, p.x, 1e-4));
+			vec3 B = normalize(cross(p, T));
+			vec3 seaward;
+			float coastM = shoreCoast(p, th, mapLod, T, B, seaward);
+			float U = sea.r * windMax;
+			float surfStrength = mix(0.2, 1.0, smoothstep(0.1, 0.6, sea.a) * smoothstep(2.0, 8.0, U));
+			shoreH = shoreWaves(coastM, p, surfStrength * shoreGate, cell * planetRadiusM).height;
+		}
 		// Wave field on the cube faces (wavecube.glsl, as water.frag), one
 		// layer per cascade. The mip matches the vertex spacing, so where a
 		// cascade's patches are far smaller than the mesh (from orbit, all
@@ -134,7 +151,7 @@ void main()
 		float d = h * norm * waveAmp;
 		// Shares the height's units, so choppiness 1 is the physical amount.
 		D *= norm * waveAmp * waveChoppy;
-		disp = p * ((oceanOffset - 1.0) + d * waveGeomScale) + D * waveGeomScale;
+		disp = p * ((oceanOffset - 1.0) + d * waveGeomScale + shoreH / planetRadiusM) + D * waveGeomScale;
 	}
 
 	// Row-vector pipeline convention (p * model), matching quad.vert. The
