@@ -1,0 +1,10 @@
+# Top-down detail pass: 400 km straight above the sub-solar point, slow pan.
+# Finest terrain LOD (full fbm3/water.frag cost per pixel), most vertices
+# displaced, sun near zenith. (Subsolar key yaw 90 = straight above.)
+view orbit
+pivot subsolar
+poff 0
+frames 480
+simtime 0
+key 0   400000 90  0
+key 480 400000 115 0

@@ -1,0 +1,9 @@
+# Mid orbit (~1.4 radii): fast coastline crossings force LOD transitions
+# between sea and land relief and the water shell's land-footprint cull.
+# Day-side sweep across the terminator region.
+view orbit
+pivot earth
+frames 480
+simtime 0
+key 0   8800000 210  8
+key 480 8800000 330  8

@@ -1,0 +1,11 @@
+# Benchmark-harness files the optimizing agent must never edit.
+# Paths are relative to the project root; wildcards allowed.
+# bench.ps1 verifies their SHA-256 against protected.sha256 before running.
+# Seal the manifest once (and after authorized edits) with:
+#   powershell -File bench\bench.ps1 -SealManifest
+bench/bench.ps1
+bench/visual_check.ps1
+bench/protected.txt
+bench/baseline.json
+bench/scenes/*.bench
+bench/reference/*.png

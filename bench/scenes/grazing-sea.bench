@@ -1,0 +1,13 @@
+# Grazing sea pass at the sub-solar point: the pivot sits 200 km inside the
+# planet; the camera rides 1430 km from it at 16 deg of local azimuth, which
+# puts the eye ~195 km above the sea looking ~15 deg below the horizon.
+# Long water passes, max quadtree depth on shell and seabed, full atmosphere
+# dome coverage. (For a subsolar pivot, key yaw = azimuth around the pivot:
+# 0 = east, 90 = straight up; key pitch = elevation toward world +Y.)
+view orbit
+pivot subsolar
+poff -200000
+frames 480
+simtime 0
+key 0   1430000 16 0
+key 480 1430000 40 0

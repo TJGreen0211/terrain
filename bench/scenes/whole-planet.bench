@@ -1,0 +1,9 @@
+# Whole planet from ~3 radii: every face visible, deepest LOD spread,
+# most patches drawn. The CPU-walk + draw-call stress case.
+# Yaw keeps the sunlit hemisphere centered (sun at azimuth 225 deg at t=0).
+view orbit
+pivot earth
+frames 480
+simtime 0
+key 0   19500000 200 15
+key 480 19500000 260 15
