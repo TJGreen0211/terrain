@@ -11,7 +11,7 @@ typedef struct TerrainPyramid TerrainPyramid;
    height field (both shaders must use the identical values or the water
    discard edge drifts off the drawn coastline), its climate and ocean maps
    and its height-bounds pyramid. Filled by generatePlanetHeightmap(); owned
-   by the caller (TerrainGen_FreePlanet). g_planetGen is the active planet:
+   by the caller (TerrainGen_FreePlanet). TerrainGen_GenParams() is the active planet:
    the one the body shaders and the bounds queries below use. */
 typedef struct {
 	float seaLevel;
@@ -44,7 +44,9 @@ typedef struct {
 	TerrainPyramid *pyramid;
 } PlanetGenParams;
 
-extern PlanetGenParams g_planetGen;
+/* The active planet's (SolarSystem.c swaps them, like the style and the
+   bake settings below). */
+PlanetGenParams *TerrainGen_GenParams(void);
 
 /* Surface look + climate response, uploaded to quad.frag every frame. The
    defaults are Earth-like; every field is free to change for alien worlds
@@ -71,10 +73,11 @@ typedef struct {
 	float oceanRelief;
 } PlanetStyle;
 
-extern PlanetStyle g_planetStyle;
+/* Live: uploaded every frame (debug panel). */
+PlanetStyle *TerrainGen_Style(void);
 
 /* Binds the climate map to texture unit `unit` (and the surface map to
-   TERRAIN_SURFACE_UNIT) and uploads g_planetStyle; harmless for shaders
+   TERRAIN_SURFACE_UNIT) and uploads TerrainGen_Style(); harmless for shaders
    that don't declare the uniforms. */
 #define TERRAIN_SURFACE_UNIT 16
 void setPlanetSurfaceUniforms(unsigned int shader, int unit);
@@ -118,7 +121,8 @@ typedef struct {
 	float dropletInertia;  /* 0 = runs straight downhill, 1 = keeps its heading */
 } TerrainBakeSettings;
 
-extern TerrainBakeSettings g_terrainBake;
+/* Bake inputs: edits apply on the next bake (debug panel). */
+TerrainBakeSettings *TerrainGen_BakeSettings(void);
 
 /* Full procedural planet height field bake: GPU shaping (heightbake.frag),
    CPU thermal + hydraulic droplet erosion, percentile normalization, sea
@@ -155,7 +159,7 @@ void TerrainGen_BakeCancel(TerrainBakeJob *job);
    height texture, which generatePlanetHeightmap returns separately). */
 void TerrainGen_FreePlanet(PlanetGenParams *p);
 
-/* Height bounds of the active planet (g_planetGen; raw field units, like
+/* Height bounds of the active planet (TerrainGen_GenParams(); raw field units, like
    seaLevel), for the quadtree's culling and split distances. HeightRange covers every value
    the body shaders can sample over a spherical cap (dir: body-local unit
    centre, capAngle in radians) at mip `lod` or finer, bilinear and

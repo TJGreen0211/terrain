@@ -14,7 +14,8 @@
 /* Baked planet height map (R32F cube map + mips, TerrainGen.c), sampled by
    quad.frag/water.frag instead of evaluating simplex noise per pixel. The
    active planet's (SolarSystem.c swaps it). */
-extern GLuint planetHeightTex;
+GLuint TerrainDraw_HeightTex(void);
+void TerrainDraw_SetHeightTex(GLuint tex);
 
 /* The surface programs: colour, and the depth-only prepass variant. */
 void TerrainDraw_Init(void);

@@ -6,7 +6,7 @@
 
 /* Cloud layers (docs/volumetric-clouds.md). Every planet with air can have
    one; its settings live in PlanetInfo.clouds, and the active planet's in
-   g_clouds (saved and loaded with the other planet globals, edited live from
+   Clouds_Params() (saved and loaded with the other planet globals, edited live from
    the debug panel). Step 1 draws the layer as a slab at its middle altitude:
 
    - Weather maps, per baked planet: coverage and column thickness in the
@@ -43,14 +43,12 @@ typedef struct cloudParams {
 	unsigned int seed;
 } cloudParams;
 
-extern cloudParams g_clouds;
-/* Quality: the slab's detail octaves below the weather map (live, debug
-   panel; starts at CLOUD_SLAB_OCTAVES). Octaves below a pixel cost nothing,
-   so this only matters close to the layer. */
-extern int g_cloudSlabOctaves;
-/* Master switch (debug panel; starts at CLOUDS_ENABLED_DEFAULT). Off drops
-   every planet's weather maps, so nothing is built, drawn or shadowed. */
-extern int g_cloudsEnabled;
+/* The active planet's live cloud layer (SolarSystem.c swaps it; debug
+   panel). The panel also sets the slab's detail octaves (starts at
+   CLOUD_SLAB_OCTAVES) and the master switch (CLOUDS_ENABLED_DEFAULT; off
+   drops every planet's weather maps, so nothing is built, drawn or
+   shadowed). */
+cloudParams *Clouds_Params(void);
 cloudParams cloudDefaults(void);   /* Earth's (WorldConfig.h) */
 const char *Clouds_StyleName(int style);
 
@@ -78,5 +76,9 @@ void Clouds_Draw(mat4 proj, mat4 view, dvec3 cam, int body);
 /* Clouds on body's stand-in (planet_impostor.frag, bound): maps on texture
    units 0 and 1; switched off when body has none. */
 void Clouds_BindStandIn(GLuint shader, int body);
+
+struct nk_context;
+/* The Clouds tab of the debug panel (Clouds.c). */
+void Clouds_DebugPanel(struct nk_context *ctx);
 
 #endif

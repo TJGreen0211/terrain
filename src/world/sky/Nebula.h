@@ -16,7 +16,7 @@
    - near: wisps inside |n| < 1, ray-marched every frame (Nebula_Draw) with
      real parallax, ended at the scene depth.
 
-   Settings: g_nebula (debug panel). The near layer follows them live (its
+   Settings: Nebula_Params() (debug panel). The near layer follows them live (its
    presence grid is rebuilt on change); the far layer on Rebake. */
 
 typedef struct nebulaParams {
@@ -105,14 +105,14 @@ typedef struct nebulaParams {
 	float filTaper;
 } nebulaParams;
 
-extern nebulaParams g_nebula;
-/* Runtime near-layer pass on/off (starts at NEBULA_ENABLE_DEFAULT). */
-extern int g_nebulaEnabled;
+/* The live settings (debug panel; a baked sky set loads its own). */
+nebulaParams *Nebula_Params(void);
+/* Runtime near-layer pass on/off (starts at NEBULA_ENABLE_DEFAULT; debug
+   panel). */
+int Nebula_Enabled(void);
 /* Sky set name: assets/textures/nebula_<name>/ ("" = skybox3). Starts at
    NEBULA_SKY_NAME, or --sky <name>. Also where "Save sky" writes. */
-extern char g_nebulaSkyName[64];
-/* Face size for the debug panel's Rebake (texels). */
-extern int g_nebulaBakeSize;
+const char *Nebula_SkyName(void);
 nebulaParams nebulaDefaults(void);
 
 /* Command line: --bake-sky <name> [--sky-size <n>] [--sky-axes]
@@ -130,7 +130,7 @@ void Nebula_Init(void);
 /* The main pass's depth (Main.c's scene target), as for the dome. */
 void Nebula_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
 
-/* Loads nebula_<name>.txt into g_nebula; 0 if absent. */
+/* Loads nebula_<name>.txt into Nebula_Params(); 0 if absent. */
 int Nebula_LoadParams(const char *name);
 
 /* Per frame, before the scene: rebuilds the presence grid when the near
@@ -146,5 +146,9 @@ GLuint Nebula_SkyTexture(GLuint fallback);
    the atmosphere dome. Premultiplied, no depth test or writes; the caller
    masks the alpha channel (the cloud cover). view: rotation only. */
 void Nebula_Draw(mat4 proj, mat4 view, dvec3 cam);
+
+struct nk_context;
+/* The Nebula tab of the debug panel (Nebula.c). */
+void Nebula_DebugPanel(struct nk_context *ctx);
 
 #endif

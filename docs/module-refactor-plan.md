@@ -327,6 +327,36 @@ A phase is green only when all four checks pass:
 - Move each `DebugGUI.c` section into its module as `X_DebugPanel`.
 - Replace the `extern g_*` globals with `X_Params()` getters.
 - Rename the remaining unprefixed public functions to the `Module_` style.
+- 8a (panels and globals) done 2026-10-22, pixel-identical, 185 warnings (unchanged):
+  - `engine/debug/DebugGUI.c/h` is the generic host. It keeps the built-in
+    Performance tab and registers other tabs with
+    `DebugGUI_AddPanel(title, draw, startup)`. It also has the row helpers
+    (`DebugGUI_Slider`, `_SliderInt`, `_Group`, `_RowLayout`, `_RowHeight`).
+    `engine/debug/nk.h` is the one nuklear include, so every file sees the same
+    `NK_INCLUDE_*` set. The host includes no module headers.
+  - Each module's panel is now `X_DebugPanel`: Solar system, Terrain (in the new
+    `world/terrain/TerrainPanel.c`), Shadows, Atmosphere, Clouds, Nebula and
+    Water. `App.c` registers them in order and keeps a small Camera tab with the
+    altitude readout.
+  - The old Camera tab was split. Its terrain items (the legacy path, detail
+    knobs and LOD stats) moved to Terrain > Detail and LOD, and the cascade
+    items to a new Shadows tab. The empty Lighting placeholder was dropped.
+  - Reset buttons still snapshot on the panel's first frame, through the
+    `startup` hook.
+  - The regenerate and new-system requests are now owned by
+    `Terrain_ConsumeRegenerate` and `SolarSystem_ConsumeNewSystem`.
+  - There are no `extern` globals left in any header:
+    - Tuning goes through `X_Params()`: Atmosphere, Clouds, Water (the 5-float
+      array), Nebula, TerrainDetail, QuadTree, Bodies (`timeScale`,
+      `focusBody`), SolarSystem (`seed`), and TerrainGen `_Style`,
+      `_BakeSettings` and `_GenParams`.
+    - State goes through getters: `Bodies_Get(id)`, `SolarSystem_Info(id)`,
+      `Bodies_SimTime`, `Shadows_Cascades`, `QuadTree_FrameStats`,
+      `Nebula_Enabled`, `Nebula_SkyName`, and
+      `TerrainDraw_HeightTex`/`_SetHeightTex`.
+    - The camera speeds use `Camera_MoveSpeed`/`_SetMoveSpeed` and
+      `_ScrollStep`/`_SetScrollStep`.
+    - Flags used only by their panel are now plain `static`.
 
 **Phase 9 — split `TerrainGen.c`.**
 - Move its code, without changes, into `world/terrain/gen/{cubemap, erosion, climate,

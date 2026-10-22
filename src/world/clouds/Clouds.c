@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
 
 /* Earth's layer (WorldConfig.h). A macro so the static initializer and
    cloudDefaults() share one copy. Colour: a slightly warm white. */
@@ -28,9 +30,14 @@
 	.seed = 1u, \
 }
 
-cloudParams g_clouds = CLOUD_DEFAULTS;
-int g_cloudSlabOctaves = CLOUD_SLAB_OCTAVES;
-int g_cloudsEnabled = CLOUDS_ENABLED_DEFAULT;
+static cloudParams g_clouds = CLOUD_DEFAULTS;
+static int g_cloudSlabOctaves = CLOUD_SLAB_OCTAVES;
+static int g_cloudsEnabled = CLOUDS_ENABLED_DEFAULT;
+
+cloudParams * Clouds_Params(void)
+{
+	return &g_clouds;
+}
 
 cloudParams cloudDefaults(void)
 {
@@ -82,18 +89,18 @@ static double frameTime;
 /* The active planet's state is in the globals; the rest in PlanetInfo. */
 static const cloudParams *paramsFor(int body)
 {
-	return body == SolarSystem_ActiveBody() ? &g_clouds : &g_planetInfo[body].clouds;
+	return body == SolarSystem_ActiveBody() ? &g_clouds : &SolarSystem_Info(body)->clouds;
 }
 
 static const PlanetGenParams *genFor(int body)
 {
-	return body == SolarSystem_ActiveBody() ? &g_planetGen : &g_planetInfo[body].gen;
+	return body == SolarSystem_ActiveBody() ? TerrainGen_GenParams() : &SolarSystem_Info(body)->gen;
 }
 
 static int wantsClouds(int body)
 {
 	const PlanetGenParams *g = genFor(body);
-	return g_cloudsEnabled && g_planetInfo[body].baked && paramsFor(body)->style != CLOUD_STYLE_NONE
+	return g_cloudsEnabled && SolarSystem_Info(body)->baked && paramsFor(body)->style != CLOUD_STYLE_NONE
 	    && g->climateTex && g->oceanTex;
 }
 
@@ -223,7 +230,7 @@ static void buildMap(int body, GLuint tex, double t)
 {
 	const cloudParams *c = paramsFor(body);
 	const PlanetGenParams *g = genFor(body);
-	double R = g_bodies[body].radius;
+	double R = Bodies_Get(body)->radius;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, mapFBO);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
@@ -373,7 +380,7 @@ static void setLayerUniforms(GLuint s, int body, int unitA, int unitB)
 	if (!m->ready)
 		return;
 	const cloudParams *c = paramsFor(body);
-	const Body *b = &g_bodies[body];
+	const Body *b = Bodies_Get(body);
 	bindMaps(s, m, unitA, unitB);
 	/* World -> body-fixed: the transpose of the body's rotation (its
 	   columns are the body axes in world coordinates). Column-major upload:
@@ -409,7 +416,7 @@ static dvec3 toView(mat4 view, dvec3 w)
 /* The first detail octave's wavelength: ~4 map texels at the layer. */
 static double detailLambda0(int body)
 {
-	return 4.0 * 2.0 * M_PI * (g_bodies[body].radius + paramsFor(body)->altitude) / mapW;
+	return 4.0 * 2.0 * M_PI * (Bodies_Get(body)->radius + paramsFor(body)->altitude) / mapW;
 }
 
 /* Detail octaves for body: g_cloudSlabOctaves, fewer where they would go
@@ -439,7 +446,7 @@ static GLuint slabProgram(int octaves)
 static void setSlabUniforms(GLuint s, mat4 proj, mat4 view, dvec3 cam, int body)
 {
 	const cloudParams *c = paramsFor(body);
-	const Body *b = &g_bodies[body];
+	const Body *b = Bodies_Get(body);
 	double R = b->radius, Rc = R + c->altitude;
 	dvec3 rel = dsubvec3(b->position, cam);
 	double d = dlengthvec3(rel);
@@ -465,7 +472,7 @@ static void setSlabUniforms(GLuint s, mat4 proj, mat4 view, dvec3 cam, int body)
 	glUniformMatrix3fv(glGetUniformLocation(s, "viewToWorld"), 1, GL_FALSE, v2w);
 	glUniform3f(glGetUniformLocation(s, "camPlanet"), (float)(-rel.x / R), (float)(-rel.y / R), (float)(-rel.z / R));
 	glUniform1f(glGetUniformLocation(s, "planetRadius"), (float)R);
-	dvec3 toSun = dsubvec3(g_bodies[BODY_SUN].position, b->position);
+	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, b->position);
 	toSun = dscalarvec3(toSun, 1.0 / dlengthvec3(toSun));
 	glUniform3f(glGetUniformLocation(s, "sunDir"), (float)toSun.x, (float)toSun.y, (float)toSun.z);
 	glUniform1f(glGetUniformLocation(s, "sunAngle"), (float)SUN_ANGULAR_RADIUS_RAD);
@@ -484,7 +491,7 @@ static void setSlabUniforms(GLuint s, mat4 proj, mat4 view, dvec3 cam, int body)
 	glUniform1f(glGetUniformLocation(s, "windMax"), WIND_MAP_MAX_MS);
 
 	/* The air (extinction toward the camera, sunlight) and ring shadows. */
-	setAtmosphereExtinction(s, (float)R, &g_atmosphere);
+	setAtmosphereExtinction(s, (float)R, Atmosphere_Params());
 	Rings_BindReceiver(s);
 }
 
@@ -529,4 +536,46 @@ void Clouds_BindStandIn(GLuint shader, int body)
 	glUniform1f(glGetUniformLocation(shader, "cloudDetail"), c->detail);
 	glUniform1f(glGetUniformLocation(shader, "cloudEdge"), cloudEdge(c));
 	glUniform3f(glGetUniformLocation(shader, "cloudColor"), c->color[0], c->color[1], c->color[2]);
+}
+
+/* ---- Debug panel (a tab of the engine/debug/DebugGUI.c window) ---- */
+
+/* The active planet's cloud layer (Clouds.c). Every change rebuilds its
+   weather maps, so dragging a slider costs a couple of map builds a frame. */
+void Clouds_DebugPanel(struct nk_context *ctx)
+{
+	cloudParams *c = &g_clouds;
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	nk_checkbox_label(ctx, "Clouds on (all planets; work in progress)", &g_cloudsEnabled);
+
+	DebugGUI_RowLayout(ctx);
+	nk_label(ctx, "Style", NK_TEXT_LEFT);
+	nk_slider_int(ctx, 0, &c->style, CLOUD_STYLE_COUNT - 1, 1);
+	nk_label(ctx, Clouds_StyleName(c->style), NK_TEXT_RIGHT);
+	DebugGUI_Slider(ctx, "Coverage", &c->coverage, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Climate weight", &c->climateWeight, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Altitude (m)", &c->altitude, 1.0e3f, 3.0e5f, 500.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Thickness (m)", &c->thickness, 500.0f, 1.0e5f, 500.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Opacity (tau)", &c->opacity, 0.5f, 80.0f, 0.5f, "%.1f");
+	DebugGUI_Slider(ctx, "Weather scale", &c->weatherScale, 0.1f, 1.5f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Sharpness", &c->sharpness, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Detail", &c->detail, 0.0f, 0.9f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Bands", &c->bands, 1.0f, 20.0f, 0.5f, "%.1f");
+	/* Written back only when moved: the round trip through days can change
+	   the last bit, and any change rebuilds the maps. */
+	float days = c->flowPeriod / 86400.0f, shown = days;
+	DebugGUI_Slider(ctx, "Flow period (d)", &days, 0.0f, 10.0f, 0.05f, "%.2f");
+	if (days != shown)
+		c->flowPeriod = days * 86400.0f;
+	DebugGUI_Slider(ctx, "Colour red", &c->color[0], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour green", &c->color[1], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour blue", &c->color[2], 0.0f, 1.0f, 0.01f, "%.2f");
+
+	DebugGUI_Group(ctx, "Quality (all planets)");
+	DebugGUI_SliderInt(ctx, "Detail octaves", &g_cloudSlabOctaves, 0, 12);
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (nk_button_label(ctx, "Reset clouds (Earth)"))
+		*c = cloudDefaults();
 }

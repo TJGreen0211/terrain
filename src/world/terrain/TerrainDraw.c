@@ -20,10 +20,20 @@
    TerrainGen_MapTexelRad() radians. With thetaPixel = 45deg/H that gives
    lod = log2(dist * LOD_K/(r*H)) plus the grazing and face-corner
    corrections in the shaders (planetmap.glsl). */
-GLuint planetHeightTex;
+static GLuint planetHeightTex;
+
+GLuint TerrainDraw_HeightTex(void)
+{
+	return planetHeightTex;
+}
+
+void TerrainDraw_SetHeightTex(GLuint tex)
+{
+	planetHeightTex = tex;
+}
 #define LOD_K_NUMER ((float)(0.7853982 / TerrainGen_MapTexelRad()))
 /* Geometric relief (quad.vert / depth.vert displace the unit sphere by it)
-   is g_planetStyle.landRelief / oceanRelief (TerrainGen.h). Sea level is
+   is TerrainGen_Style()->landRelief / oceanRelief (TerrainGen.h). Sea level is
    radius 1.0 for both the planet and the water shell; the squared shelf
    profile keeps vertices next to the coast near sea level, so
    coast-straddling triangles barely sag. */
@@ -57,10 +67,10 @@ GLuint TerrainDraw_SurfaceProgram(void) { return surfaceProgram; }
    h, so a height range maps straight to a relief range. */
 static double reliefOf(double h)
 {
-	double sea = g_planetGen.seaLevel;
-	double s = fmin(fmax((sea - h) / fmax(g_planetGen.oceanDepth, 1e-4), 0.0), 1.0);
-	return g_planetStyle.landRelief * fmax(h - sea, 0.0) / fmax(1.0 - sea, 1e-3)
-	     - g_planetStyle.oceanRelief * s * s;
+	double sea = TerrainGen_GenParams()->seaLevel;
+	double s = fmin(fmax((sea - h) / fmax(TerrainGen_GenParams()->oceanDepth, 1e-4), 0.0), 1.0);
+	return TerrainGen_Style()->landRelief * fmax(h - sea, 0.0) / fmax(1.0 - sea, 1e-3)
+	     - TerrainGen_Style()->oceanRelief * s * s;
 }
 
 /* quad.vert / depth.vert's lodCellK: the height-map mip a vertex at
@@ -98,7 +108,7 @@ void TerrainDraw_ViewRange(const Body *planet, dvec3 cam, double *nearest, doubl
 
 double Earth_GroundRadius(dvec3 worldDir, double capAngle)
 {
-	const Body *earth = &g_bodies[BODY_EARTH];
+	const Body *earth = Bodies_Get(BODY_EARTH);
 	double w[3] = { worldDir.x, worldDir.y, worldDir.z }, dl[3];
 	const double (*m)[4] = earth->rotation.m;
 	for (int j = 0; j < 3; j++)
@@ -116,7 +126,7 @@ static void terrainReliefBounds(const double dir[3], double capAngle, double cel
                                 double maxDist, double *lo, double *hi)
 {
 	(void)cell;
-	double R = g_bodies[SolarSystem_ActiveBody()].radius;
+	double R = Bodies_Get(SolarSystem_ActiveBody())->radius;
 	double lodK = LOD_K_NUMER / (R * getWindowHeight());
 	/* Unclamped: HeightRange adds the face-corner bias, then clamps. */
 	double lodCell = log2(fmax(maxDist * lodCellKFor(R), 1e-30));
@@ -133,11 +143,11 @@ static void terrainReliefBounds(const double dir[3], double capAngle, double cel
    block's minimum bounds every finer sample. */
 int TerrainDraw_FootprintAllLand(const double dir[3], double capAngle, double maxDist)
 {
-	double lodK = LOD_K_NUMER / (g_bodies[SolarSystem_ActiveBody()].radius * getWindowHeight());
+	double lodK = LOD_K_NUMER / (Bodies_Get(SolarSystem_ActiveBody())->radius * getWindowHeight());
 	double fragLod = log2(fmax(maxDist * lodK, 1e-30)) + log2(1.0 / 0.15);
 	float hmin, hmax;
 	TerrainGen_HeightRange(dir, capAngle, fmin(fragLod, TerrainGen_MapMaxLod()), &hmin, &hmax);
-	return hmin > g_planetGen.seaLevel;
+	return hmin > TerrainGen_GenParams()->seaLevel;
 }
 
 QuadTree_Body TerrainDraw_Body(const Body *planet, dvec3 cam, QuadTree_ReliefFn relief)
@@ -176,9 +186,9 @@ void TerrainDraw_SetBodyUniforms(GLuint shader, float lodRadius, mat4 m, const F
 	glUniform3f(glGetUniformLocation(shader, "cameraPos"), 0.0f, 0.0f, 0.0f);
 	glUniform3f(glGetUniformLocation(shader, "bodyCenter"), m.m[0][3], m.m[1][3], m.m[2][3]);
 	glUniform3f(glGetUniformLocation(shader, "lightPosition"), f->lightPos.x, f->lightPos.y, f->lightPos.z);
-	glUniform1f(glGetUniformLocation(shader, "oceanOffset"), g_waveParams[0]);
-	glUniform1f(glGetUniformLocation(shader, "waveAmp"), g_waveParams[1]);
-	glUniform1f(glGetUniformLocation(shader, "waveNormalStrength"), g_waveParams[2]);
+	glUniform1f(glGetUniformLocation(shader, "oceanOffset"), Water_Params()[0]);
+	glUniform1f(glGetUniformLocation(shader, "waveAmp"), Water_Params()[1]);
+	glUniform1f(glGetUniformLocation(shader, "waveNormalStrength"), Water_Params()[2]);
 	/* Per cascade: patches per body radius at its drawn size, and that
 	   size over true size (heights scale with it). Water.c. */
 	float tilings[OCEAN_CASCADES], scales[OCEAN_CASCADES], shoreDepths[OCEAN_CASCADES];
@@ -189,12 +199,12 @@ void TerrainDraw_SetBodyUniforms(GLuint shader, float lodRadius, mat4 m, const F
 		   coast (seastate.glsl): a few of its drawn rms heights, about
 		   where waves that size break. */
 		shoreDepths[c] = (float)(WAVE_SHORE_RMS * OCEAN_SWELL_RMS_M * waveCascadeRmsFrac(c)
-		                         * scales[c] * g_waveParams[1]);
+		                         * scales[c] * Water_Params()[1]);
 	}
 	glUniform1fv(glGetUniformLocation(shader, "waveTilings"), OCEAN_CASCADES, tilings);
 	glUniform1fv(glGetUniformLocation(shader, "waveCascadeScales"), OCEAN_CASCADES, scales);
 	glUniform1fv(glGetUniformLocation(shader, "waveShoreDepths"), OCEAN_CASCADES, shoreDepths);
-	glUniform1f(glGetUniformLocation(shader, "waveChoppy"), g_waveParams[4]);
+	glUniform1f(glGetUniformLocation(shader, "waveChoppy"), Water_Params()[4]);
 	glUniform1f(glGetUniformLocation(shader, "time"), (float)(f->time/100.0));
 	/* The wave maps (tex0, slopeTex, dispTex, jacobTex) are 2D arrays, one
 	   layer per cascade; the planet passes 0 for them. */
@@ -230,10 +240,10 @@ void TerrainDraw_SetBodyUniforms(GLuint shader, float lodRadius, mat4 m, const F
 	/* Sea level + ocean depth from the last bake. planet and water go through
 	   this one function so they can never disagree — a different seaLevel in
 	   water.frag would drift the discard edge off the drawn coastline. */
-	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
-	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
-	glUniform1f(glGetUniformLocation(shader, "landRelief"), g_planetStyle.landRelief);
-	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), g_planetStyle.oceanRelief);
+	glUniform1f(glGetUniformLocation(shader, "seaLevel"), TerrainGen_GenParams()->seaLevel);
+	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), TerrainGen_GenParams()->oceanDepth);
+	glUniform1f(glGetUniformLocation(shader, "landRelief"), TerrainGen_Style()->landRelief);
+	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), TerrainGen_Style()->oceanRelief);
 	/* quad.frag rewrites gl_FragDepth for seafloor that pokes through the
 	   water; it needs the main projection's convention and near plane, and
 	   how far under sea level the wave troughs can reach. */
@@ -260,13 +270,13 @@ void TerrainDraw_ShadowCasters(const QuadTree_Body *body, mat4 lightSpace, doubl
 	glBindTexture(GL_TEXTURE_CUBE_MAP, planetHeightTex);
 	glUniform1i(glGetUniformLocation(shader, "heightMap"), 6);
 	glActiveTexture(GL_TEXTURE0 + TERRAIN_SURFACE_UNIT);
-	glBindTexture(GL_TEXTURE_CUBE_MAP, g_planetGen.surfaceTex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, TerrainGen_GenParams()->surfaceTex);
 	glUniform1i(glGetUniformLocation(shader, "surfaceMap"), TERRAIN_SURFACE_UNIT);
 	glActiveTexture(GL_TEXTURE0);
-	glUniform1f(glGetUniformLocation(shader, "seaLevel"), g_planetGen.seaLevel);
-	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), g_planetGen.oceanDepth);
-	glUniform1f(glGetUniformLocation(shader, "landRelief"), g_planetStyle.landRelief);
-	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), g_planetStyle.oceanRelief);
+	glUniform1f(glGetUniformLocation(shader, "seaLevel"), TerrainGen_GenParams()->seaLevel);
+	glUniform1f(glGetUniformLocation(shader, "oceanDepth"), TerrainGen_GenParams()->oceanDepth);
+	glUniform1f(glGetUniformLocation(shader, "landRelief"), TerrainGen_Style()->landRelief);
+	glUniform1f(glGetUniformLocation(shader, "oceanRelief"), TerrainGen_Style()->oceanRelief);
 	/* Same vertex lod inputs as TerrainDraw_SetBodyUniforms, so the
 	   displaced caster matches the drawn surface vertex for vertex. */
 	glUniform1f(glGetUniformLocation(shader, "lodK"), LOD_K_NUMER/(lodRadius*f->viewportH));
@@ -307,7 +317,7 @@ void TerrainDraw_Planet(const QuadTree_Body *body, const FrameContext *f, float 
 	TerrainDraw_SetBodyUniforms(surfaceProgram, lodRadius, model, f,
 	                            0, noiseTex, 0, 0, 0, 0);
 	setOceanUniforms(surfaceProgram, 10);   /* beach swash exposure */
-	setAtmosphereExtinction(surfaceProgram, atmoInner, &g_atmosphere);
+	setAtmosphereExtinction(surfaceProgram, atmoInner, Atmosphere_Params());
 	Rings_BindReceiver(surfaceProgram);
 	Clouds_BindReceiver(surfaceProgram, bodyId);
 	glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */

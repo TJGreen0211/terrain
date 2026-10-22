@@ -13,19 +13,19 @@ static GLuint skyboxVAO, skyboxVBO;
 // +X, -X, +Y, -Y, +Z, -Z (the nebula bake writes them in this order).
 static const char *faceNames[6] = { "right", "left", "top", "bottom", "back", "front" };
 
-// The nebula sky set g_nebulaSkyName (Nebula.c), with its settings, when
+// The nebula sky set Nebula_SkyName() (Nebula.c), with its settings, when
 // all six faces are there; 0 otherwise.
 static GLuint loadNebulaSky(void)
 {
-	if (!g_nebulaSkyName[0])
+	if (!Nebula_SkyName()[0])
 		return 0;
 	char paths[6][256];
 	char *faces[6];
 	for (int i = 0; i < 6; i++) {
-		Paths_Asset(paths[i], sizeof paths[i], "textures/nebula_%s/%s.png", g_nebulaSkyName, faceNames[i]);
+		Paths_Asset(paths[i], sizeof paths[i], "textures/nebula_%s/%s.png", Nebula_SkyName(), faceNames[i]);
 		FILE *f = fopen(paths[i], "rb");
 		if (!f) {
-			fprintf(stderr, "[skybox] no nebula sky '%s' (%s); using skybox3\n", g_nebulaSkyName, paths[i]);
+			fprintf(stderr, "[skybox] no nebula sky '%s' (%s); using skybox3\n", Nebula_SkyName(), paths[i]);
 			return 0;
 		}
 		fclose(f);
@@ -34,7 +34,7 @@ static GLuint loadNebulaSky(void)
 	// The runtime wisps use the settings the sky was baked with. The baked
 	// glow crosses face edges: filter across them too. (The planet bake
 	// turns seamless filtering on for every sky anyway: TerrainGen.c.)
-	Nebula_LoadParams(g_nebulaSkyName);
+	Nebula_LoadParams(Nebula_SkyName());
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	return loadCubemap(faces);
 }

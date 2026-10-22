@@ -37,8 +37,18 @@
 /* Skirt drop cap, body radii. */
 #define QT_SKIRT_MAX 0.005
 
-int g_qtLegacyPath = 0;
-QuadTree_Stats g_qtStats;
+static QuadTreeParams qtParams;
+static QuadTree_Stats g_qtStats;
+
+QuadTreeParams * QuadTree_Params(void)
+{
+	return &qtParams;
+}
+
+const QuadTree_Stats * QuadTree_FrameStats(void)
+{
+	return &g_qtStats;
+}
 
 /* One drawn leaf (shaders/patch.glsl, attribute locations 4-11). */
 typedef struct qtInstance {
@@ -635,7 +645,7 @@ static void drawPatches(void)
 	/* Per-draw uniforms of whichever body program is bound (patch.glsl). */
 	GLint program = 0;
 	glGetIntegerv(GL_CURRENT_PROGRAM, &program);
-	glUniform1i(glGetUniformLocation((GLuint)program, "patchLegacy"), g_qtLegacyPath);
+	glUniform1i(glGetUniformLocation((GLuint)program, "patchLegacy"), qtParams.legacyPath);
 
 	/* Patch skirts must render double-sided, so culling is off entirely for
 	   this pass and the depth buffer resolves the near/far hemispheres (the

@@ -85,8 +85,8 @@ static double lambertPhase(double a)
 /* One body; dots: 0 = disc pass (skips dots), 1 = dot pass (skips discs). */
 static void drawBody(int id, mat4 view, dvec3 cam, int dots)
 {
-	const Body *b = &g_bodies[id];
-	const PlanetInfo *pi = &g_planetInfo[id];
+	const Body *b = Bodies_Get(id);
+	const PlanetInfo *pi = SolarSystem_Info(id);
 	dvec3 rel = dsubvec3(b->position, cam);
 	double d = dlengthvec3(rel), R = b->radius;
 	if (R <= 0.0 || d <= R * 1.0001)
@@ -112,7 +112,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots)
 	if (isDot)
 		half = fmax(R * d / sqrt(d * d - R * R), 3.0 * DOT_SIGMA_PX * d / pixelsPerRadian());
 
-	dvec3 toSun = unit(dsubvec3(g_bodies[BODY_SUN].position, b->position));
+	dvec3 toSun = unit(dsubvec3(Bodies_Get(BODY_SUN)->position, b->position));
 	dvec3 pole = { b->rotation.m[0][2], b->rotation.m[1][2], b->rotation.m[2][2] };
 	dvec3 ringN = id == BODY_EARTH ? Rings_DefaultNormal() : pole;
 
@@ -187,14 +187,14 @@ void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull)
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthMask(GL_TRUE);
 	for (int i = 0; i < BODY_COUNT; i++)
-		if (g_bodies[i].kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
+		if (Bodies_Get(i)->kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
 			drawBody(i, view, cam, 0);
 
 	/* Dots: additive light, depth-tested only. */
 	glBlendFunc(GL_ONE, GL_ONE);
 	glDepthMask(GL_FALSE);
 	for (int i = 0; i < BODY_COUNT; i++)
-		if (g_bodies[i].kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
+		if (Bodies_Get(i)->kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
 			drawBody(i, view, cam, 1);
 
 	glDepthMask(GL_TRUE);

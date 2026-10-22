@@ -20,10 +20,11 @@ typedef struct CameraConfig {
 /* Call once, before any other camera function. */
 void Camera_Init(const CameraConfig *cfg);
 
-extern float CameraDistance;
-extern float CameraDistanceMax;
-extern GLfloat MovementSpeed;
-extern GLfloat CameraScrollSpeed;
+/* WASD speed (m/s) and dolly per wheel notch (m); start at the config's. */
+float Camera_MoveSpeed(void);
+void Camera_SetMoveSpeed(float metresPerSecond);
+float Camera_ScrollStep(void);
+void Camera_SetScrollStep(float metres);
 
 /* Camera-relative rendering: getViewMatrix() is rotation only, and the camera
    sits at the origin of every space the GPU sees. getCameraPosition() is the

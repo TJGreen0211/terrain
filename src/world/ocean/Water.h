@@ -28,10 +28,11 @@ typedef struct waves {
    60 fps = 4 updates/s), since frames in between are not interpolated. */
 #define WAVE_UPDATE_INTERVAL 1
 
-/* Live wave multipliers (defaults set by Main.c), uploaded every frame: [0] oceanOffset
-   (shell radius, keep 1.0 = sea level), [1] waveAmp, [2] normalStrength,
-   [3] wave scale, [4] choppiness. Edited from the debug panel. */
-extern float g_waveParams[5];
+/* Live wave multipliers (defaults set by the app), uploaded every frame:
+   [0] oceanOffset (shell radius, keep 1.0 = sea level), [1] waveAmp,
+   [2] normalStrength, [3] wave scale, [4] choppiness. Edited from the debug
+   panel. Returns the 5-float array. */
+float *Water_Params(void);
 
 /* rms of the calibrated FFT height field (all cascades), in body radii, at wave height
    1.0 (initializeWaves). water.vert rescales the geometric displacement
@@ -46,7 +47,7 @@ void generateWaves(waves *water, double time);
 /* Side (m) of cascade c's patch: OCEAN_WAVE_PATCH_M / OCEAN_CASCADE_RATIO^c. */
 double waveCascadePatchM(int c);
 /* How much larger than true size cascade c is drawn: the "Wave scale" knob
-   (g_waveParams[3]) for all but the finest, which stays at true size so
+   (Water_Params()[3]) for all but the finest, which stays at true size so
    the close-up chop keeps its detail. Lengths and heights scale by it,
    time by its square root (Froude scaling). */
 double waveCascadeScale(int c);
@@ -54,5 +55,11 @@ double waveCascadeScale(int c);
    cascades' variances add up to 1). */
 double waveCascadeRmsFrac(int c);
 void initializeWaves(waves *water, int dim, double time);
+
+struct nk_context;
+/* The Water tab of the debug panel (Water.c); the startup hook snapshots
+   what "Reset water" restores. */
+void Water_DebugPanel(struct nk_context *ctx);
+void Water_DebugPanelStartup(void);
 
 #endif

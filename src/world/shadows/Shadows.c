@@ -4,9 +4,16 @@
 #include "world/WorldConfig.h"
 #include <math.h>
 #include <stdio.h>
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
 
-ShadowCascades g_cascades;
-int g_shadowDebug = 0;
+static ShadowCascades g_cascades;
+static int g_shadowDebug = 0;   /* debug panel: tint receivers by level */
+
+const ShadowCascades * Shadows_Cascades(void)
+{
+	return &g_cascades;
+}
 
 static GLuint cascadeTex, cascadeFBO;
 static GLuint globalTex, globalFBO;
@@ -283,4 +290,16 @@ void Shadows_BindReceiver(GLuint shader, int unit)
 		snprintf(name, sizeof name, "cascadeTexel[%d]", i);
 		glUniform1f(glGetUniformLocation(shader, name), (float)sc->texel);
 	}
+}
+
+/* ---- Debug panel (a tab of the engine/debug/DebugGUI.c window) ---- */
+
+void Shadows_DebugPanel(struct nk_context *ctx)
+{
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	nk_checkbox_label(ctx, "Tint shadow cascades", &g_shadowDebug);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Shadow cascades: %d", g_cascades.count);
+	for (int i = 0; i < g_cascades.count; i++)
+		nk_labelf(ctx, NK_TEXT_LEFT, "  %d: radius %.0f m, texel %.2f m", i,
+		          g_cascades.c[i].radius, g_cascades.c[i].texel);
 }

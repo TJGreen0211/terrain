@@ -86,11 +86,15 @@ typedef struct QuadTree_Stats {
 	int maxLevel;    /* deepest drawn level */
 	double walkMs;   /* CPU time of the walks */
 } QuadTree_Stats;
-extern QuadTree_Stats g_qtStats;
+/* Totals over this frame's walks. */
+const QuadTree_Stats *QuadTree_FrameStats(void);
 
-/* Debug (panel toggle): 1 = place vertices with the old float path, for
-   comparing against the double-precision patch corners. */
-extern int g_qtLegacyPath;
+typedef struct QuadTreeParams {
+	/* Debug (panel toggle): 1 = place vertices with the old float path, for
+	   comparing against the double-precision patch corners. */
+	int legacyPath;
+} QuadTreeParams;
+QuadTreeParams *QuadTree_Params(void);
 
 void QuadTree_Shutdown(void);
 

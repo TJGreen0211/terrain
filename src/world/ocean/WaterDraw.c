@@ -34,8 +34,8 @@ double Water_GeomScale(double radius)
 double Water_Excursion(double radius)
 {
 	return WAVE_BOUND_RMS * OCEAN_FFT_RMS * Water_GeomScale(radius)
-	     * fmax(g_waveParams[3], 1.0)
-	     * g_waveParams[1] * (1.0 + g_waveParams[4]);
+	     * fmax(Water_Params()[3], 1.0)
+	     * Water_Params()[1] * (1.0 + Water_Params()[4]);
 }
 
 /* QuadTree_ReliefFn for Earth's water shell (water.vert): sea level, plus
@@ -51,8 +51,8 @@ static void waterReliefBounds(const double dir[3], double capAngle, double cell,
 		*hi = 0.0;
 		return;
 	}
-	double shell = g_waveParams[0] - 1.0;
-	double wave = Water_Excursion(g_bodies[BODY_EARTH].radius);
+	double shell = Water_Params()[0] - 1.0;
+	double wave = Water_Excursion(Bodies_Get(BODY_EARTH)->radius);
 	*lo = shell - wave;
 	*hi = shell + wave;
 }
@@ -73,7 +73,7 @@ void WaterDraw_Draw(const waves *ocean, const Body *planet, const FrameContext *
 	                            ocean->dyTexture, 0,
 	                            ocean->slopeTexture, ocean->dispTexture, ocean->jacobTexture, skyTex);
 	/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
-	setAtmosphereExtinction(waterProgram, atmoInner, &g_atmosphere);
+	setAtmosphereExtinction(waterProgram, atmoInner, Atmosphere_Params());
 	glUniform1f(glGetUniformLocation(waterProgram, "waveGeomScale"), (float)Water_GeomScale(planet->radius));
 	/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
 	setOceanUniforms(waterProgram, 10);

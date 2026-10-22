@@ -9,10 +9,10 @@ static const float toRadians = (float)(M_PI / 180.0f);
    scroll dollies it out to the max, at which point dragging orbits the
    pivot. Distances and speeds come from Camera_Init (the app passes
    WorldConfig.h's). */
-float CameraDistance = 0.0f;
-float CameraDistanceMax;
-GLfloat MovementSpeed;
-GLfloat CameraScrollSpeed;   // fine: lets you dolly all the way through the atmosphere shell
+static float CameraDistance = 0.0f;
+static float CameraDistanceMax;
+static GLfloat MovementSpeed;
+static GLfloat CameraScrollSpeed;   // fine: lets you dolly all the way through the atmosphere shell
 
 /* The whole orbit orientation is one unit quaternion: the world -> camera
    rotation. A drag never accumulates per frame; it recomposes from the
@@ -453,4 +453,24 @@ void processMouseScroll(float yoffset)
         CameraDistance = 0.0f;
     if (CameraDistance > CameraDistanceMax)
         CameraDistance = CameraDistanceMax;
+}
+
+float Camera_MoveSpeed(void)
+{
+    return MovementSpeed;
+}
+
+void Camera_SetMoveSpeed(float metresPerSecond)
+{
+    MovementSpeed = metresPerSecond;
+}
+
+float Camera_ScrollStep(void)
+{
+    return CameraScrollSpeed;
+}
+
+void Camera_SetScrollStep(float metres)
+{
+    CameraScrollSpeed = metres;
 }

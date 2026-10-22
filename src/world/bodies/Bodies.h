@@ -65,15 +65,20 @@ typedef struct Body {
 	dmat4 rotation;         /* body -> world, rotation only */
 } Body;
 
-extern Body g_bodies[BODY_COUNT];
+/* Body id (BodyId). */
+Body *Bodies_Get(int id);
 
-/* Live simulation seconds per real second (debug panel); starts at
-   SIM_TIME_SCALE. */
-extern double g_simTimeScale;
-/* Simulation time of the current frame (s since J2000), and the body the
-   camera follows (Tab / debug panel; Main.c applies a change). */
-extern double g_simTime;
-extern int g_focusBody;
+typedef struct BodiesParams {
+	/* Live simulation seconds per real second (debug panel); starts at
+	   SIM_TIME_SCALE. */
+	double timeScale;
+	/* The body the camera follows (Tab / debug panel / bench; the app
+	   applies a change). */
+	int focusBody;
+} BodiesParams;
+BodiesParams *Bodies_Params(void);
+/* Simulation time of the current frame (s since J2000). */
+double Bodies_SimTime(void);
 
 /* Positions and orientations at simulation time t (seconds). */
 void Bodies_Update(double t);

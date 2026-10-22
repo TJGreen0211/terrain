@@ -14,8 +14,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
+#include <string.h>
 
-float g_waveParams[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, normalStrength, wave scale, choppiness
+static float g_waveParams[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, normalStrength, wave scale, choppiness
+
+float * Water_Params(void)
+{
+	return g_waveParams;
+}
 
 static void initWavesGPU(waves *water);
 static void generateWavesGPU(waves *water, double time);
@@ -404,4 +412,31 @@ void generateWaves(waves *water, double time) {
 	if(frame++ % WAVE_UPDATE_INTERVAL != 0)
 		return;
 	generateWavesGPU(water, time);
+}
+
+/* ---- Debug panel (a tab of the engine/debug/DebugGUI.c window) ---- */
+
+/* Startup values, restored by "Reset water" (Water_DebugPanelStartup). */
+static float wavesAtStartup[5];
+
+void Water_DebugPanelStartup(void)
+{
+	memcpy(wavesAtStartup, g_waveParams, sizeof wavesAtStartup);
+}
+
+/* Live: g_waveParams is uploaded every frame. [0] (oceanOffset) is left
+   out: the water shell must stay at sea level or it detaches from the
+   coastline. */
+void Water_DebugPanel(struct nk_context *ctx)
+{
+	float *w = g_waveParams;
+
+	DebugGUI_Slider(ctx, "Wave height", &w[1], 0.0f, 1.5f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Choppiness", &w[4], 0.0f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Normal strength", &w[2], 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Wave scale", &w[3], 0.25f, 30.0f, 0.05f, "%.2f");
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (nk_button_label(ctx, "Reset water"))
+		memcpy(w, wavesAtStartup, sizeof wavesAtStartup);
 }

@@ -1,7 +1,8 @@
 #include "app/App.h"
 #include "app/Bench.h"
 #include "app/CameraSliders.h"
-#include "app/DebugGUI.h"
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
 #include "app/LoadingScreen.h"
 #include "engine/camera/arcballCamera.h"
 #include "engine/core/paths.h"
@@ -35,6 +36,7 @@
 #include "world/terrain/TerrainDetail.h"
 #include "world/terrain/TerrainDraw.h"
 #include "world/terrain/TerrainGen.h"
+#include "world/terrain/TerrainPanel.h"
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -92,6 +94,33 @@ static GLuint initSphere() {
 
 	vao = initBuffers(planet.points, planet.size, planet.normals, planet.nsize, texCoords, sizeof(texCoords[0])*planet.vertexNumber);
 	return vao;
+}
+
+/* The Camera tab of the debug panel: altitude above the focus body's
+   sea-level sphere. */
+static void cameraPanel(struct nk_context *ctx)
+{
+	const Body *focus = Bodies_Get(Bodies_Params()->focusBody);
+	double alt = dlengthvec3(dsubvec3(getCameraPosition(), focus->position)) - focus->radius;
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (fabs(alt) < 1e4)
+		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f m", alt);
+	else
+		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
+}
+
+/* The debug panel's tabs, in order (below its built-in Performance tab). */
+static void addDebugPanels(void)
+{
+	DebugGUI_AddPanel("Solar system", SolarSystem_DebugPanel, NULL);
+	DebugGUI_AddPanel("Camera", cameraPanel, NULL);
+	DebugGUI_AddPanel("Terrain", Terrain_DebugPanel, Terrain_DebugPanelStartup);
+	DebugGUI_AddPanel("Shadows", Shadows_DebugPanel, NULL);
+	DebugGUI_AddPanel("Atmosphere", Atmosphere_DebugPanel, NULL);
+	DebugGUI_AddPanel("Clouds", Clouds_DebugPanel, NULL);
+	DebugGUI_AddPanel("Nebula", Nebula_DebugPanel, NULL);
+	DebugGUI_AddPanel("Water", Water_DebugPanel, Water_DebugPanelStartup);
 }
 
 int App_Create(App *app, int argc, char *argv[], int *exitCode)
@@ -169,6 +198,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	uiInit();
 	CameraSliders_Setup();
 	DebugGUI_Init(window);
+	addDebugPanels();
 	LoadingScreen_Step(); // all shader programs
 	/* The quadtree body LOD: six face grids + shared instance VBO, attribute
 	   layout wired once (all three body programs declare vPosition at 0 and
@@ -187,7 +217,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	LoadingScreen_Step();
 	Nebula_Init();
 	LoadingScreen_Step();
-	/* A baked nebula sky (g_nebulaSkyName) also loads its settings. */
+	/* A baked nebula sky (Nebula_SkyName()) also loads its settings. */
 	app->skyboxTex = loadSkyboxCube();
 	LoadingScreen_Step();
 
@@ -219,15 +249,15 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	LoadingScreen_Step();
 
 	/* Bake the planet height field: GPU shaping + CPU erosion + sea level
-	   stats (TerrainGen.c), from g_terrainBake. The seed advances on every
+	   stats (TerrainGen.c), from TerrainGen_BakeSettings(). The seed advances on every
 	   H-key re-bake; the debug panel edits the rest and re-bakes on demand. */
-	planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetStyle, &g_planetGen, LoadingScreen_Step);
+	TerrainDraw_SetHeightTex(generatePlanetHeightmap(TerrainGen_BakeSettings(), TerrainGen_Style(), TerrainGen_GenParams(), LoadingScreen_Step));
 	TerrainDetail_Init();
 
 	/* Procedural rings, seeded with the planet (re-rolled with it when the
 	   seed changes). Every program that samples the ring shadow is a
 	   receiver. */
-	Rings_Init(g_terrainBake.seed, rockVAOs, rockVerts);
+	Rings_Init(TerrainGen_BakeSettings()->seed, rockVAOs, rockVerts);
 	Rings_AttachReceiver(TerrainDraw_SurfaceProgram());
 	Rings_AttachReceiver(WaterDraw_Program());
 	Rings_AttachReceiver(BodyDraw_Program());
@@ -244,11 +274,11 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 
 	glViewport(0, 0, getWindowWidth(), getWindowHeight());
 
-	g_waveParams[0] = 1.0f;   // shell radius = sea level (planet coast is at 1.0)
-	g_waveParams[1] = 0.25f;  // ~0.0006 rms: well under the land relief
-	g_waveParams[2] = 1.0f;
-	g_waveParams[3] = 10.0f;  // wave scale: patches 10x true size (stylized)
-	g_waveParams[4] = 1.0f;
+	Water_Params()[0] = 1.0f;   // shell radius = sea level (planet coast is at 1.0)
+	Water_Params()[1] = 0.25f;  // ~0.0006 rms: well under the land relief
+	Water_Params()[2] = 1.0f;
+	Water_Params()[3] = 10.0f;  // wave scale: patches 10x true size (stylized)
+	Water_Params()[4] = 1.0f;
 
 	glGenTextures(1, &app->dxWaveTex);
 
@@ -264,17 +294,17 @@ void App_Update(App *app)
 	   debug panel's regenerate button re-bakes with its current
 	   settings (1-3 s hitch either way). A new system seed re-generates
 	   every planet but Earth. */
-	int rebake = DebugGUI_ConsumeRegenerate();
+	int rebake = Terrain_ConsumeRegenerate();
 	if (consumeRegenRequest()) {
-		g_terrainBake.seed++;
+		TerrainGen_BakeSettings()->seed++;
 		rebake = 1;
 	}
 	if (rebake)
 		SolarSystem_RebakeActive(NULL);
-	if (DebugGUI_ConsumeNewSystem()) {
-		SolarSystem_Generate(g_systemSeed);
+	if (SolarSystem_ConsumeNewSystem()) {
+		SolarSystem_Generate(SolarSystem_Params()->seed);
 		/* The focused planet may have a new size: back off to see it. */
-		resetCameraForFocus(CAMERA_FOCUS_DISTANCE_RADII * g_bodies[g_focusBody].radius);
+		resetCameraForFocus(CAMERA_FOCUS_DISTANCE_RADII * Bodies_Get(Bodies_Params()->focusBody)->radius);
 	}
 
 	/* Ocean waves: only Earth has water. */
@@ -295,7 +325,7 @@ void App_Update(App *app)
 	if (Bench_Active())
 		app->simTime = Bench_SimTime();
 	else if (!getRotationPaused())
-		app->simTime += fmin(deltaTime, 0.1) * g_simTimeScale;
+		app->simTime += fmin(deltaTime, 0.1) * Bodies_Params()->timeScale;
 	Bodies_Update(app->simTime);
 
 	/* Focus body (Tab / debug panel): the camera rides with it. A
@@ -303,15 +333,15 @@ void App_Update(App *app)
 	{
 		int step = consumeFocusStep();
 		if (step != 0 && !Bench_Active())
-			g_focusBody = ((g_focusBody + step) % BODY_COUNT + BODY_COUNT) % BODY_COUNT;
-		const Body *f = &g_bodies[g_focusBody];
-		dvec3 toSun = dsubvec3(g_bodies[BODY_SUN].position, f->position);
+			Bodies_Params()->focusBody = ((Bodies_Params()->focusBody + step) % BODY_COUNT + BODY_COUNT) % BODY_COUNT;
+		const Body *f = Bodies_Get(Bodies_Params()->focusBody);
+		dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, f->position);
 		double ds = dlengthvec3(toSun);
 		dvec3 sunDir = ds > 0.0 ? dscalarvec3(toSun, 1.0 / ds) : (dvec3){ 1.0, 0.0, 0.0 };
 		setCameraFocus(f->position, f->radius, sunDir);
-		if (g_focusBody != app->lastFocus) {
+		if (Bodies_Params()->focusBody != app->lastFocus) {
 			resetCameraForFocus(CAMERA_FOCUS_DISTANCE_RADII * f->radius);
-			app->lastFocus = g_focusBody;
+			app->lastFocus = Bodies_Params()->focusBody;
 		}
 	}
 	Bench_UpdateCamera();
@@ -323,10 +353,10 @@ void App_Update(App *app)
 	   the largest on screen. One never seen up close bakes in the
 	   background first (a few seconds as a stand-in; cached after).
 	   Bench runs switch and bake at once: repeatable frames. */
-	SolarSystem_Update(app->cam, g_focusBody, Bench_BlockingBakes());
+	SolarSystem_Update(app->cam, Bodies_Params()->focusBody, Bench_BlockingBakes());
 	/* Cloud weather maps for the planets that have them (a build or
 	   two per frame, as simulation time moves on). */
-	Clouds_Update(g_simTime);
+	Clouds_Update(Bodies_SimTime());
 }
 
 void App_Destroy(App *app)

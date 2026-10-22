@@ -14,8 +14,8 @@
 
    Only one terrain planet is drawn in full at a time: the active one. Its
    state lives in the globals the planet passes have always used
-   (g_planetGen, g_planetStyle, g_atmosphere, g_clouds, g_terrainBake,
-   planetHeightTex, the ring state), so the debug panel edits whichever
+   (TerrainGen_GenParams(), TerrainGen_Style(), Atmosphere_Params(), Clouds_Params(), TerrainGen_BakeSettings(),
+   TerrainDraw_HeightTex(), the ring state), so the debug panel edits whichever
    planet is active. Activating another planet saves those into its
    PlanetInfo and loads the new one. A planet's terrain is baked the first
    time it is approached, in the background (TerrainGen_BakeStart), and
@@ -46,11 +46,16 @@ typedef struct PlanetInfo {
 	PlanetGenParams gen;
 } PlanetInfo;
 
-extern PlanetInfo g_planetInfo[BODY_COUNT];
-extern unsigned int g_systemSeed;
+/* Body id (BodyId). */
+PlanetInfo *SolarSystem_Info(int id);
+
+typedef struct SolarSystemParams {
+	unsigned int seed;   /* the system seed (SolarSystem_Generate); starts at SYSTEM_SEED_DEFAULT */
+} SolarSystemParams;
+SolarSystemParams *SolarSystem_Params(void);
 
 /* After Earth's start-up bake: records Earth (the current globals) as its
-   planet and generates the rest of the system from g_systemSeed. */
+   planet and generates the rest of the system from the system seed. */
 void SolarSystem_Init(void);
 
 /* Re-generates every planet but Earth from seed: orbits, sizes, kinds and
@@ -79,11 +84,18 @@ void SolarSystem_Update(dvec3 cam, int focusBody, int blocking);
    (0..1, may be NULL). */
 int SolarSystem_BakingBody(float *progress);
 
-/* Re-bakes the active planet with the current g_terrainBake (H key / debug
+/* Re-bakes the active planet with the current TerrainGen_BakeSettings() (H key / debug
    panel); Earth's rings follow its seed as before. */
 void SolarSystem_RebakeActive(void (*step)(void));
 
 /* "Rocky", "Gas giant", ... for the debug panel. */
 const char *SolarSystem_TypeName(PlanetType t);
+
+struct nk_context;
+/* The Solar system tab of the debug panel (SolarSystem.c). */
+void SolarSystem_DebugPanel(struct nk_context *ctx);
+/* 1 once after the panel changed the system seed (the app then calls
+   SolarSystem_Generate). */
+int SolarSystem_ConsumeNewSystem(void);
 
 #endif

@@ -132,7 +132,7 @@ static int loadScene(const char *path)
 			   make it the focus. "earth" / "subsolar" keep Earth. */
 			pivotBody = BODY_EARTH;
 			for (int i = 0; i < BODY_COUNT; i++)
-				if (_stricmp(v, g_bodies[i].name) == 0)
+				if (_stricmp(v, Bodies_Get(i)->name) == 0)
 					pivotBody = i;
 		} else if (strcmp(tok, "poff") == 0) {
 			char v[64] = "";
@@ -152,14 +152,14 @@ static int loadScene(const char *path)
 			long f = 0;
 			if (sscanf(line, "%*s %ld %63s", &f, v) == 2)
 				for (int i = 0; i < BODY_COUNT; i++)
-					if (_stricmp(v, g_bodies[i].name) == 0) {
+					if (_stricmp(v, Bodies_Get(i)->name) == 0) {
 						switchFrame[nSwitch] = f;
 						switchBody[nSwitch++] = i;
 					}
 		} else if (strcmp(tok, "bakeasync") == 0) {
 			bakeAsync = 1;
 		} else if (strcmp(tok, "systemseed") == 0) {
-			sscanf(line, "%*s %u", &g_systemSeed);
+			sscanf(line, "%*s %u", &SolarSystem_Params()->seed);
 		} else if (strcmp(tok, "timescale") == 0) {
 			sscanf(line, "%*s %lf", &timeScale);
 		} else if (strcmp(tok, "simtime") == 0) {
@@ -193,7 +193,7 @@ static int loadScene(const char *path)
 		fprintf(stderr, "[bench] scene %s needs at least two 'key' lines\n", path);
 		return 0;
 	}
-	g_focusBody = pivotBody;
+	Bodies_Params()->focusBody = pivotBody;
 	startBody = pivotBody;
 	if (phaseDeg != 0.0) {
 		char buf[64];
@@ -256,7 +256,7 @@ void Bench_ParseArgs(int argc, char *argv[])
 	}
 	fprintf(stderr, "[bench] scene %s: %ld frames, %s view, %s pivot\n",
 	        sceneName, totalFrames, viewSurface ? "surface" : "orbit",
-	        pivotSubsolar ? "subsolar" : g_bodies[pivotBody].name);
+	        pivotSubsolar ? "subsolar" : Bodies_Get(pivotBody)->name);
 }
 
 /* ---------------- accessors ---------------- */
@@ -283,8 +283,8 @@ void Bench_UpdateCamera(void)
 	for (int i = 0; i < nSwitch; i++)
 		if (frame >= switchFrame[i])
 			pivotBody = switchBody[i];
-	g_focusBody = pivotBody;
-	const Body *e = &g_bodies[pivotBody];
+	Bodies_Params()->focusBody = pivotBody;
+	const Body *e = Bodies_Get(pivotBody);
 	if (viewSurface) {
 		if (!isSurfaceCamera()) toggleSurfaceCamera();
 		testSetSurfaceRadius((float)interpAlt((double)frame));
@@ -292,7 +292,7 @@ void Bench_UpdateCamera(void)
 	}
 	double dist, yaw, pitch;
 	interpPose((double)frame, &dist, &yaw, &pitch);
-	dvec3 pivot = g_bodies[pivotBody].position;
+	dvec3 pivot = Bodies_Get(pivotBody)->position;
 	if (pivotSubsolar) {
 		/* True sub-solar point: the direction of the sun body itself, so
 		   the pivot is lit at any simTime (the phase key then slides the
@@ -301,7 +301,7 @@ void Bench_UpdateCamera(void)
 		   above, in the pivot's local frame) and its elevation out of
 		   that frame toward +Y: at an equatorial pivot the local "up" is
 		   horizontal, so it cannot be expressed with world pitch. */
-		dvec3 toSun = dsubvec3(g_bodies[BODY_SUN].position, e->position);
+		dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, e->position);
 		double psi = atan2(toSun.z, toSun.x) + phaseDeg * (M_PI / 180.0);
 		double lat = pivotLatDeg * (M_PI / 180.0);
 		dvec3 dir = { cos(lat) * cos(psi), sin(lat), cos(lat) * sin(psi) };
@@ -349,11 +349,11 @@ void Bench_MaybeCapture(void)
 int Bench_NoteFrame(void)
 {
 	if (!active) return 0;
-	if (g_qtStats.leaves > leavesMax) leavesMax = g_qtStats.leaves;
-	if (g_qtStats.maxLevel > levelMax) levelMax = g_qtStats.maxLevel;
-	walkMsSum += g_qtStats.walkMs;
-	nodesSum += g_qtStats.nodes;
-	builtSum += g_qtStats.built;
+	if (QuadTree_FrameStats()->leaves > leavesMax) leavesMax = QuadTree_FrameStats()->leaves;
+	if (QuadTree_FrameStats()->maxLevel > levelMax) levelMax = QuadTree_FrameStats()->maxLevel;
+	walkMsSum += QuadTree_FrameStats()->walkMs;
+	nodesSum += QuadTree_FrameStats()->nodes;
+	builtSum += QuadTree_FrameStats()->built;
 	frame++;
 	return frame >= totalFrames;
 }

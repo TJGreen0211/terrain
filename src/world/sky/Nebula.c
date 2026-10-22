@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
 
 /* The default look: EVE-style teal/amber duotone, ridged filaments, a
    tilted galaxy band. A macro so the static initializer and
@@ -75,10 +77,25 @@
 	.filTaper = 0.5f, \
 }
 
-nebulaParams g_nebula = NEBULA_DEFAULTS;
-int g_nebulaEnabled = NEBULA_ENABLE_DEFAULT;
-char g_nebulaSkyName[64] = NEBULA_SKY_NAME;
-int g_nebulaBakeSize = NEBULA_SKY_FACE_SIZE;
+static nebulaParams g_nebula = NEBULA_DEFAULTS;
+static int g_nebulaEnabled = NEBULA_ENABLE_DEFAULT;
+static char g_nebulaSkyName[64] = NEBULA_SKY_NAME;
+static int g_nebulaBakeSize = NEBULA_SKY_FACE_SIZE;
+
+nebulaParams * Nebula_Params(void)
+{
+	return &g_nebula;
+}
+
+int Nebula_Enabled(void)
+{
+	return g_nebulaEnabled;
+}
+
+const char * Nebula_SkyName(void)
+{
+	return g_nebulaSkyName;
+}
 
 nebulaParams nebulaDefaults(void)
 {
@@ -893,7 +910,7 @@ void Nebula_Draw(mat4 proj, mat4 view, dvec3 cam)
 	if (!g_nebulaEnabled || !gridReady)
 		return;
 	double R = NEBULA_RADIUS_M;
-	dvec3 rel = dsubvec3(cam, g_bodies[BODY_SUN].position);
+	dvec3 rel = dsubvec3(cam, Bodies_Get(BODY_SUN)->position);
 	dvec3 camN = dscalarvec3(rel, 1.0 / R);
 	/* Forward: minus the view matrix's third row (Atmosphere.c). */
 	dvec3 fwd = { -view.m[2][0], -view.m[2][1], -view.m[2][2] };
@@ -960,4 +977,101 @@ void Nebula_Draw(mat4 proj, mat4 view, dvec3 cam)
 	glActiveTexture(GL_TEXTURE0 + UNIT_PRESENCE);
 	glBindTexture(GL_TEXTURE_3D, 0);
 	glActiveTexture(GL_TEXTURE0);
+}
+
+/* ---- Debug panel (a tab of the engine/debug/DebugGUI.c window) ---- */
+
+/* The nebula (Nebula.c). The near layer (in-system wisps) follows the
+   sliders live; the far layer (the sky) only on Rebake, which blocks for
+   a few seconds at 1024 and more at 2048. Save writes the baked sky and
+   these settings to assets/textures/nebula_<sky name>/. */
+void Nebula_DebugPanel(struct nk_context *ctx)
+{
+	nebulaParams *n = &g_nebula;
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	nk_checkbox_label(ctx, "In-system wisps on", &g_nebulaEnabled);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Sky set: %s", g_nebulaSkyName[0] ? g_nebulaSkyName : "(skybox3; saves as 'custom')");
+
+	int seed = (int)n->seed;
+	DebugGUI_SliderInt(ctx, "Seed", &seed, 1, 999);
+	n->seed = (unsigned int)seed;
+	DebugGUI_Group(ctx, "Look (both layers)");
+	DebugGUI_Slider(ctx, "Turbulence", &n->turbulence, 0.0f, 2.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Contrast", &n->contrast, 0.5f, 6.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Emission", &n->emission, 0.0f, 2.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Dark lanes", &n->dark, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour A red", &n->colA[0], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour A green", &n->colA[1], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour A blue", &n->colA[2], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour B red", &n->colB[0], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour B green", &n->colB[1], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Colour B blue", &n->colB[2], 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Group(ctx, "Near layer (live)");
+	DebugGUI_Slider(ctx, "Wavelength (Rb)", &n->nearWavelength, 0.02f, 1.0f, 0.005f, "%.3f");
+	DebugGUI_Slider(ctx, "Coverage", &n->nearCoverage, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Density", &n->nearDensity, 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Extinction", &n->nearSigma, 0.0f, 20.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Sun scatter", &n->scatter, 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Group(ctx, "Far layer (rebake to apply)");
+	DebugGUI_Slider(ctx, "Wavelength (shell)", &n->farWavelength, 0.05f, 2.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Coverage", &n->farCoverage, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Density", &n->farDensity, 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Extinction", &n->farSigma, 0.0f, 60.0f, 0.5f, "%.1f");
+	DebugGUI_Slider(ctx, "Erosion", &n->farErosion, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Erosion detail", &n->farDetail, 0.5f, 8.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Galaxy band", &n->band, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Band tilt (deg)", &n->bandTilt, 0.0f, 90.0f, 1.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Star density", &n->starDensity, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Star brightness", &n->starBrightness, 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Group(ctx, "Far layer composition (rebake to apply)");
+	DebugGUI_Slider(ctx, "Cloud bodies", &n->bodyCount, 0.0f, 8.0f, 1.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Body size", &n->bodySize, 0.2f, 1.5f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Body stretch", &n->bodyStretch, 1.0f, 5.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Edge breakup", &n->bodyBreakup, 0.0f, 0.8f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Core fill", &n->bodyFill, 0.3f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Density curve", &n->densityCurve, 0.5f, 4.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Filaments", &n->filament, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Filament reach", &n->filReach, 1.0f, 4.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Filament stretch", &n->filStretch, 1.0f, 10.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Filament count", &n->filScale, 0.5f, 8.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Filament sway", &n->filBend, 0.0f, 1.5f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Filament fill", &n->filCover, 0.2f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Filament taper", &n->filTaper, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Group(ctx, "Far layer emissive gas (rebake to apply)");
+	DebugGUI_Slider(ctx, "Gas glow", &n->gasStrength, 0.0f, 0.5f, 0.005f, "%.3f");
+	DebugGUI_Slider(ctx, "Gas glow near lights", &n->gasLight, 0.0f, 0.5f, 0.005f, "%.3f");
+	DebugGUI_Slider(ctx, "Gas extent", &n->gasExtent, 1.0f, 2.5f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Gas light radius", &n->gasRadius, 0.1f, 4.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Gas patchiness", &n->gasContrast, 0.5f, 6.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Gas behind dust", &n->gasBack, 0.0f, 1.5f, 0.01f, "%.2f");
+	DebugGUI_Group(ctx, "Far layer lighting (rebake to apply)");
+	DebugGUI_Slider(ctx, "Lights (one per body)", &n->lightCount, 0.0f, 8.0f, 1.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Light behind body", &n->lightBack, 0.0f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Light intensity", &n->lightIntensity, 0.0f, 20.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Light radius", &n->lightRadius, 0.05f, 1.5f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Gas around lights", &n->lightClump, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Dust albedo", &n->dustAlbedo, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Ambient", &n->ambient, 0.0f, 0.5f, 0.005f, "%.3f");
+	DebugGUI_Slider(ctx, "Forward scatter", &n->phaseG, 0.0f, 0.95f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Powder", &n->powder, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Core size (rad)", &n->coreSize, 0.0005f, 0.03f, 0.0005f, "%.4f");
+	DebugGUI_Slider(ctx, "Edge glow", &n->edgeGlow, 0.0f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Edge width", &n->edgeWidth, 0.02f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Group(ctx, "Sky glow (rebake to apply)");
+	DebugGUI_Slider(ctx, "Bloom", &n->bloomStrength, 0.0f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Bloom width (mips)", &n->bloomLevels, 0.0f, 9.0f, 1.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Exposure", &n->skyExposure, 0.1f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Contrast", &n->skyContrast, 0.5f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_SliderInt(ctx, "Bake face size", &g_nebulaBakeSize, 256, 2048);
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 2);
+	if (nk_button_label(ctx, "Rebake sky"))
+		Nebula_RequestRebake(0);
+	if (nk_button_label(ctx, "Axis test sky"))
+		Nebula_RequestRebake(1);
+	if (nk_button_label(ctx, "Save sky"))
+		Nebula_RequestSave();
+	if (nk_button_label(ctx, "Reset nebula"))
+		*n = nebulaDefaults();
 }

@@ -6,9 +6,22 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
+#include <limits.h>
 
-PlanetInfo g_planetInfo[BODY_COUNT];
-unsigned int g_systemSeed = SYSTEM_SEED_DEFAULT;
+static PlanetInfo g_planetInfo[BODY_COUNT];
+static SolarSystemParams ssParams = { SYSTEM_SEED_DEFAULT };
+
+PlanetInfo *SolarSystem_Info(int id)
+{
+	return &g_planetInfo[id];
+}
+
+SolarSystemParams * SolarSystem_Params(void)
+{
+	return &ssParams;
+}
 
 static int activeBody = BODY_EARTH;
 
@@ -206,7 +219,7 @@ static void generateClouds(unsigned int seed, int id, PlanetInfo *p)
 		c->style = CLOUD_STYLE_OVERCAST;
 
 	int overcast = c->style == CLOUD_STYLE_OVERCAST;
-	double relief = p->style.landRelief * g_bodies[id].radius;
+	double relief = p->style.landRelief * Bodies_Get(id)->radius;
 	double alt = relief * (overcast ? range(&r, CLOUD_GEN_OVERCAST_ALT_MIN, CLOUD_GEN_OVERCAST_ALT_MAX)
 	                                : range(&r, CLOUD_GEN_ALTITUDE_MIN, CLOUD_GEN_ALTITUDE_MAX));
 	c->altitude = (float)fmin(alt, CLOUD_GEN_MAX_SHELL * p->atmo.shellHeight);
@@ -235,7 +248,7 @@ static void generateClouds(unsigned int seed, int id, PlanetInfo *p)
 	c->detail = frange(&r, 0.25, 0.6);
 	/* Flow cycle tied loosely to the spin, kept short enough that the
 	   wind belts do not shear the noise into streaks. */
-	double spin = fabs(g_bodies[id].rotationPeriod);
+	double spin = fabs(Bodies_Get(id)->rotationPeriod);
 	c->flowPeriod = (float)fmin(fmax(spin * range(&r, 0.5, 1.5), 0.25 * 86400.0), 1.5 * 86400.0);
 	/* Near-white, faintly tinted (sulphur yellows, dusty tans, cold blues). */
 	hsv(rnd(&r), range(&r, 0.0, overcast ? 0.3 : 0.12), range(&r, 0.85, 1.0), c->color);
@@ -257,7 +270,7 @@ void SolarSystem_Generate(unsigned int seed)
 {
 	if (activeBody != BODY_EARTH)
 		SolarSystem_Activate(BODY_EARTH, NULL);
-	g_systemSeed = seed;
+	ssParams.seed = seed;
 	bakeBody = -1;   /* a bake in flight is for the old system: drop it */
 
 	/* Major orbits: random ratios out of and into Earth's 1 AU. */
@@ -273,7 +286,7 @@ void SolarSystem_Generate(unsigned int seed)
 		int id = majorSlots[i];
 		if (id == BODY_EARTH)
 			continue;
-		Body *b = &g_bodies[id];
+		Body *b = Bodies_Get(id);
 		PlanetInfo *p = &g_planetInfo[id];
 		freeBake(p);
 		memset(p, 0, sizeof *p);
@@ -308,7 +321,7 @@ void SolarSystem_Generate(unsigned int seed)
 	   last one on eccentric, inclined orbits. */
 	for (int k = 0; k < 4; k++) {
 		int id = k == 0 ? BODY_CERES : kuiperSlots[k - 1];
-		Body *b = &g_bodies[id];
+		Body *b = Bodies_Get(id);
 		PlanetInfo *p = &g_planetInfo[id];
 		freeBake(p);
 		memset(p, 0, sizeof *p);
@@ -335,7 +348,7 @@ void SolarSystem_Generate(unsigned int seed)
 		if (p->type != PLANET_ROCKY && p->type != PLANET_DWARF)
 			continue;
 		for (int c = 0; c < 3; c++)
-			g_bodies[id].color[c] = (p->style.biome[0][0][c] + p->style.biome[1][0][c] +
+			Bodies_Get(id)->color[c] = (p->style.biome[0][0][c] + p->style.biome[1][0][c] +
 			                         p->style.biome[2][0][c] + p->style.rock[c]) * 0.25f;
 	}
 
@@ -344,8 +357,8 @@ void SolarSystem_Generate(unsigned int seed)
 		const PlanetInfo *p = &g_planetInfo[id];
 		if (p->type == PLANET_NONE)
 			continue;
-		fprintf(stderr, "  %-9s %-11s a %6.2f AU  r %6.0f km%s%s%s\n", g_bodies[id].name,
-		        SolarSystem_TypeName(p->type), g_bodies[id].orbit.a / AU_M, g_bodies[id].radius / 1000.0,
+		fprintf(stderr, "  %-9s %-11s a %6.2f AU  r %6.0f km%s%s%s\n", Bodies_Get(id)->name,
+		        SolarSystem_TypeName(p->type), Bodies_Get(id)->orbit.a / AU_M, Bodies_Get(id)->radius / 1000.0,
 		        p->hasAtmosphere ? "  atmosphere" : "", p->hasRings ? "  rings" : "",
 		        p->hasWater ? "  (water)" : "");
 		if (p->clouds.style != CLOUD_STYLE_NONE)
@@ -356,22 +369,22 @@ void SolarSystem_Generate(unsigned int seed)
 
 void SolarSystem_Init(void)
 {
-	baseStyle = g_planetStyle;
-	baseBake = g_terrainBake;
+	baseStyle = *TerrainGen_Style();
+	baseBake = *TerrainGen_BakeSettings();
 
 	PlanetInfo *e = &g_planetInfo[BODY_EARTH];
 	e->type = PLANET_EARTHLIKE;
 	e->hasAtmosphere = 1;
 	e->hasWater = 1;
 	e->hasRings = 1;
-	e->ringSeed = g_terrainBake.seed;   /* Earth's rings follow its terrain seed */
-	e->atmo = g_atmosphere;              /* for its stand-in until it is first saved */
-	e->clouds = g_clouds;
+	e->ringSeed = TerrainGen_BakeSettings()->seed;   /* Earth's rings follow its terrain seed */
+	e->atmo = *Atmosphere_Params();              /* for its stand-in until it is first saved */
+	e->clouds = *Clouds_Params();
 	e->ringColor[0] = 0.80f; e->ringColor[1] = 0.74f; e->ringColor[2] = 0.66f;
 	e->baked = 1;
 	activeBody = BODY_EARTH;
 
-	SolarSystem_Generate(g_systemSeed);
+	SolarSystem_Generate(ssParams.seed);
 }
 
 int SolarSystem_ActiveBody(void)
@@ -383,26 +396,26 @@ int SolarSystem_ActiveBody(void)
 static void saveActive(void)
 {
 	PlanetInfo *p = &g_planetInfo[activeBody];
-	p->gen = g_planetGen;
-	p->style = g_planetStyle;
-	p->atmo = g_atmosphere;
-	p->clouds = g_clouds;
-	p->bake = g_terrainBake;
-	p->heightTex = planetHeightTex;
+	p->gen = *TerrainGen_GenParams();
+	p->style = *TerrainGen_Style();
+	p->atmo = *Atmosphere_Params();
+	p->clouds = *Clouds_Params();
+	p->bake = *TerrainGen_BakeSettings();
+	p->heightTex = TerrainDraw_HeightTex();
 }
 
 static void loadActive(int body)
 {
 	PlanetInfo *p = &g_planetInfo[body];
-	g_planetGen = p->gen;
-	g_planetStyle = p->style;
-	g_atmosphere = p->atmo;
-	g_clouds = p->clouds;
-	g_terrainBake = p->bake;
-	planetHeightTex = p->heightTex;
+	*TerrainGen_GenParams() = p->gen;
+	*TerrainGen_Style() = p->style;
+	*Atmosphere_Params() = p->atmo;
+	*Clouds_Params() = p->clouds;
+	*TerrainGen_BakeSettings() = p->bake;
+	TerrainDraw_SetHeightTex(p->heightTex);
 	activeBody = body;
 	/* Earth keeps its fixed stylised ring plane; others ring their equator. */
-	const Body *b = &g_bodies[body];
+	const Body *b = Bodies_Get(body);
 	dvec3 pole = { b->rotation.m[0][2], b->rotation.m[1][2], b->rotation.m[2][2] };
 	Rings_SetPlanet(p->hasRings, p->ringSeed, body == BODY_EARTH ? Rings_DefaultNormal() : pole);
 }
@@ -431,7 +444,7 @@ static void pollBake(int wait)
 		PlanetInfo *p = &g_planetInfo[bakeBody];
 		p->heightTex = TerrainGen_BakeFinish(bakeJob, &p->gen);
 		bakeDone(bakeBody);
-		fprintf(stderr, "[system] %s baked\n", g_bodies[bakeBody].name);
+		fprintf(stderr, "[system] %s baked\n", Bodies_Get(bakeBody)->name);
 	} else {
 		TerrainGen_BakeCancel(bakeJob);
 	}
@@ -441,7 +454,7 @@ static void pollBake(int wait)
 
 static int bakeable(int body)
 {
-	return body >= 0 && g_bodies[body].kind == BODY_KIND_TERRAIN &&
+	return body >= 0 && Bodies_Get(body)->kind == BODY_KIND_TERRAIN &&
 	       g_planetInfo[body].type != PLANET_NONE && g_planetInfo[body].type != PLANET_GAS;
 }
 
@@ -450,7 +463,7 @@ static void requestBake(int body)
 {
 	if (bakeJob || !bakeable(body) || g_planetInfo[body].baked)
 		return;
-	fprintf(stderr, "[system] baking %s (background)\n", g_bodies[body].name);
+	fprintf(stderr, "[system] baking %s (background)\n", Bodies_Get(body)->name);
 	bakeJob = TerrainGen_BakeStart(&g_planetInfo[body].bake, &g_planetInfo[body].style);
 	bakeBody = body;
 }
@@ -474,7 +487,7 @@ void SolarSystem_Activate(int body, void (*step)(void))
 		return;
 	saveActive();
 	if (!g_planetInfo[body].baked) {
-		fprintf(stderr, "[system] baking %s\n", g_bodies[body].name);
+		fprintf(stderr, "[system] baking %s\n", Bodies_Get(body)->name);
 		bakeInto(body, step);
 	}
 	loadActive(body);
@@ -518,11 +531,11 @@ void SolarSystem_RebakeActive(void (*step)(void))
 int SolarSystem_PickActive(dvec3 cam)
 {
 	int best = activeBody;
-	double bestPx = Planets_ScreenRadiusPx(&g_bodies[activeBody], cam);
+	double bestPx = Planets_ScreenRadiusPx(Bodies_Get(activeBody), cam);
 	for (int id = 0; id < BODY_COUNT; id++) {
-		if (g_bodies[id].kind != BODY_KIND_TERRAIN)
+		if (Bodies_Get(id)->kind != BODY_KIND_TERRAIN)
 			continue;
-		const Body *b = &g_bodies[id];
+		const Body *b = Bodies_Get(id);
 		double d = dlengthvec3(dsubvec3(b->position, cam));
 		double px = d <= b->radius ? 1e9 : Planets_ScreenRadiusPx(b, cam);
 		if (px >= ACTIVATE_PX && px > bestPx * 1.25) {
@@ -542,4 +555,83 @@ const char *SolarSystem_TypeName(PlanetType t)
 	case PLANET_GAS:       return "Gas giant";
 	default:               return "-";
 	}
+}
+
+/* ---- Debug panel (a tab of the engine/debug/DebugGUI.c window) ---- */
+
+/* Set by the Generate / New system seed buttons, consumed by the app next
+   frame (SolarSystem_Generate runs there, outside the GUI pass). */
+static int newSystemRequested;
+
+int SolarSystem_ConsumeNewSystem(void)
+{
+	int r = newSystemRequested;
+	newSystemRequested = 0;
+	return r;
+}
+
+/* Focus body, time scale and the date. The time scale slider is log-mapped
+   from real time (1) to SIM_TIME_SCALE_MAX. */
+void SolarSystem_DebugPanel(struct nk_context *ctx)
+{
+	/* System seed: every planet but Earth (whose terrain seed is in
+	   Terrain > Generation). */
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 2);
+	static int seedEdit = -1;
+	if (seedEdit < 0)
+		seedEdit = (int)ssParams.seed;
+	nk_property_int(ctx, "System seed", 0, &seedEdit, INT_MAX, 1, 1.0f);
+	if (nk_button_label(ctx, "Generate")) {
+		ssParams.seed = (unsigned int)seedEdit;
+		newSystemRequested = 1;
+	}
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (nk_button_label(ctx, "New system seed")) {
+		seedEdit = (int)(ssParams.seed + 1u);
+		ssParams.seed = (unsigned int)seedEdit;
+		newSystemRequested = 1;
+	}
+	nk_labelf(ctx, NK_TEXT_LEFT, "Active (full detail): %s", Bodies_Get(SolarSystem_ActiveBody())->name);
+	{
+		float progress;
+		int baking = SolarSystem_BakingBody(&progress);
+		if (baking >= 0)
+			nk_labelf(ctx, NK_TEXT_LEFT, "Baking %s... %d%%", Bodies_Get(baking)->name, (int)(progress * 100.0f));
+		else
+			nk_label(ctx, "Baking: -", NK_TEXT_LEFT);
+	}
+	nk_labelf(ctx, NK_TEXT_LEFT, "Day %.2f", Bodies_SimTime() / 86400.0);
+	float lg = (float)log10(Bodies_Params()->timeScale);
+	float lgMax = (float)log10(SIM_TIME_SCALE_MAX);
+	DebugGUI_RowLayout(ctx);
+	nk_label(ctx, "Time scale", NK_TEXT_LEFT);
+	nk_slider_float(ctx, 0.0f, &lg, lgMax, 0.01f);
+	Bodies_Params()->timeScale = pow(10.0, lg);
+	if (Bodies_Params()->timeScale < 86400.0)
+		nk_labelf(ctx, NK_TEXT_RIGHT, "%.0fx", Bodies_Params()->timeScale);
+	else
+		nk_labelf(ctx, NK_TEXT_RIGHT, "%.1f d/s", Bodies_Params()->timeScale / 86400.0);
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (nk_button_label(ctx, "Default time scale"))
+		Bodies_Params()->timeScale = SIM_TIME_SCALE;
+
+	DebugGUI_Group(ctx, "Focus (Tab / Shift+Tab)");
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 3);
+	for (int i = 0; i < BODY_COUNT; i++) {
+		int on = (i == Bodies_Params()->focusBody);
+		if (nk_select_label(ctx, Bodies_Get(i)->name, NK_TEXT_CENTERED, on) && !on)
+			Bodies_Params()->focusBody = i;
+	}
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	const Body *f = Bodies_Get(Bodies_Params()->focusBody);
+	const Body *sun = Bodies_Get(BODY_SUN);
+	double fromSun = dlengthvec3(dsubvec3(f->position, sun->position));
+	nk_labelf(ctx, NK_TEXT_LEFT, "%s: %.2f AU (x%.2g drawn), radius %.0f km",
+	          f->name, fromSun / AU_M / ORBIT_DISTANCE_SCALE, ORBIT_DISTANCE_SCALE, f->radius / 1000.0);
+	const PlanetInfo *pi = &g_planetInfo[Bodies_Params()->focusBody];
+	if (pi->type != PLANET_NONE)
+		nk_labelf(ctx, NK_TEXT_LEFT, "%s%s%s%s%s", SolarSystem_TypeName(pi->type),
+		          pi->hasAtmosphere ? ", atmosphere" : "", pi->hasRings ? ", rings" : "",
+		          pi->hasWater ? ", water" : "",
+		          pi->type == PLANET_GAS ? "" : (pi->baked ? ", baked" : ", not baked"));
 }

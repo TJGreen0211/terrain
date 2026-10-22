@@ -7,10 +7,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-int g_terrainDetail = 1;
-float g_detailRoughness = TERRAIN_DETAIL_ROUGHNESS;
-float g_terrainAO = 1.0f;
-float g_terrainTexStrength = 1.0f;
+static TerrainDetailParams detailParams = { 1, TERRAIN_DETAIL_ROUGHNESS, 1.0f, 1.0f };
+
+TerrainDetailParams * TerrainDetail_Params(void)
+{
+	return &detailParams;
+}
 
 /* detail.glsl's gradient table: DETAIL_TABLE^3 random 3D gradients, one
    2D array texture holding it three times, once per constant cube axis
@@ -132,14 +134,14 @@ typedef struct DetailOctaves {
 /* Metres of relief per raw height unit on land, for the active planet. */
 static double landMetresPerUnit(double radius)
 {
-	return g_planetStyle.landRelief * radius / fmax(1.0 - g_planetGen.seaLevel, 1e-3);
+	return TerrainGen_Style()->landRelief * radius / fmax(1.0 - TerrainGen_GenParams()->seaLevel, 1e-3);
 }
 
 /* The map's RMS height step between neighbouring land texels, metres: the
    reference the coarsest octave's amplitude and the local scale use. */
 static double stepRefMetres(double radius)
 {
-	return g_planetGen.landStepRms * landMetresPerUnit(radius);
+	return TerrainGen_GenParams()->landStepRms * landMetresPerUnit(radius);
 }
 
 /* Octave n has 2^n lattice cells across a cube face, i.e. a wavelength of
@@ -150,9 +152,9 @@ static double stepRefMetres(double radius)
 static DetailOctaves octavesFor(double radius)
 {
 	DetailOctaves o = { 0, 0, 0.0, 0.0, 0.0 };
-	if (!g_terrainDetail || radius <= 0.0)
+	if (!detailParams.enabled || radius <= 0.0)
 		return o;
-	o.amp0 = g_detailRoughness * stepRefMetres(radius);
+	o.amp0 = detailParams.roughness * stepRefMetres(radius);
 	int first = (int)lround(log2((double)TERRAIN_MAP_SIZE));
 	int last = (int)floor(log2(2.0 * radius / TERRAIN_DETAIL_MIN_WAVELENGTH_M));
 	if (first < 0)
@@ -188,7 +190,7 @@ void TerrainDetail_SetUniforms(GLuint shader, double radius, double trianglePx)
 	double stepRef = stepRefMetres(radius);
 	glUniform1f(glGetUniformLocation(shader, "detailSlopeToStep"),
 	            (float)(stepRef > 0.0 ? TerrainGen_MapTexelRad() * landMetresPerUnit(radius) / stepRef : 0.0));
-	glUniform1f(glGetUniformLocation(shader, "terrainAO"), g_terrainAO);
+	glUniform1f(glGetUniformLocation(shader, "terrainAO"), detailParams.ao);
 	glUniform1f(glGetUniformLocation(shader, "detailRadius"), (float)radius);
 	glUniform1f(glGetUniformLocation(shader, "detailPix"), (float)pix);
 	glUniform1f(glGetUniformLocation(shader, "detailTriPx"), (float)trianglePx);
@@ -200,7 +202,7 @@ void TerrainDetail_SetUniforms(GLuint shader, double radius, double trianglePx)
 	glActiveTexture(GL_TEXTURE0 + GROUND_TEXTURE_UNIT);
 	glBindTexture(GL_TEXTURE_2D_ARRAY, groundTex);
 	glUniform1i(glGetUniformLocation(shader, "groundTex"), GROUND_TEXTURE_UNIT);
-	glUniform1f(glGetUniformLocation(shader, "groundTexStrength"), groundTex ? g_terrainTexStrength : 0.0f);
+	glUniform1f(glGetUniformLocation(shader, "groundTexStrength"), groundTex ? detailParams.texStrength : 0.0f);
 	glActiveTexture(GL_TEXTURE0);
 }
 

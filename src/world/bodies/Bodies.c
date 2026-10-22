@@ -5,7 +5,7 @@
 /* The body table. Sun, Earth and the Moon come from WorldConfig.h; the
    other planets are names only until SolarSystem_Generate fills them in
    from the system seed. Colours are look only (Planets.c shading). */
-Body g_bodies[BODY_COUNT] = {
+static Body g_bodies[BODY_COUNT] = {
 	[BODY_SUN] = {
 		.name = "Sun", .kind = BODY_KIND_STAR,
 		.radius = SUN_RADIUS_M * ORBIT_DISTANCE_SCALE,
@@ -37,9 +37,23 @@ Body g_bodies[BODY_COUNT] = {
 	[BODY_MAKEMAKE] = { .name = "Makemake", .parent = BODY_SUN },
 };
 
-double g_simTimeScale = SIM_TIME_SCALE;
-double g_simTime = 0.0;
-int g_focusBody = BODY_EARTH;
+static BodiesParams bodiesParams = { SIM_TIME_SCALE, BODY_EARTH };
+static double g_simTime = 0.0;
+
+Body *Bodies_Get(int id)
+{
+	return &g_bodies[id];
+}
+
+BodiesParams * Bodies_Params(void)
+{
+	return &bodiesParams;
+}
+
+double Bodies_SimTime(void)
+{
+	return g_simTime;
+}
 
 static const double DEG = M_PI / 180.0;
 

@@ -2,6 +2,8 @@
 #include "engine/gfx/Common.h"
 #include "world/atmosphere/Atmosphere.h"
 #include "world/WorldConfig.h"
+#include "engine/debug/DebugGUI.h"
+#include "engine/debug/nk.h"
 
 static GLuint domeProgram;
 static GLuint atmosphereVAO, atmosphereVBO;
@@ -40,7 +42,12 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane)
 	.G_M = -0.85f, \
 }
 
-atmosphereParams g_atmosphere = ATMOSPHERE_DEFAULTS;
+static atmosphereParams g_atmosphere = ATMOSPHERE_DEFAULTS;
+
+atmosphereParams * Atmosphere_Params(void)
+{
+	return &g_atmosphere;
+}
 
 atmosphereParams atmosphereDefaults(void)
 {
@@ -201,4 +208,25 @@ void setAtmosphereExtinction(GLuint shader, float fInner, const atmosphereParams
 {
 	glUniform1f(glGetUniformLocation(shader, "hasAtmosphere"), atmo->shellHeight > 0.0f ? 1.0f : 0.0f);
 	setScatteringUniforms(shader, fInner, atmo);
+}
+
+/* ---- Debug panel (a tab of the engine/debug/DebugGUI.c window) ---- */
+
+void Atmosphere_DebugPanel(struct nk_context *ctx)
+{
+	atmosphereParams *a = &g_atmosphere;
+
+	DebugGUI_Slider(ctx, "Shell height (m)", &a->shellHeight, 1.0e4f, 6.0e5f, 1.0e3f, "%.0f");
+	DebugGUI_Slider(ctx, "Scale height (m)", &a->scaleHeight, 1.0e3f, 2.0e5f, 5.0e2f, "%.0f");
+	DebugGUI_Slider(ctx, "C_R red", &a->C_R.x, 0.0f, 2.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "C_R green", &a->C_R.y, 0.0f, 2.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "C_R blue", &a->C_R.z, 0.0f, 2.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "E (sun)", &a->E, 0.0f, 50.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "K_R", &a->K_R, 0.0f, 1.0f, 0.001f, "%.3f");
+	DebugGUI_Slider(ctx, "K_M", &a->K_M, 0.0f, 0.05f, 0.0001f, "%.4f");
+	DebugGUI_Slider(ctx, "G_M", &a->G_M, -0.999f, -0.5f, 0.001f, "%.3f");
+
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (nk_button_label(ctx, "Reset atmosphere"))
+		*a = atmosphereDefaults();
 }

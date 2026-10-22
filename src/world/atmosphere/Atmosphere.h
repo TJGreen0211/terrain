@@ -18,7 +18,8 @@ typedef struct atmosphereParams {
 	float G_M;        // Mie phase asymmetry, -0.75..-0.999 (closer to -1: tighter sun halo)
 } atmosphereParams;
 
-extern atmosphereParams g_atmosphere;
+/* The active planet's live atmosphere (SolarSystem.c swaps it; debug panel). */
+atmosphereParams *Atmosphere_Params(void);
 atmosphereParams atmosphereDefaults(void); // OpenGLSolar Earth values
 
 // Build the atmosphere dome's program (atmosphere.vert/frag) and its VAO/VBO
@@ -54,5 +55,9 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
 // through the same shell the dome scatters in. The program must be bound.
 // shellHeight <= 0 switches extinction off.
 void setAtmosphereExtinction(GLuint shader, float fInner, const atmosphereParams *atmo);
+
+struct nk_context;
+/* The Atmosphere tab of the debug panel (Atmosphere.c). */
+void Atmosphere_DebugPanel(struct nk_context *ctx);
 
 #endif

@@ -18,7 +18,7 @@
 #pragma optimize("gtp", on)
 
 /* Sea level + ocean depth used by quad.frag/water.frag (see TerrainGen.h). */
-PlanetGenParams g_planetGen = { 0.5f, 0.22f, 0 };
+static PlanetGenParams g_planetGen = { 0.5f, 0.22f, 0 };
 
 /* The baked maps are cube maps (TERRAIN_MAP_SIZE texels per face edge, GL
    face order +X -X +Y -Y +Z -Z). CPU fields hold the six faces back to
@@ -65,7 +65,7 @@ PlanetGenParams g_planetGen = { 0.5f, 0.22f, 0 };
 
 /* Bake inputs (TerrainGen.h). Shaping defaults mirror the [default]
    notes in heightbake.frag. */
-TerrainBakeSettings g_terrainBake = {
+static TerrainBakeSettings g_terrainBake = {
 	.seed = 1337u,
 	.plateCount = 14,
 	.continentArea = 0.42f,
@@ -1370,7 +1370,7 @@ void setOceanUniforms(unsigned int shader, int unit)
    setPlanetSurfaceUniforms converts them to linear albedo for the shader.
    Linear targets roughly: forest ~0.02-0.05, grass ~0.05-0.10,
    desert ~0.15-0.50, fresh snow ~0.85. */
-PlanetStyle g_planetStyle = {
+static PlanetStyle g_planetStyle = {
 	{	/* cold:      tundra             boreal              taiga */
 		{ { 0.47f, 0.44f, 0.38f }, { 0.30f, 0.33f, 0.24f }, { 0.16f, 0.22f, 0.14f } },
 		/* temperate: steppe             grassland           forest */
@@ -2253,4 +2253,19 @@ void TerrainGen_BakeCancel(TerrainBakeJob *job)
 		job->thread = NULL;
 	}
 	freeJob(job);
+}
+
+PlanetGenParams *TerrainGen_GenParams(void)
+{
+	return &g_planetGen;
+}
+
+PlanetStyle *TerrainGen_Style(void)
+{
+	return &g_planetStyle;
+}
+
+TerrainBakeSettings *TerrainGen_BakeSettings(void)
+{
+	return &g_terrainBake;
 }

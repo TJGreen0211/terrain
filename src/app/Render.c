@@ -1,7 +1,7 @@
 #include "app/Render.h"
 #include "app/Bench.h"
 #include "app/CameraSliders.h"
-#include "app/DebugGUI.h"
+#include "engine/debug/DebugGUI.h"
 #include "engine/camera/arcballCamera.h"
 #include "engine/debug/GUI.h"
 #include "engine/debug/Profiler.h"
@@ -114,9 +114,9 @@ void Render_Frame(App *app)
 	dvec3 cam = app->cam;
 	int activeId = SolarSystem_ActiveBody();
 	int isEarth = activeId == BODY_EARTH;
-	const Body *planetB = &g_bodies[activeId];
-	const Body *sun = &g_bodies[BODY_SUN];
-	const Body *moon = &g_bodies[BODY_MOON];
+	const Body *planetB = Bodies_Get(activeId);
+	const Body *sun = Bodies_Get(BODY_SUN);
+	const Body *moon = Bodies_Get(BODY_MOON);
 	mat4 model;
 
 	/* Full passes for the active planet and the Moon only while they are
@@ -130,7 +130,7 @@ void Render_Frame(App *app)
 	dvec3 translation = planetB->position;
 
 	/* Atmosphere: shell starts at the planet surface; the rest of its
-	   parameters live in g_atmosphere (Atmosphere.c, debug panel).
+	   parameters live in Atmosphere_Params() (Atmosphere.c, debug panel).
 	   Shared by the dome (in-scatter) and the planet/water passes
 	   (extinction). */
 	float atmoInner = fScale;
@@ -181,7 +181,7 @@ void Render_Frame(App *app)
 	{
 		dvec3 toSun = dsubvec3(lightWorld, translation);
 		dvec3 sunDir = dscalarvec3(toSun, 1.0 / dlengthvec3(toSun));
-		double boundR = fScale * (1.0 + g_planetStyle.landRelief) * SHADOW_BOUND_MARGIN;
+		double boundR = fScale * (1.0 + TerrainGen_Style()->landRelief) * SHADOW_BOUND_MARGIN;
 		/* Earth's Moon both casts and receives; other planets only self-shadow. */
 		double reach = (isEarth ? dlengthvec3(dsubvec3(moon->position, translation)) + moon->radius * 1.5 : 0.0) + boundR;
 		dvec3 eye = daddvec3(translation, dscalarvec3(sunDir, reach));
@@ -220,8 +220,8 @@ void Render_Frame(App *app)
 				dvec3 toSun = dsubvec3(lightWorld, translation);
 				Shadows_Fit(cam, forward, dscalarvec3(toSun, 1.0 / dlengthvec3(toSun)), nearest, farthest);
 			}
-			for (int i = 0; i < g_cascades.count; i++) {
-				const ShadowCascade *sc = &g_cascades.c[i];
+			for (int i = 0; i < Shadows_Cascades()->count; i++) {
+				const ShadowCascade *sc = &Shadows_Cascades()->c[i];
 				Shadows_BeginCascade(i);
 				if (isEarth)
 					Shadows_DrawMeshCaster(app->quadCubeVAO, app->quadCubeVerts, model, sc->lightSpace);
@@ -322,7 +322,7 @@ void Render_Frame(App *app)
 	//its air in front afterwards. Not tied to planetFull: deep space
 	//is where it matters most. The alpha channel keeps the cloud
 	//cover (above), as for the rings.
-	if (g_nebulaEnabled) {
+	if (Nebula_Enabled()) {
 		Prof_Begin(PROF_NEBULA);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 		Nebula_Draw(sunProj, sunView, cam);
@@ -333,10 +333,10 @@ void Render_Frame(App *app)
 	//Atmosphere dome: OpenGLSolar port (GPU Gems ch.16 scattering on the
 	//planet shell; params above with the planet extinction). Rays end at
 	//the scene depth, so this runs after everything opaque.
-	if (planetFull && g_atmosphere.shellHeight > 0.0f) {
+	if (planetFull && Atmosphere_Params()->shellHeight > 0.0f) {
 		Prof_Begin(PROF_ATMOSPHERE);
 		drawAtmosphereDome(sunProj, sunView, camRelTranslate(translation, cam),
-		                   atmoInner, &g_atmosphere, lightPosition);
+		                   atmoInner, Atmosphere_Params(), lightPosition);
 		Prof_End(PROF_ATMOSPHERE);
 	}
 

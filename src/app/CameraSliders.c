@@ -30,9 +30,9 @@ static float cameraSliderInitT(float minV, float maxV, float value)
 static void onCameraSliderChanged(int id, float t)
 {
 	if (id == UI_SLIDER_MOVEMENT)
-		MovementSpeed = cameraSliderValue(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, t);
+		Camera_SetMoveSpeed(cameraSliderValue(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, t));
 	else if (id == UI_SLIDER_SCROLL)
-		CameraScrollSpeed = cameraSliderValue(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, t);
+		Camera_SetScrollStep(cameraSliderValue(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, t));
 }
 
 /* Accent colours double as labels: blue = movement, orange = scroll. */
@@ -44,10 +44,10 @@ void CameraSliders_Setup(void)
 	uiSliderSetChangedFn(onCameraSliderChanged);
 	/* t0 puts each handle at the current camera default. */
 	uiAddSlider(UI_SLIDER_MOVEMENT,
-		cameraSliderInitT(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, MovementSpeed),
+		cameraSliderInitT(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, Camera_MoveSpeed()),
 		sliderAccentMovement);
 	uiAddSlider(UI_SLIDER_SCROLL,
-		cameraSliderInitT(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, CameraScrollSpeed),
+		cameraSliderInitT(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, Camera_ScrollStep()),
 		sliderAccentScroll);
 }
 

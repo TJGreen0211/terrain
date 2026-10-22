@@ -28,8 +28,8 @@ typedef struct ShadowCascades {
 	ShadowCascade c[SHADOW_MAX_CASCADES];
 } ShadowCascades;
 
-extern ShadowCascades g_cascades;
-extern int g_shadowDebug;   /* debug panel: tint receivers by level */
+/* This frame's cascades (Shadows_Fit). */
+const ShadowCascades *Shadows_Cascades(void);
 
 /* The global map, the cascades and the caster program. */
 void Shadows_InitGL(void);
@@ -66,5 +66,9 @@ void Shadows_BindReceiver(GLuint shader, int unit);
 /* Every shadow input of a receiver: the global map at `unit` (depthMap,
    lightSpace, shadowTexel), then the cascades at unit 13. */
 void Shadows_BindMaps(GLuint shader, int unit);
+
+struct nk_context;
+/* The Shadows tab of the debug panel (Shadows.c). */
+void Shadows_DebugPanel(struct nk_context *ctx);
 
 #endif
