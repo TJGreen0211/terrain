@@ -7,6 +7,7 @@ SRCS = Main.c \
 	Skybox.c \
 	Atmosphere.c \
 	Clouds.c \
+	Nebula.c \
 	Rings.c \
 	Bodies.c \
 	Profiler.c \

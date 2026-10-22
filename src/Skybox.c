@@ -1,15 +1,49 @@
 #include "Common.h"
 #include "CommonGL.h"
 #include "Skybox.h"
+#include "Nebula.h"
+#include <stdio.h>
 
 static GLuint skyboxShader;
 static GLuint skyboxVAO, skyboxVBO;
 
-// Six faces in the order loadCubemap expects for CUBE_MAP_POSITIVE_X+i:
-// +X, -X, +Y, -Y, -Z, +Z  ==  right, left, top, bottom, back, front.
+// Six faces in the order loadCubemap expects: faces[i] goes to
+// CUBE_MAP_POSITIVE_X+i, so right, left, top, bottom, back, front are
+// +X, -X, +Y, -Y, +Z, -Z (the nebula bake writes them in this order).
 // The app chdir's to src, so assets live in ../assets.
+static const char *faceNames[6] = { "right", "left", "top", "bottom", "back", "front" };
+
+// The nebula sky set g_nebulaSkyName (Nebula.c), with its settings, when
+// all six faces are there; 0 otherwise.
+static GLuint loadNebulaSky(void)
+{
+	if (!g_nebulaSkyName[0])
+		return 0;
+	char paths[6][256];
+	char *faces[6];
+	for (int i = 0; i < 6; i++) {
+		snprintf(paths[i], sizeof paths[i], "../assets/textures/nebula_%s/%s.png", g_nebulaSkyName, faceNames[i]);
+		FILE *f = fopen(paths[i], "rb");
+		if (!f) {
+			fprintf(stderr, "[skybox] no nebula sky '%s' (%s); using skybox3\n", g_nebulaSkyName, paths[i]);
+			return 0;
+		}
+		fclose(f);
+		faces[i] = paths[i];
+	}
+	// The runtime wisps use the settings the sky was baked with. The baked
+	// glow crosses face edges: filter across them too (only for a nebula
+	// sky, so skybox3 samples as it always has).
+	Nebula_LoadParams(g_nebulaSkyName);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	return loadCubemap(faces);
+}
+
 GLuint loadSkyboxCube(void)
 {
+	GLuint nebula = loadNebulaSky();
+	if (nebula)
+		return nebula;
 	char *cubemapArray[] = {
 		"../assets/textures/skybox3/right.png",
 		"../assets/textures/skybox3/left.png",

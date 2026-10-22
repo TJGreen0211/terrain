@@ -8,12 +8,12 @@ static int loadStepDone = 0;
 static int loadTotal = 0;   /* 0 = LOAD_TOTAL_STEPS (start-up) */
 
 // Number of discrete load steps main() takes: waves (1) + all shaders (1) +
-// quadtree (1) + sun (1) + skybox setup (1) + skybox cube (1) + textures (1) +
+// quadtree (1) + sun (1) + skybox setup (1) + nebula (1) + skybox cube (1) + textures (1) +
 // sphere/atmosphere/ring (1) + OBJ models (3) + quad cube (1) + framebuffers
 // (1) + the heightmap bake's own steps (TERRAIN_BAKE_STEPS). Steps are grouped
 // so each covers a roughly similar slice of load time. If the count drifts the
 // bar just tops out early or late, and the final frame forces it to 1.0.
-#define LOAD_TOTAL_STEPS (1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 3 + 1 + 1 + TERRAIN_BAKE_STEPS)
+#define LOAD_TOTAL_STEPS (1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 3 + 1 + 1 + TERRAIN_BAKE_STEPS)
 
 void LoadingScreen_Init(GLFWwindow *window)
 {

@@ -245,6 +245,40 @@
 #define CLOUD_GEN_THICKNESS_MAX     0.6
 #define CLOUD_GEN_MAX_SHELL         0.6
 
+/* ---- Nebula (Nebula.c, nebula*.glsl/frag) --------------------------------
+   One density function in nebula units n = (p - sun) / NEBULA_RADIUS_M,
+   in two layers that never overlap (.kilo/plans/...-volumetric-nebula-
+   skybox.md):
+   - near: wisps inside |n| < 1, ray-marched every frame with real
+     parallax (NEBULA_ENABLE_DEFAULT; debug panel);
+   - far: a shell |n| in [FAR_START, FAR_END], baked into the skybox
+     cubemap as seen from the sun (cube.exe --bake-sky <name>, or the debug
+     panel's Rebake). Its parallax error for a camera at |n| = c is about
+     c / FAR_START radians.
+   Nebula radius: about the generated system's size (CAMERA_DISTANCE_MAX_M
+   is 2e12). Both switches start off so bench references stay
+   pixel-identical: an empty sky name keeps assets/textures/skybox3. */
+#define NEBULA_ENABLE_DEFAULT       0
+#define NEBULA_SKY_NAME             ""
+#define NEBULA_RADIUS_M             1.0e12
+#define NEBULA_FAR_START            60.0
+#define NEBULA_FAR_END              200.0
+#define NEBULA_SEED_DEFAULT         1u
+/* Bake: face size (texels), coarse march steps through the far shell's
+   empty space (inside clouds the march steps a pixel's footprint), and
+   the rows drawn per strip (each strip is one draw, kept short of the 2 s
+   Windows GPU timeout on an integrated GPU). */
+#define NEBULA_SKY_FACE_SIZE        2048
+#define NEBULA_BAKE_STEPS           128
+#define NEBULA_BAKE_STRIP_ROWS      32
+/* Runtime: march steps through the near sphere (a chord of at most 2),
+   and the presence grid's texels per side over n in [-1, 1]^3. */
+#define NEBULA_VOL_STEPS            48
+#define NEBULA_GRID_SIZE            64
+/* Float32 lattice exactness: the noise coordinate n / wavelength stays
+   under ~1e4 when the wavelengths are kept above this (nebula units). */
+#define NEBULA_MIN_WAVELENGTH       1.0e-3
+
 /* ---- Ocean ---------------------------------------------------------------
    Geometric swell: rms height (m) the water shell's vertices are displaced
    by at "Wave height" 1.0 (debug panel). Shading (slopes, foam) uses the

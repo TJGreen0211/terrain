@@ -1,6 +1,7 @@
 #define _CRT_SECURE_NO_WARNINGS // nuklear's NK_INCLUDE_STANDARD_IO uses fopen
 #include "DebugGUI.h"
 #include "Atmosphere.h"
+#include "Nebula.h"
 #include "Clouds.h"
 #include "TerrainGen.h"
 #include "TerrainDetail.h"
@@ -124,6 +125,101 @@ static void groupLabel(const char *text)
 {
 	nk_layout_row_dynamic(ctx, rowHeight, 1);
 	nk_label_colored(ctx, text, NK_TEXT_LEFT, nk_rgb(150, 170, 200));
+}
+
+/* The nebula (Nebula.c). The near layer (in-system wisps) follows the
+   sliders live; the far layer (the sky) only on Rebake, which blocks for
+   a few seconds at 1024 and more at 2048. Save writes the baked sky and
+   these settings to assets/textures/nebula_<sky name>/. */
+static void nebulaSection(void)
+{
+	nebulaParams *n = &g_nebula;
+
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
+	nk_checkbox_label(ctx, "In-system wisps on", &g_nebulaEnabled);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Sky set: %s", g_nebulaSkyName[0] ? g_nebulaSkyName : "(skybox3; saves as 'custom')");
+
+	int seed = (int)n->seed;
+	sliderRowInt("Seed", &seed, 1, 999);
+	n->seed = (unsigned int)seed;
+	groupLabel("Look (both layers)");
+	sliderRow("Turbulence", &n->turbulence, 0.0f, 2.0f, 0.01f, "%.2f");
+	sliderRow("Contrast", &n->contrast, 0.5f, 6.0f, 0.05f, "%.2f");
+	sliderRow("Emission", &n->emission, 0.0f, 2.0f, 0.01f, "%.2f");
+	sliderRow("Dark lanes", &n->dark, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour A red", &n->colA[0], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour A green", &n->colA[1], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour A blue", &n->colA[2], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour B red", &n->colB[0], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour B green", &n->colB[1], 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Colour B blue", &n->colB[2], 0.0f, 1.0f, 0.01f, "%.2f");
+	groupLabel("Near layer (live)");
+	sliderRow("Wavelength (Rb)", &n->nearWavelength, 0.02f, 1.0f, 0.005f, "%.3f");
+	sliderRow("Coverage", &n->nearCoverage, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Density", &n->nearDensity, 0.0f, 4.0f, 0.01f, "%.2f");
+	sliderRow("Extinction", &n->nearSigma, 0.0f, 20.0f, 0.1f, "%.1f");
+	sliderRow("Sun scatter", &n->scatter, 0.0f, 4.0f, 0.01f, "%.2f");
+	groupLabel("Far layer (rebake to apply)");
+	sliderRow("Wavelength (shell)", &n->farWavelength, 0.05f, 2.0f, 0.01f, "%.2f");
+	sliderRow("Coverage", &n->farCoverage, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Density", &n->farDensity, 0.0f, 4.0f, 0.01f, "%.2f");
+	sliderRow("Extinction", &n->farSigma, 0.0f, 60.0f, 0.5f, "%.1f");
+	sliderRow("Erosion", &n->farErosion, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Erosion detail", &n->farDetail, 0.5f, 8.0f, 0.1f, "%.1f");
+	sliderRow("Galaxy band", &n->band, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Band tilt (deg)", &n->bandTilt, 0.0f, 90.0f, 1.0f, "%.0f");
+	sliderRow("Star density", &n->starDensity, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Star brightness", &n->starBrightness, 0.0f, 4.0f, 0.01f, "%.2f");
+	groupLabel("Far layer composition (rebake to apply)");
+	sliderRow("Cloud bodies", &n->bodyCount, 0.0f, 8.0f, 1.0f, "%.0f");
+	sliderRow("Body size", &n->bodySize, 0.2f, 1.5f, 0.01f, "%.2f");
+	sliderRow("Body stretch", &n->bodyStretch, 1.0f, 5.0f, 0.05f, "%.2f");
+	sliderRow("Edge breakup", &n->bodyBreakup, 0.0f, 0.8f, 0.01f, "%.2f");
+	sliderRow("Core fill", &n->bodyFill, 0.3f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Density curve", &n->densityCurve, 0.5f, 4.0f, 0.05f, "%.2f");
+	sliderRow("Filaments", &n->filament, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Filament reach", &n->filReach, 1.0f, 4.0f, 0.05f, "%.2f");
+	sliderRow("Filament stretch", &n->filStretch, 1.0f, 10.0f, 0.1f, "%.1f");
+	sliderRow("Filament count", &n->filScale, 0.5f, 8.0f, 0.1f, "%.1f");
+	sliderRow("Filament sway", &n->filBend, 0.0f, 1.5f, 0.01f, "%.2f");
+	sliderRow("Filament fill", &n->filCover, 0.2f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Filament taper", &n->filTaper, 0.0f, 1.0f, 0.01f, "%.2f");
+	groupLabel("Far layer emissive gas (rebake to apply)");
+	sliderRow("Gas glow", &n->gasStrength, 0.0f, 0.5f, 0.005f, "%.3f");
+	sliderRow("Gas glow near lights", &n->gasLight, 0.0f, 0.5f, 0.005f, "%.3f");
+	sliderRow("Gas extent", &n->gasExtent, 1.0f, 2.5f, 0.01f, "%.2f");
+	sliderRow("Gas light radius", &n->gasRadius, 0.1f, 4.0f, 0.05f, "%.2f");
+	sliderRow("Gas patchiness", &n->gasContrast, 0.5f, 6.0f, 0.05f, "%.2f");
+	sliderRow("Gas behind dust", &n->gasBack, 0.0f, 1.5f, 0.01f, "%.2f");
+	groupLabel("Far layer lighting (rebake to apply)");
+	sliderRow("Lights (one per body)", &n->lightCount, 0.0f, 8.0f, 1.0f, "%.0f");
+	sliderRow("Light behind body", &n->lightBack, 0.0f, 3.0f, 0.01f, "%.2f");
+	sliderRow("Light intensity", &n->lightIntensity, 0.0f, 20.0f, 0.1f, "%.1f");
+	sliderRow("Light radius", &n->lightRadius, 0.05f, 1.5f, 0.01f, "%.2f");
+	sliderRow("Gas around lights", &n->lightClump, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Dust albedo", &n->dustAlbedo, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Ambient", &n->ambient, 0.0f, 0.5f, 0.005f, "%.3f");
+	sliderRow("Forward scatter", &n->phaseG, 0.0f, 0.95f, 0.01f, "%.2f");
+	sliderRow("Powder", &n->powder, 0.0f, 1.0f, 0.01f, "%.2f");
+	sliderRow("Core size (rad)", &n->coreSize, 0.0005f, 0.03f, 0.0005f, "%.4f");
+	sliderRow("Edge glow", &n->edgeGlow, 0.0f, 3.0f, 0.01f, "%.2f");
+	sliderRow("Edge width", &n->edgeWidth, 0.02f, 1.0f, 0.01f, "%.2f");
+	groupLabel("Sky glow (rebake to apply)");
+	sliderRow("Bloom", &n->bloomStrength, 0.0f, 3.0f, 0.01f, "%.2f");
+	sliderRow("Bloom width (mips)", &n->bloomLevels, 0.0f, 9.0f, 1.0f, "%.0f");
+	sliderRow("Exposure", &n->skyExposure, 0.1f, 4.0f, 0.01f, "%.2f");
+	sliderRow("Contrast", &n->skyContrast, 0.5f, 3.0f, 0.01f, "%.2f");
+	sliderRowInt("Bake face size", &g_nebulaBakeSize, 256, 2048);
+
+	nk_layout_row_dynamic(ctx, rowHeight, 2);
+	if (nk_button_label(ctx, "Rebake sky"))
+		Nebula_RequestRebake(0);
+	if (nk_button_label(ctx, "Axis test sky"))
+		Nebula_RequestRebake(1);
+	if (nk_button_label(ctx, "Save sky"))
+		Nebula_RequestSave();
+	if (nk_button_label(ctx, "Reset nebula"))
+		*n = nebulaDefaults();
 }
 
 static void atmosphereSection(void)
@@ -436,6 +532,10 @@ static void buildPanel(void)
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Clouds", NK_MINIMIZED)) {
 			cloudsSection();
+			nk_tree_pop(ctx);
+		}
+		if (nk_tree_push(ctx, NK_TREE_TAB, "Nebula", NK_MINIMIZED)) {
+			nebulaSection();
 			nk_tree_pop(ctx);
 		}
 		if (nk_tree_push(ctx, NK_TREE_TAB, "Water", NK_MINIMIZED)) {

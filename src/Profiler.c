@@ -12,7 +12,7 @@
 #define PROF_MAX_SAMPLES 2048
 
 static const char *names[PROF_COUNT] = {
-	"Waves (FFT)", "Shadow map", "Moon", "Planet", "Water", "Clouds", "Rings", "Atmosphere", "Resolve + UI"
+	"Waves (FFT)", "Shadow map", "Moon", "Planet", "Water", "Clouds", "Rings", "Atmosphere", "Nebula", "Resolve + UI"
 };
 
 static GLuint queries[PROF_LAG][PROF_COUNT];

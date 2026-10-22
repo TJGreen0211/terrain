@@ -3,6 +3,7 @@
 #include "Planets.h"
 #include "SolarSystem.h"
 #include "Skybox.h"
+#include "Nebula.h"
 #include "Atmosphere.h"
 #include "Clouds.h"
 #include "LoadingScreen.h"
@@ -396,6 +397,7 @@ static void ensureSceneTarget(int w, int h) {
 		fprintf(stderr, "[main] scene framebuffer incomplete\n");
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	Atmosphere_SetSceneDepth(g_sceneDepthTex, SCENE_SAMPLES, CAMERA_NEAR);
+	Nebula_SetSceneDepth(g_sceneDepthTex, SCENE_SAMPLES, CAMERA_NEAR);
 }
 
 /* Switches clip control, depth test and depth clear value between the main
@@ -1008,6 +1010,7 @@ int main(int argc, char *argv[])
 		chdir(exePath);
 	}
 	Bench_ParseArgs(argc, argv);
+	Nebula_ParseArgs(argc, argv);
 	GLFWwindow *window = setupGLFW();
 	if (window == NULL)
     {
@@ -1029,6 +1032,12 @@ int main(int argc, char *argv[])
 	}
 	if (Bench_Active())
 		glfwSwapInterval(0);   /* no vsync: frames run as fast as they can */
+	/* cube.exe --bake-sky <name>: bake the nebula sky's faces and exit. */
+	if (Nebula_BakeRequested()) {
+		int rc = Nebula_RunBake();
+		glfwTerminate();
+		return rc;
+	}
 
 	// Show the loading screen before the first blocking load, so the window
 	// never sits blank/unresponsive while shaders compile, textures and models
@@ -1075,6 +1084,9 @@ int main(int argc, char *argv[])
 
 	initSkybox();
 	LoadingScreen_Step();
+	Nebula_Init();
+	LoadingScreen_Step();
+	/* A baked nebula sky (g_nebulaSkyName) also loads its settings. */
 	GLuint skyboxTexture = loadSkyboxCube();
 	LoadingScreen_Step();
 
@@ -1382,6 +1394,10 @@ int main(int argc, char *argv[])
 
 		/* Main pass: the multisampled float-depth scene target, reversed-Z
 		   (see setReversedDepth), resolved into the window before the UI. */
+		/* Nebula presence grid on a settings change; Rebake / Save
+		   requests from the debug panel (blocking). */
+		Nebula_Update();
+
 		int sceneW = (int)getWindowWidth(), sceneH = (int)getWindowHeight();
 		ensureSceneTarget(sceneW, sceneH);
 		glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
@@ -1393,7 +1409,7 @@ int main(int argc, char *argv[])
 
 		//Skybox: full-screen background, drawn first (far plane, no depth write)
 		mat4 skyboxProj = cameraProjection();
-		drawSkybox(skyboxTexture, skyboxProj, getViewRotation());
+		drawSkybox(Nebula_SkyTexture(skyboxTexture), skyboxProj, getViewRotation());
 
 		glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
 		if (moonFull) {
@@ -1527,6 +1543,19 @@ int main(int argc, char *argv[])
 			Rings_DrawDust(sunProj, sunView);
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			Prof_End(PROF_RINGS);
+		}
+
+		//Nebula: the in-system wisps (Nebula.c), marched to the scene
+		//depth and blended over everything drawn so far; the dome adds
+		//its air in front afterwards. Not tied to planetFull: deep space
+		//is where it matters most. The alpha channel keeps the cloud
+		//cover (above), as for the rings.
+		if (g_nebulaEnabled) {
+			Prof_Begin(PROF_NEBULA);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+			Nebula_Draw(sunProj, sunView, g_cam);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			Prof_End(PROF_NEBULA);
 		}
 
 		//Atmosphere dome: OpenGLSolar port (GPU Gems ch.16 scattering on the
