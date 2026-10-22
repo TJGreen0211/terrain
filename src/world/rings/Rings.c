@@ -1,4 +1,5 @@
-#include "app/Main.h"
+#include "engine/gfx/Common.h"
+#include "engine/platform/Window.h"
 #include "world/rings/Rings.h"
 #include "world/WorldConfig.h"
 #include <math.h>

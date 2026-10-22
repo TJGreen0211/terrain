@@ -1,19 +1,27 @@
 #ifndef CAMERA_H
 #define CAMERA_H
-#ifdef __APPLE__
-# define __gl_h_
-# define GL_DO_NOT_WARN_IF_MULTI_GL_VERSION_HEADERS_INCLUDED
-#endif
-
-#include <windows.h>
-#include <glad/glad.h> 
-#include <GLFW/glfw3.h>
+#include "engine/core/gl.h"
 
 #include "engine/platform/Window.h"
 #include "engine/math/LinearAlg.h"
 
+/* Scales, all in metres (and m/s). The app fills these from WorldConfig.h:
+   the engine camera has no world constants of its own. */
+typedef struct CameraConfig {
+    double distanceMax;       /* farthest scroll-out orbit radius */
+    double moveSpeed;         /* WASD speed, m/s */
+    double scrollStep;        /* dolly per wheel notch */
+    double spawnDistance;     /* initial pivot, in front of the focus body */
+    double referenceRadius;   /* body radius the surface radii are given for */
+    double surfaceMinRadius;  /* surface preset (G): radius range from the */
+    double surfaceMaxRadius;  /*   body centre, for referenceRadius */
+    double surfaceTiltDeg;    /* surface preset: view tilt below the horizon */
+} CameraConfig;
+/* Call once, before any other camera function. */
+void Camera_Init(const CameraConfig *cfg);
+
 extern float CameraDistance;
-extern const float CameraDistanceMax;
+extern float CameraDistanceMax;
 extern GLfloat MovementSpeed;
 extern GLfloat CameraScrollSpeed;
 

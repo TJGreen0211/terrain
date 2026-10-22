@@ -1,7 +1,7 @@
 #ifndef CLOUDS_H
 #define CLOUDS_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "engine/math/LinearAlg.h"
 
 /* Cloud layers (docs/volumetric-clouds.md). Every planet with air can have

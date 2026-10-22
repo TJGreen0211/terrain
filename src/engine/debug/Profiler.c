@@ -1,6 +1,5 @@
 #include "engine/debug/Profiler.h"
-#include <windows.h>
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

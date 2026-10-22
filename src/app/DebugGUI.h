@@ -6,7 +6,8 @@
    right. Nuklear stays private to DebugGUI.c (its NK_INCLUDE_* config must
    match in every file that includes it), so callers only see this API.
 
-   Input.c keeps ownership of the GLFW callbacks and forwards events here;
+   Input.c keeps ownership of the GLFW callbacks and forwards events here
+   through the InputUiHooks Main.c registers (Input_SetUiHooks);
    DebugGUI_WantsMouse lets it skip the arcball / camera zoom while the
    cursor is over the panel. F1 toggles visibility. Sections edit the
    modules' live parameter structs directly (g_atmosphere, ...). */

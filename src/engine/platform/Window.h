@@ -1,15 +1,10 @@
 #ifndef WINDOW_H
 #define WINDOW_H
-#ifdef __APPLE__
-# define __gl_h_
-# define GL_DO_NOT_WARN_IF_MULTI_GL_VERSION_HEADERS_INCLUDED
-#endif
+#include "engine/core/gl.h"
 
-#include <windows.h>
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
-
-GLFWwindow *setupGLFW();
+/* fixedWidth/fixedHeight > 0: a hidden window of exactly that size (bench
+   runs); 0: a visible window the size of the primary monitor. */
+GLFWwindow *setupGLFW(const char *title, int fixedWidth, int fixedHeight);
 float getWindowWidth();
 float getWindowHeight();
 

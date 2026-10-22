@@ -252,6 +252,20 @@ A phase is green only when all four checks pass:
 - `Window_Create` takes its size as a parameter, so Bench passes it in. Drop the
   unused `Bench.h` include in `Water.c`.
 - Switch `check_modules.ps1` to failing the build.
+- Done 2026-10-22:
+  - `Water.c` did use `Bench.h`: its `App_Time()` was the wave clock. The
+    time is now a parameter of `initializeWaves` and `generateWaves`, and
+    `Main` passes `App_Time()` in.
+  - The camera takes its scales through `CameraConfig` / `Camera_Init`, filled
+    from `WorldConfig.h` by `Main`.
+  - `Input` forwards to the GUI through `InputUiHooks` / `Input_SetUiHooks`.
+  - `setupGLFW(title, fixedW, fixedH)` replaces the Bench call.
+  - The build runs `check_modules.ps1 -Strict` first (Makefile `check`), and
+    `CFLAGS` has `/we4013`: an undeclared function is now an error. Removing
+    `Main.h` exposed six implicit declarations, including `float`-returning
+    window getters that would have read as `int`.
+  - `gl.h` includes `windows.h` first, which removed the two `APIENTRY`
+    redefinition warnings. The `__APPLE__` guards were dropped.
 
 **Phase 6 — move rendering out of `Main.c` into its owners.**
 - `init*Shader` functions go to their modules.

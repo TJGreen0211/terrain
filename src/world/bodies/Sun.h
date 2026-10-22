@@ -1,7 +1,7 @@
 #ifndef SUN_H
 #define SUN_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "engine/math/LinearAlg.h"
 
 // `radius` (both passes): world-space radius used to project the sun's

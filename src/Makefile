@@ -9,7 +9,7 @@
 # it. Changing CFLAGS or INCLUDE_PATHS is not tracked: run `nmake clean`.
 
 CC = cl.exe
-CFLAGS = /nologo /W3 /O2 /openmp /D_USE_MATH_DEFINES /MD
+CFLAGS = /nologo /W3 /we4013 /O2 /openmp /D_USE_MATH_DEFINES /MD
 OUTDIR = ..\build
 OBJDIR = $(OUTDIR)\obj
 PROG = $(OUTDIR)\cube.exe
@@ -41,7 +41,12 @@ OBJS =
 !include ..\third_party\module.mk
 
 # First target = the default goal, so it must come before deps.mk's targets.
-all: $(PROG)
+# `check` runs first: a module-boundary violation fails the build
+# (docs\module-refactor-plan.md, section 3).
+all: check $(PROG)
+
+check:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File ..\tools\check_modules.ps1 -Strict
 
 !if [powershell -NoProfile -ExecutionPolicy Bypass -File ..\tools\gen_deps.ps1 -ObjDir $(OBJDIR) -Out $(OBJDIR)\deps.mk]
 !endif

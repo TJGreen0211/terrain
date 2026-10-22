@@ -1,4 +1,19 @@
-#include "app/Main.h"
+#include "engine/core/gl.h"
+#include "engine/gfx/LoadShader.h"
+#include "engine/math/LinearAlg.h"
+#include "engine/camera/arcballCamera.h"
+#include "engine/platform/Window.h"
+#include "engine/gfx/Sphere.h"
+#include "engine/gfx/Geometry.h"
+#include "engine/gfx/Obj.h"
+#include "world/terrain/QuadCube.h"
+#include "world/terrain/QuadTree.h"
+#include "world/ocean/Water.h"
+#include "engine/gfx/Common.h"
+#include "engine/gfx/Textures.h"
+#include "engine/gfx/Buffers.h"
+#include "engine/gfx/CommonGL.h"
+#include "engine/platform/Input.h"
 #include "world/bodies/Sun.h"
 #include "world/bodies/Planets.h"
 #include "world/bodies/SolarSystem.h"
@@ -27,6 +42,7 @@
 #include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <direct.h>
 //#include <pthread.h>
 
 /* World units are metres; every scale constant (camera near plane, shadow
@@ -1036,23 +1052,41 @@ int main(int argc, char *argv[])
 	struct obj rockObj[3];
 	/* Simulation clock (seconds, double): drives every orbit and spin. */
 	double simTime = 0.0;
+	{
+		CameraConfig cam = {
+			CAMERA_DISTANCE_MAX_M, CAMERA_MOVE_SPEED_MPS, CAMERA_SCROLL_STEP_M,
+			CAMERA_SPAWN_DISTANCE_M, EARTH_RADIUS_M,
+			SURFACE_CAMERA_MIN_RADIUS_M, SURFACE_CAMERA_MAX_RADIUS_M, SURFACE_CAMERA_TILT_DEG
+		};
+		Camera_Init(&cam);
+	}
 	//printf("\tWorkdir: %s\n", getenv("PWD"));
 	{
 		char exePath[MAX_PATH];
 		GetModuleFileNameA(NULL, exePath, MAX_PATH);
 		char *slash = strrchr(exePath, '\\');
 		if(slash) *slash = '\0';
-		chdir(exePath);
+		_chdir(exePath);
 	}
 	Bench_ParseArgs(argc, argv);
 	Nebula_ParseArgs(argc, argv);
-	GLFWwindow *window = setupGLFW();
+	int benchW = 0, benchH = 0;
+	int benchSize = Bench_FixedWindowSize(&benchW, &benchH);
+	GLFWwindow *window = setupGLFW(benchSize ? "Bench" : "Shadows", benchW, benchH);
 	if (window == NULL)
     {
         printf("Failed to create GLFW window.");
         glfwTerminate();
         return -1;
     }
+	/* The debug panel sees input before the camera (Input.c). */
+	{
+		InputUiHooks hooks = {
+			DebugGUI_KeyEvent, DebugGUI_CharEvent, DebugGUI_ScrollEvent,
+			DebugGUI_MouseButtonEvent, DebugGUI_WantsMouse, DebugGUI_ToggleVisible
+		};
+		Input_SetUiHooks(&hooks);
+	}
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
         printf("Failed to initialize GLAD");
@@ -1084,7 +1118,7 @@ int main(int argc, char *argv[])
 	GLuint sunNoiseTexture;
 
 	struct waves ocean;
-	initializeWaves(&ocean, 256);
+	initializeWaves(&ocean, 256, App_Time());
 	LoadingScreen_Step();
 
 	GLuint tessShader = initTessShader();
@@ -1253,7 +1287,7 @@ int main(int argc, char *argv[])
 		/* Ocean waves: only Earth has water. */
 		if (SolarSystem_ActiveBody() == BODY_EARTH) {
 			Prof_Begin(PROF_WAVES);
-			generateWaves(&ocean);
+			generateWaves(&ocean, App_Time());
 			Prof_End(PROF_WAVES);
 		}
 

@@ -1,7 +1,7 @@
 #ifndef SKYBOX_H
 #define SKYBOX_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "engine/math/LinearAlg.h"
 
 // Compile the skybox program and upload its 36-triangle box. Call once after

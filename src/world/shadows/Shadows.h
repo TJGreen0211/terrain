@@ -1,7 +1,7 @@
 #ifndef SHADOWS_H
 #define SHADOWS_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "engine/math/LinearAlg.h"
 
 /* Cascaded sun shadows (shaders/shadow.glsl). SHADOW_CASCADES orthographic

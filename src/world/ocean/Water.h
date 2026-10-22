@@ -1,13 +1,6 @@
 #ifndef WATER_H
 #define WATER_H
-#ifdef __APPLE__
-#define __gl_h_
-#define GL_DO_NOT_WARN_IF_MULTI_GL_VERSION_HEADERS_INCLUDED
-#endif
-
-#include <windows.h>
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
+#include "engine/core/gl.h"
 
 #include "engine/math/LinearAlg.h"
 #include "world/WorldConfig.h"
@@ -45,7 +38,8 @@ extern float g_waveParams[5];
    from it to OCEAN_SWELL_RMS_M (WorldConfig.h). */
 #define OCEAN_FFT_RMS 0.0025f
 
-void generateWaves(waves *water);
+/* time: the scene clock in seconds (the app's App_Time). */
+void generateWaves(waves *water, double time);
 /* Side (m) of cascade c's patch: OCEAN_WAVE_PATCH_M / OCEAN_CASCADE_RATIO^c. */
 double waveCascadePatchM(int c);
 /* How much larger than true size cascade c is drawn: the "Wave scale" knob
@@ -56,6 +50,6 @@ double waveCascadeScale(int c);
 /* Cascade c's share of the total rms height at true size (0..1, the
    cascades' variances add up to 1). */
 double waveCascadeRmsFrac(int c);
-void initializeWaves(waves *water, int dim);
+void initializeWaves(waves *water, int dim, double time);
 
 #endif

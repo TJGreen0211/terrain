@@ -1,7 +1,7 @@
 #ifndef TERRAINDETAIL_H
 #define TERRAINDETAIL_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 
 /* Terrain detail below the height map's resolution (step 3b): fractal
    gradient noise on land, evaluated in shaders/detail.glsl on an integer

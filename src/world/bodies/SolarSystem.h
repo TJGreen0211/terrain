@@ -1,7 +1,7 @@
 #ifndef SOLARSYSTEM_H
 #define SOLARSYSTEM_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "world/bodies/Bodies.h"
 #include "world/terrain/TerrainGen.h"
 #include "world/atmosphere/Atmosphere.h"

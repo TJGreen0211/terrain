@@ -9,8 +9,7 @@
 #include <string.h>
 #include <math.h>
 
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
+#include "engine/core/gl.h"
 
 #include "engine/platform/Window.h"
 #include "engine/math/LinearAlg.h"

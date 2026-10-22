@@ -9,6 +9,8 @@
 #include "world/ocean/Water.h"
 #include "world/bodies/Bodies.h"
 #include "world/bodies/SolarSystem.h"
+#include "world/terrain/QuadTree.h"
+#include "engine/camera/arcballCamera.h"
 #include "engine/debug/Profiler.h"
 #include "world/WorldConfig.h"
 #include <limits.h>

@@ -6,11 +6,9 @@
 #include <stdlib.h>
 #include <math.h>
 #include "engine/math/LinearAlg.h"
-#include <windows.h>
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "engine/platform/Window.h"
 
-#define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 
 /* Cube-sphere quadtree LOD bodies (planet, water shell, moon).
 

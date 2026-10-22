@@ -1,6 +1,5 @@
 #include "engine/platform/Input.h"
 #include "engine/debug/GUI.h"
-#include "app/DebugGUI.h"
 
 /* Held state per movement key, so any combination (W+D, W+A, ...) moves at
    once and releasing one key leaves the others held. */
@@ -10,9 +9,21 @@ static int rotationPaused = 0;
 static int regenRequested = 0;
 static int focusStep = 0;
 
+static InputUiHooks ui;
+
+void Input_SetUiHooks(const InputUiHooks *hooks)
+{
+    ui = *hooks;
+}
+
+static int uiWantsMouse(double x, double y)
+{
+    return ui.wantsMouse && ui.wantsMouse(x, y);
+}
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
-    DebugGUI_KeyEvent(window, key, scancode, action, mode);
+    if (ui.key) ui.key(window, key, scancode, action, mode);
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GL_TRUE);
     if (key == GLFW_KEY_T && action == GLFW_PRESS && mode == 0)
@@ -23,8 +34,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         rotationPaused = !rotationPaused;
     if (key == GLFW_KEY_H && action == GLFW_PRESS && mode == 0)
         regenRequested = 1;
-    if (key == GLFW_KEY_F1 && action == GLFW_PRESS && mode == 0)
-        DebugGUI_ToggleVisible();
+    if (key == GLFW_KEY_F1 && action == GLFW_PRESS && mode == 0 && ui.toggleVisible)
+        ui.toggleVisible();
     /* Tab / Shift+Tab: next / previous focus body. */
     if (key == GLFW_KEY_TAB && action == GLFW_PRESS)
         focusStep += (mode & GLFW_MOD_SHIFT) ? -1 : 1;
@@ -47,15 +58,15 @@ void doMovement(float deltaTime) {
 }
 
 void char_callback(GLFWwindow* window, unsigned int codepoint) {
-	DebugGUI_CharEvent(window, codepoint);
+	if (ui.chr) ui.chr(window, codepoint);
 }
 
 /* The wheel scrolls the debug panel while over it, zooms the camera otherwise. */
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 	double mx, my;
-	DebugGUI_ScrollEvent(window, xoffset, yoffset);
+	if (ui.scroll) ui.scroll(window, xoffset, yoffset);
 	glfwGetCursorPos(window, &mx, &my);
-	if (DebugGUI_WantsMouse(mx, my))
+	if (uiWantsMouse(mx, my))
 		return;
 	processMouseScroll((float)yoffset);
 }
@@ -66,14 +77,14 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
    press starts an arcball drag and the release ends it, the moment each
    happens. */
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-	DebugGUI_MouseButtonEvent(window, button, action, mods);
+	if (ui.mouseButton) ui.mouseButton(window, button, action, mods);
 	if (button != GLFW_MOUSE_BUTTON_LEFT)
 		return;
 	if (action == GLFW_PRESS) {
 		double mx, my;
 		int width, height;
 		glfwGetCursorPos(window, &mx, &my);
-		if (DebugGUI_WantsMouse(mx, my))
+		if (uiWantsMouse(mx, my))
 			return;
 		glfwGetWindowSize(window, &width, &height);
 		uiSliderPress((float)mx, (float)my);

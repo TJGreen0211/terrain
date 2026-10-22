@@ -1,7 +1,7 @@
 #ifndef PLANETS_H
 #define PLANETS_H
 
-#include <glad/glad.h>
+#include "engine/core/gl.h"
 #include "engine/math/LinearAlg.h"
 #include "world/bodies/Bodies.h"
 

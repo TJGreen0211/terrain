@@ -1,4 +1,7 @@
-#include "app/Main.h"
+#include "engine/core/gl.h"
+#include "engine/gfx/Common.h"
+#include "engine/gfx/Buffers.h"
+#include "engine/platform/Window.h"
 #include "world/terrain/TerrainGen.h"
 #include "world/WorldConfig.h"
 #include <stdio.h>

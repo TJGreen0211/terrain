@@ -1,7 +1,7 @@
 #ifndef LOADINGSCREEN_H
 #define LOADINGSCREEN_H
 
-#include <GLFW/glfw3.h>
+#include "engine/core/gl.h"
 
 // Setup: point the loading frames at the app's GL context, build the shader and
 // quad, and arm the step counter. Called once in main() right after GLAD loads.

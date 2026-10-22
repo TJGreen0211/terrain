@@ -1,6 +1,6 @@
 #include "engine/debug/GUI.h"
 
-#define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
+#include "engine/gfx/Buffers.h"
 
 static GLuint UIShader;
 static GLint uiLRect, uiLColor, uiLHasTex, uiLTint, uiLAlpha, uiLViewport, uiLTex;

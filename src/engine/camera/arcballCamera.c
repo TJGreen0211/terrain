@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include "engine/camera/arcballCamera.h"
-#include "world/WorldConfig.h"
 #include <math.h>
 
 static const float toRadians = (float)(M_PI / 180.0f);
@@ -8,11 +7,12 @@ static const float toRadians = (float)(M_PI / 180.0f);
 /* Orbit radius (m): how far the camera sits behind the pivot it orbits.
    Spawns at 0 (the camera sits on the pivot; dragging turns it in place) and
    scroll dollies it out to the max, at which point dragging orbits the
-   pivot. Distances and speeds are in WorldConfig.h. */
+   pivot. Distances and speeds come from Camera_Init (the app passes
+   WorldConfig.h's). */
 float CameraDistance = 0.0f;
-const float CameraDistanceMax = (float)CAMERA_DISTANCE_MAX_M;
-GLfloat MovementSpeed = (GLfloat)CAMERA_MOVE_SPEED_MPS;
-GLfloat CameraScrollSpeed = (GLfloat)CAMERA_SCROLL_STEP_M;   // fine: lets you dolly all the way through the atmosphere shell
+float CameraDistanceMax;
+GLfloat MovementSpeed;
+GLfloat CameraScrollSpeed;   // fine: lets you dolly all the way through the atmosphere shell
 
 /* The whole orbit orientation is one unit quaternion: the world -> camera
    rotation. A drag never accumulates per frame; it recomposes from the
@@ -29,11 +29,13 @@ static int dragging = 0;
    the scene scale (camera-relative rendering, see getViewMatrix). Starts
    where the camera used to spawn (in front of the planet) since the
    distance starts at 0. */
-static dvec3 Pivot = { 0.0, 0.0, CAMERA_SPAWN_DISTANCE_M };
+static dvec3 Pivot = { 0.0, 0.0, 0.0 };
 /* Focus body, set every frame (setCameraFocus): its world centre, its
    radius, and the unit direction from it to the Sun. */
 static dvec3 FocusOrigin = { 0.0, 0.0, 0.0 };
-static double FocusRadius = EARTH_RADIUS_M;
+static double FocusRadius;
+/* Body radius the surface-camera radii below are given for (Camera_Init). */
+static double ReferenceRadius;
 static dvec3 FocusSunDir = { -0.70710678118654752, 0.0, -0.70710678118654752 };
 
 /* Sub-solar surface preset. When active the camera stands above the planet
@@ -43,10 +45,25 @@ static dvec3 FocusSunDir = { -0.70710678118654752, 0.0, -0.70710678118654752 };
    radial direction. That gives a lit daytime interior: blue sky dome up top,
    bright horizon, sunlit fog-ground below. Press G to toggle (see Input.c). */
 static int surfaceView = 0;
-#define SURFACE_RAD ((float)SURFACE_CAMERA_MIN_RADIUS_M)
-#define SURFACE_MAX ((float)SURFACE_CAMERA_MAX_RADIUS_M)
-#define SURFACE_TILT ((float)SURFACE_CAMERA_TILT_DEG)
-static float surfAlt = SURFACE_RAD;
+static float surfMinRadius, surfMaxRadius, surfTiltDeg;   /* Camera_Init */
+#define SURFACE_RAD surfMinRadius
+#define SURFACE_MAX surfMaxRadius
+#define SURFACE_TILT surfTiltDeg
+static float surfAlt;
+
+void Camera_Init(const CameraConfig *cfg)
+{
+    CameraDistanceMax = (float)cfg->distanceMax;
+    MovementSpeed = (GLfloat)cfg->moveSpeed;
+    CameraScrollSpeed = (GLfloat)cfg->scrollStep;
+    Pivot.z = cfg->spawnDistance;
+    FocusRadius = cfg->referenceRadius;
+    ReferenceRadius = cfg->referenceRadius;
+    surfMinRadius = (float)cfg->surfaceMinRadius;
+    surfMaxRadius = (float)cfg->surfaceMaxRadius;
+    surfTiltDeg = (float)cfg->surfaceTiltDeg;
+    surfAlt = SURFACE_RAD;
+}
 /* Benchmark hooks (Bench.c): set the surface camera's radius from the
    planet centre directly, and move the surface pose QT_TEST_PHASE degrees
    away from the sub-solar point (so the sun is not overhead). */
@@ -192,7 +209,7 @@ static dvec3 surfaceEye(void)
 {
     vec3 s = surfaceSun();
     /* surfAlt is a radius for an Earth-sized body: scale it to the focus. */
-    double r = surfAlt * (FocusRadius / EARTH_RADIUS_M);
+    double r = surfAlt * (FocusRadius / ReferenceRadius);
     dvec3 e;
     e.x = FocusOrigin.x + s.x * r;
     e.y = FocusOrigin.y;

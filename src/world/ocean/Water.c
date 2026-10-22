@@ -10,14 +10,13 @@
 #include "world/ocean/Water.h"
 #include "engine/gfx/Common.h"
 #include "engine/math/ComplexMath.h"
-#include "app/Bench.h"
 #include "world/WorldConfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 
 static void initWavesGPU(waves *water);
-static void generateWavesGPU(waves *water);
+static void generateWavesGPU(waves *water, double time);
 
 static complexType complexConj(complexType c) {
 	complexType cConj;
@@ -145,7 +144,7 @@ double waveCascadeScale(int c) {
 	return (c == OCEAN_CASCADES - 1) ? 1.0 : fmax(g_waveParams[3], 0.01);
 }
 
-void initializeWaves(waves *water, int dim) {
+void initializeWaves(waves *water, int dim, double time) {
 	water->dimension = dim;
 	for(int c = 0; c < OCEAN_CASCADES; c++)
 		water->patchM[c] = (float)waveCascadePatchM(c);
@@ -168,7 +167,7 @@ void initializeWaves(waves *water, int dim) {
 	{
 		int dim2 = dim*dim;
 		water->heightScale = 1.0f;
-		generateWavesGPU(water);
+		generateWavesGPU(water, time);
 		float *raw = malloc((size_t)dim2*OCEAN_CASCADES*sizeof(float));
 		glBindTexture(GL_TEXTURE_2D_ARRAY, water->dyTexture);
 		glGetTexImage(GL_TEXTURE_2D_ARRAY, 0, GL_RED, GL_FLOAT, raw);
@@ -322,7 +321,7 @@ static void bindPair(int p) {
 	glBindTexture(GL_TEXTURE_2D, s_pingTex[p][1]);
 }
 
-static void generateWavesGPU(waves *water) {
+static void generateWavesGPU(waves *water, double time) {
 	int dim = water->dimension;
 	GLint viewport[4];
 	glGetIntegerv(GL_VIEWPORT, viewport);
@@ -342,7 +341,7 @@ static void generateWavesGPU(waves *water) {
 		/* Froude scaling: the shaders draw this cascade waveCascadeScale
 		   times larger, so it runs sqrt of that slower and keeps the speed
 		   of real waves of its drawn size. */
-		glUniform1f(s_specTime, (float)(App_Time() / sqrt(waveCascadeScale(c))));
+		glUniform1f(s_specTime, (float)(time / sqrt(waveCascadeScale(c))));
 		glUniform1f(s_specPatch, water->patchM[c]);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, s_h0Tex[c]);
@@ -398,9 +397,9 @@ static void generateWavesGPU(waves *water) {
 	if(cull) glEnable(GL_CULL_FACE);
 }
 
-void generateWaves(waves *water) {
+void generateWaves(waves *water, double time) {
 	static int frame = 0;
 	if(frame++ % WAVE_UPDATE_INTERVAL != 0)
 		return;
-	generateWavesGPU(water);
+	generateWavesGPU(water, time);
 }
