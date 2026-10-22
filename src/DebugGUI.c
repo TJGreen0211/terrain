@@ -9,7 +9,7 @@
 #include "Water.h"
 #include "Bodies.h"
 #include "SolarSystem.h"
-#include "Profiler.h"
+#include "engine/debug/Profiler.h"
 #include "WorldConfig.h"
 #include <limits.h>
 #include <math.h>

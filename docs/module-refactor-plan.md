@@ -96,15 +96,21 @@ terrain/
   src/
     engine/                     tier 0
       core/      gl.h (the ONLY place glad/GLFW/windows.h are included),
-                 log, fileutil (from common/Common), paths (shader/asset roots)
+                 paths (shader/asset roots)
       math/      linalg.c/h, complex.h
       platform/  window.c/h, input.c/h   (input sends events; it never calls the GUI)
-      gfx/       shader.c/h (LoadShader), texture.c/h, buffer.c/h (+BUFFER_OFFSET),
+      gfx/       shader.c/h (LoadShader + common/Common's createShader helpers),
+                 texture.c/h, buffer.c/h (+BUFFER_OFFSET),
                  mesh.c/h (Geometry, Sphere, Obj), framebuffer.c/h (CommonGL),
                  frame.h (FrameContext)
                  shaders/ framebuffer.*, tonemap.glsl
       camera/    arcball.c/h
       debug/     profiler.c/h, gui.c/h (Nuklear host + panel registry)
+                 shaders/ UI.*
+
+   Phase 4 moves files under their CURRENT names (engine/gfx/LoadShader.c);
+   the lowercase renames and merges above (shader, mesh, ...) are code
+   changes and happen with the phase 8 renames.
     world/                      tier 1
       WorldConfig.h             stays a single file (see rule 7)
       bodies/      Bodies, SolarSystem, Planets (impostors), Sun     + shaders/

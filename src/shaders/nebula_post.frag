@@ -10,7 +10,7 @@
 // - Contrast: an S-curve on the display value (blacks stay black, the lit
 //   gas stays bright).
 
-#include "tonemap.glsl"
+#include "engine/gfx/tonemap.glsl"
 
 out vec4 FragColor;
 

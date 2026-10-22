@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 typedef struct obj{
 	vec3 *points;

@@ -1,7 +1,5 @@
-# geometry: meshes, quad cube, quadtree LOD.
+# geometry: quad cube, quadtree LOD (moves to world/terrain).
 OBJS = $(OBJS) \
-	$(OBJDIR)\geometry\Sphere.obj \
-	$(OBJDIR)\geometry\Geometry.obj \
 	$(OBJDIR)\geometry\QuadCube.obj \
 	$(OBJDIR)\geometry\QuadTree.obj
 

@@ -1,4 +1,4 @@
-#include "LoadShader.h"
+#include "engine/gfx/LoadShader.h"
 #include "engine/core/paths.h"
 
 char *readShader(char *filename)

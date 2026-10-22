@@ -1,5 +1,5 @@
 #include <stdlib.h>
-#include "arcballCamera.h"
+#include "engine/camera/arcballCamera.h"
 #include "WorldConfig.h"
 #include <math.h>
 

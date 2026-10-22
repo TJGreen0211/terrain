@@ -9,8 +9,8 @@
 #include <glad/glad.h> 
 #include <GLFW/glfw3.h>
 
-#include "Window.h"
-#include "LinearAlg.h"
+#include "engine/platform/Window.h"
+#include "engine/math/LinearAlg.h"
 
 extern float CameraDistance;
 extern const float CameraDistanceMax;

@@ -16,7 +16,7 @@
    Boundary skirt vertices (position w = 1) duplicate each grid edge
    slightly below the surface so LOD patch edges never crack. */
 #include "QuadTree.h"
-#include "Window.h"
+#include "engine/platform/Window.h"
 #include "WorldConfig.h"
 #include <stddef.h>
 

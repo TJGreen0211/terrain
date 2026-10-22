@@ -2,7 +2,7 @@
 #define NEBULA_H
 
 #include <glad/glad.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 /* The nebula (.kilo/plans/1792611923000-volumetric-nebula-skybox.md): one
    density function (shaders/nebula.glsl) in nebula units n = (p - sun) /

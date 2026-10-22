@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 

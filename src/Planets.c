@@ -1,10 +1,10 @@
-#include "Common.h"
-#include "CommonGL.h"
+#include "engine/gfx/Common.h"
+#include "engine/gfx/CommonGL.h"
 #include "Planets.h"
 #include "SolarSystem.h"
 #include "Rings.h"
 #include "Clouds.h"
-#include "Window.h"
+#include "engine/platform/Window.h"
 #include "WorldConfig.h"
 #include <math.h>
 

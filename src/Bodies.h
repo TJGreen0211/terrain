@@ -1,7 +1,7 @@
 #ifndef BODIES_H
 #define BODIES_H
 
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 /* Celestial bodies: physical description (from WorldConfig.h) plus the
    per-frame state derived from the simulation time. Everything is double

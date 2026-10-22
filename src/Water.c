@@ -8,8 +8,8 @@
 */
 
 #include "Water.h"
-#include "Common.h"
-#include "ComplexMath.h"
+#include "engine/gfx/Common.h"
+#include "engine/math/ComplexMath.h"
 #include "Bench.h"
 #include "WorldConfig.h"
 #include <stdio.h>

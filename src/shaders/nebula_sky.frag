@@ -16,7 +16,7 @@
 #endif
 #define NEBULA_FAR
 #include "nebula.glsl"
-#include "tonemap.glsl"
+#include "engine/gfx/tonemap.glsl"
 
 out vec4 FragColor;
 

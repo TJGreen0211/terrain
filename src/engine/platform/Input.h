@@ -9,8 +9,8 @@
 #include <glad/glad.h> 
 #include <GLFW/glfw3.h>
 
-#include "arcballCamera.h"
-#include "Window.h"
+#include "engine/camera/arcballCamera.h"
+#include "engine/platform/Window.h"
 
 void doMovement(float deltaTime);
 int getWireframeState(void);

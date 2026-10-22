@@ -1,9 +1,9 @@
-#include "Common.h"
+#include "engine/gfx/Common.h"
 #include "Clouds.h"
 #include "SolarSystem.h"
 #include "Atmosphere.h"
 #include "Rings.h"
-#include "Window.h"
+#include "engine/platform/Window.h"
 #include "WorldConfig.h"
 #include <math.h>
 #include <string.h>

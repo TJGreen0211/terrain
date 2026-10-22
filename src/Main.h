@@ -9,21 +9,21 @@
 #include <glad/glad.h> 
 #include <GLFW/glfw3.h>
 
-#include "LoadShader.h"
-#include "LinearAlg.h"
-#include "arcballCamera.h"
-#include "Window.h"
-#include "Sphere.h"
-#include "Geometry.h"
-#include "Obj.h"
+#include "engine/gfx/LoadShader.h"
+#include "engine/math/LinearAlg.h"
+#include "engine/camera/arcballCamera.h"
+#include "engine/platform/Window.h"
+#include "engine/gfx/Sphere.h"
+#include "engine/gfx/Geometry.h"
+#include "engine/gfx/Obj.h"
 #include "QuadCube.h"
 #include "Quadtree.h"
 #include "Water.h"
-#include "Common.h"
-#include "Textures.h"
-#include "Buffers.h"
-#include "CommonGL.h"
-#include "Input.h"
+#include "engine/gfx/Common.h"
+#include "engine/gfx/Textures.h"
+#include "engine/gfx/Buffers.h"
+#include "engine/gfx/CommonGL.h"
+#include "engine/platform/Input.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 

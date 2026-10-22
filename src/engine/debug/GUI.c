@@ -1,4 +1,4 @@
-#include "GUI.h"
+#include "engine/debug/GUI.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 
@@ -14,8 +14,8 @@ static int uiReady = 0;
 
 void attachGUIShaders()
 {
-	createShader(&UIShader, "UI.vert",
-		"UI.frag");
+	createShader(&UIShader, "engine/debug/UI.vert",
+		"engine/debug/UI.frag");
 	uiLRect = glGetUniformLocation(UIShader, "uRect");
 	uiLColor = glGetUniformLocation(UIShader, "uColor");
 	uiLHasTex = glGetUniformLocation(UIShader, "uHasTex");

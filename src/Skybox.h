@@ -2,7 +2,7 @@
 #define SKYBOX_H
 
 #include <glad/glad.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 // Compile the skybox program and upload its 36-triangle box. Call once after
 // the GL context is ready (alongside initSun).

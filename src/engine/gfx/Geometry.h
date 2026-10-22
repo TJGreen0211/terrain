@@ -5,8 +5,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#include "LinearAlg.h"
-#include "Buffers.h"
+#include "engine/math/LinearAlg.h"
+#include "engine/gfx/Buffers.h"
 
 typedef struct ring {
 	int size;

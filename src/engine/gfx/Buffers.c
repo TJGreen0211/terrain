@@ -1,4 +1,4 @@
-#include "Buffers.h"
+#include "engine/gfx/Buffers.h"
 
 GLuint initBuffers(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
 	GLuint vbo, vao;

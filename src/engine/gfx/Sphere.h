@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 typedef struct sphere {
 	int size;

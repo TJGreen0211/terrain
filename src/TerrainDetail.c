@@ -1,5 +1,5 @@
-#include "Window.h"
-#include "common/Common.h"
+#include "engine/platform/Window.h"
+#include "engine/gfx/Common.h"
 #include "TerrainDetail.h"
 #include "TerrainGen.h"
 #include "WorldConfig.h"

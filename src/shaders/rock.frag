@@ -8,7 +8,7 @@ in float fTau;
 
 out vec4 FragColor;
 
-#include "tonemap.glsl"
+#include "engine/gfx/tonemap.glsl"
 
 uniform vec3 lightPosition;   // camera-relative
 uniform vec3 ringCenter;      // camera-relative planet centre

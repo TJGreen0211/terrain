@@ -12,14 +12,14 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include "Window.h"
-#include "LinearAlg.h"
-#include "arcballCamera.h"
+#include "engine/platform/Window.h"
+#include "engine/math/LinearAlg.h"
+#include "engine/camera/arcballCamera.h"
 #include "Bodies.h"
 #include "SolarSystem.h"
 #include "WorldConfig.h"
 #include "QuadTree.h"
-#include "Profiler.h"
+#include "engine/debug/Profiler.h"
 #include "engine/core/paths.h"
 #include <stb_image_write.h>
 

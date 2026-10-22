@@ -2,7 +2,7 @@
 #define CLOUDS_H
 
 #include <glad/glad.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 /* Cloud layers (docs/volumetric-clouds.md). Every planet with air can have
    one; its settings live in PlanetInfo.clouds, and the active planet's in

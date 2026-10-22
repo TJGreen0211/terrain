@@ -1,5 +1,5 @@
-#include "Common.h"
-#include "LoadShader.h"
+#include "engine/gfx/Common.h"
+#include "engine/gfx/LoadShader.h"
 
 //GLfloat deltaTime = 0.0f;
 //GLfloat lastFrame = 0.0f;

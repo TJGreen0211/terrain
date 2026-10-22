@@ -9,7 +9,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 #include "WorldConfig.h"
 
 /* FFT ocean, simulated on the GPU (Water.c): the textures below are render

@@ -2,7 +2,7 @@
 #define SUN_H
 
 #include <glad/glad.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 // `radius` (both passes): world-space radius used to project the sun's
 // on-screen size. The NDC half-size is the projected radius of a sphere this

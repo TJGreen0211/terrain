@@ -9,9 +9,9 @@
 #include <glad/glad.h> 
 #include <GLFW/glfw3.h>
 
-#include "LinearAlg.h"
-#include "Textures.h"
-#include "LoadShader.h"
+#include "engine/math/LinearAlg.h"
+#include "engine/gfx/Textures.h"
+#include "engine/gfx/LoadShader.h"
 
 GLuint initFramebufferShader();
 GLuint initFramebuffer(GLuint *textureID, float sizeX, float sizeY);

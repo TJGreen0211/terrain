@@ -1,5 +1,5 @@
-#include "Common.h"
-#include "CommonGL.h"
+#include "engine/gfx/Common.h"
+#include "engine/gfx/CommonGL.h"
 #include "Skybox.h"
 #include "Nebula.h"
 #include "engine/core/paths.h"

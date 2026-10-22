@@ -40,7 +40,7 @@ uniform vec3 cloudColor;
 
 #include "atmosurface.glsl"
 #include "ringshadow.glsl"
-#include "tonemap.glsl"
+#include "engine/gfx/tonemap.glsl"
 
 // The dome's march for the air in front of the cloud.
 uniform float E;     // solar brightness (Atmosphere.c)

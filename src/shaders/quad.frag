@@ -228,7 +228,7 @@ float hadleyFactor(float absLatDeg) {
 #include "ringshadow.glsl"
 // Cloud shadows (Clouds.c).
 #include "cloudlayer.glsl"
-#include "tonemap.glsl"
+#include "engine/gfx/tonemap.glsl"
 
 // Depth of this fragment for the prepass. Seafloor (e < seaLevel), seen
 // through the translucent water: coarse LOD triangles straddling the coast

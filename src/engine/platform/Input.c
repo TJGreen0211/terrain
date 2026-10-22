@@ -1,5 +1,5 @@
-#include "Input.h"
-#include "GUI.h"
+#include "engine/platform/Input.h"
+#include "engine/debug/GUI.h"
 #include "DebugGUI.h"
 
 /* Held state per movement key, so any combination (W+D, W+A, ...) moves at

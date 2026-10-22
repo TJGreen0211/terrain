@@ -9,21 +9,15 @@ OBJS = $(OBJS) \
 	$(OBJDIR)\Nebula.obj \
 	$(OBJDIR)\Rings.obj \
 	$(OBJDIR)\Bodies.obj \
-	$(OBJDIR)\Profiler.obj \
 	$(OBJDIR)\Bench.obj \
 	$(OBJDIR)\LoadingScreen.obj \
-	$(OBJDIR)\GUI.obj \
 	$(OBJDIR)\DebugGUI.obj \
 	$(OBJDIR)\TerrainGen.obj \
 	$(OBJDIR)\TerrainDetail.obj \
 	$(OBJDIR)\Shadows.obj \
 	$(OBJDIR)\Planets.obj \
 	$(OBJDIR)\SolarSystem.obj \
-	$(OBJDIR)\LoadShader.obj \
-	$(OBJDIR)\Window.obj \
-	$(OBJDIR)\Obj.obj \
-	$(OBJDIR)\Water.obj \
-	$(OBJDIR)\Buffers.obj
+	$(OBJDIR)\Water.obj
 
 {.}.c{$(OBJDIR)}.obj::
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)

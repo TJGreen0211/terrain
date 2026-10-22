@@ -1,4 +1,4 @@
-#include "Common.h"
+#include "engine/gfx/Common.h"
 #include "LoadingScreen.h"
 #include "TerrainGen.h"
 

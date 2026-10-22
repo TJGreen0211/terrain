@@ -7,7 +7,7 @@
 #include "Atmosphere.h"
 #include "Clouds.h"
 #include "LoadingScreen.h"
-#include "GUI.h"
+#include "engine/debug/GUI.h"
 #include "DebugGUI.h"
 #include "TerrainGen.h"
 #include "TerrainDetail.h"
@@ -15,7 +15,7 @@
 #include "Rings.h"
 #include "WorldConfig.h"
 #include "Bodies.h"
-#include "Profiler.h"
+#include "engine/debug/Profiler.h"
 #include "Bench.h"
 #include "engine/core/paths.h"
 /* stb_image_write lives here; Bench.c uses it for its PNG captures. */

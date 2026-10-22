@@ -2,7 +2,7 @@
 #define SHADOWS_H
 
 #include <glad/glad.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 
 /* Cascaded sun shadows (shaders/shadow.glsl). SHADOW_CASCADES orthographic
    maps along the sun direction, each fitted around a slice of the camera's

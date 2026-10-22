@@ -1,6 +1,6 @@
 #ifndef GUI_H
 #define GUI_H
-#include "Common.h"
+#include "engine/gfx/Common.h"
 
 /* Slider subset of the OpenGLSolar GUI (ui/GUI.c): same API names, so its
    buttons / text can be ported later without touching callers. */

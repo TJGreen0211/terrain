@@ -250,7 +250,7 @@ vec3 skyRadiance(vec3 p, vec3 dir, vec3 l, out vec3 viewT)
 }
 
 // Tone map (and its inverse for the reflected sky), shared by every lit shader.
-#include "tonemap.glsl"
+#include "engine/gfx/tonemap.glsl"
 
 void main()
 {

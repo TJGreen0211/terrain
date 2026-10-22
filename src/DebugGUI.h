@@ -1,6 +1,6 @@
 #ifndef DEBUG_GUI_H
 #define DEBUG_GUI_H
-#include "Window.h"
+#include "engine/platform/Window.h"
 
 /* Nuklear debug panel: a movable, resizable, collapsible window in the top
    right. Nuklear stays private to DebugGUI.c (its NK_INCLUDE_* config must

@@ -1,5 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
-#include "Common.h"
+#include "engine/gfx/Common.h"
 #include "Nebula.h"
 #include "Bodies.h"
 #include "WorldConfig.h"

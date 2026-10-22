@@ -1,4 +1,4 @@
-#include "Obj.h"
+#include "engine/gfx/Obj.h"
 
 obj ObjLoadModel(char *fname);
 obj newObj;

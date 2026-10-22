@@ -1,9 +1,9 @@
-#include "CommonGL.h"
+#include "engine/gfx/CommonGL.h"
 
 GLuint initFramebufferShader() {
 	GLuint shader;
-	GLuint vertShader = LoadShader("framebuffer.vert", GL_VERTEX_SHADER);
-	GLuint fragShader = LoadShader("framebuffer.frag", GL_FRAGMENT_SHADER);
+	GLuint vertShader = LoadShader("engine/gfx/framebuffer.vert", GL_VERTEX_SHADER);
+	GLuint fragShader = LoadShader("engine/gfx/framebuffer.frag", GL_FRAGMENT_SHADER);
 	shader = glCreateProgram();
 	glAttachShader(shader, vertShader);
 	glAttachShader(shader, fragShader);

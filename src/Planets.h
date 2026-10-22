@@ -2,7 +2,7 @@
 #define PLANETS_H
 
 #include <glad/glad.h>
-#include "LinearAlg.h"
+#include "engine/math/LinearAlg.h"
 #include "Bodies.h"
 
 /* Stand-ins (shaders/planet_impostor.*) for every body not drawn in full

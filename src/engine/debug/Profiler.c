@@ -1,4 +1,4 @@
-#include "Profiler.h"
+#include "engine/debug/Profiler.h"
 #include <windows.h>
 #include <glad/glad.h>
 #include <stdio.h>
