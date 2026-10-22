@@ -51,7 +51,7 @@ static GLuint initQuadShader(int depthPrepass) {
 	char defines[128];
 	snprintf(defines, sizeof defines, "%s#define DETAIL_PIXEL_OCTAVES %d\n",
 	         depthPrepass ? "#define DEPTH_PREPASS\n" : "", TERRAIN_DETAIL_PIXEL_OCTAVES);
-	createShaderDefines(&shader, "world/terrain/quad.vert", "world/terrain/quad.frag", defines);
+	Shader_CreateDefines(&shader, "world/terrain/quad.vert", "world/terrain/quad.frag", defines);
 	return shader;
 }
 
@@ -127,7 +127,7 @@ static void terrainReliefBounds(const double dir[3], double capAngle, double cel
 {
 	(void)cell;
 	double R = Bodies_Get(SolarSystem_ActiveBody())->radius;
-	double lodK = LOD_K_NUMER / (R * getWindowHeight());
+	double lodK = LOD_K_NUMER / (R * Window_Height());
 	/* Unclamped: HeightRange adds the face-corner bias, then clamps. */
 	double lodCell = log2(fmax(maxDist * lodCellKFor(R), 1e-30));
 	double lodPix = log2(fmax(maxDist * lodK, 1e-30));
@@ -143,7 +143,7 @@ static void terrainReliefBounds(const double dir[3], double capAngle, double cel
    block's minimum bounds every finer sample. */
 int TerrainDraw_FootprintAllLand(const double dir[3], double capAngle, double maxDist)
 {
-	double lodK = LOD_K_NUMER / (Bodies_Get(SolarSystem_ActiveBody())->radius * getWindowHeight());
+	double lodK = LOD_K_NUMER / (Bodies_Get(SolarSystem_ActiveBody())->radius * Window_Height());
 	double fragLod = log2(fmax(maxDist * lodK, 1e-30)) + log2(1.0 / 0.15);
 	float hmin, hmax;
 	TerrainGen_HeightRange(dir, capAngle, fmin(fragLod, TerrainGen_MapMaxLod()), &hmin, &hmax);
@@ -193,12 +193,12 @@ void TerrainDraw_SetBodyUniforms(GLuint shader, float lodRadius, mat4 m, const F
 	   size over true size (heights scale with it). Water.c. */
 	float tilings[OCEAN_CASCADES], scales[OCEAN_CASCADES], shoreDepths[OCEAN_CASCADES];
 	for (int c = 0; c < OCEAN_CASCADES; c++) {
-		scales[c] = (float)waveCascadeScale(c);
-		tilings[c] = (float)(lodRadius / (waveCascadePatchM(c) * scales[c]));
+		scales[c] = (float)Water_CascadeScale(c);
+		tilings[c] = (float)(lodRadius / (Water_CascadePatchM(c) * scales[c]));
 		/* Water depth (m) each cascade's waves fade out over toward the
 		   coast (seastate.glsl): a few of its drawn rms heights, about
 		   where waves that size break. */
-		shoreDepths[c] = (float)(WAVE_SHORE_RMS * OCEAN_SWELL_RMS_M * waveCascadeRmsFrac(c)
+		shoreDepths[c] = (float)(WAVE_SHORE_RMS * OCEAN_SWELL_RMS_M * Water_CascadeRmsFrac(c)
 		                         * scales[c] * Water_Params()[1]);
 	}
 	glUniform1fv(glGetUniformLocation(shader, "waveTilings"), OCEAN_CASCADES, tilings);
@@ -250,7 +250,7 @@ void TerrainDraw_SetBodyUniforms(GLuint shader, float lodRadius, mat4 m, const F
 	glUniform1f(glGetUniformLocation(shader, "depthNear"), f->nearPlane);
 	glUniform1f(glGetUniformLocation(shader, "seaClearance"), (float)Water_Excursion(lodRadius));
 	/* Climate map (unit 8) + surface style for quad.frag's biome shading. */
-	setPlanetSurfaceUniforms(shader, 8);
+	TerrainGen_SetSurfaceUniforms(shader, 8);
 	/* Terrain detail (quad.vert/quad.frag), faded for the main walk. */
 	TerrainDetail_SetUniforms(shader, lodRadius, QT_TARGET_TRIANGLE_PX);
 	glActiveTexture(GL_TEXTURE0);
@@ -316,8 +316,8 @@ void TerrainDraw_Planet(const QuadTree_Body *body, const FrameContext *f, float 
 
 	TerrainDraw_SetBodyUniforms(surfaceProgram, lodRadius, model, f,
 	                            0, noiseTex, 0, 0, 0, 0);
-	setOceanUniforms(surfaceProgram, 10);   /* beach swash exposure */
-	setAtmosphereExtinction(surfaceProgram, atmoInner, Atmosphere_Params());
+	TerrainGen_SetOceanUniforms(surfaceProgram, 10);   /* beach swash exposure */
+	Atmosphere_SetExtinction(surfaceProgram, atmoInner, Atmosphere_Params());
 	Rings_BindReceiver(surfaceProgram);
 	Clouds_BindReceiver(surfaceProgram, bodyId);
 	glDepthFunc(GL_GEQUAL);   /* reversed-Z: nearer = greater */

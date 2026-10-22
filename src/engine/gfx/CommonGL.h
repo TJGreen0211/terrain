@@ -6,6 +6,6 @@
 #include "engine/gfx/Textures.h"
 #include "engine/gfx/LoadShader.h"
 
-GLuint initFramebuffer(GLuint *textureID, float sizeX, float sizeY);
+GLuint Framebuffer_Create(GLuint *textureID, float sizeX, float sizeY);
 
 #endif

@@ -11,14 +11,14 @@
 
 // Creates the sun billboard shader + fullscreen quad and loads the
 // sun colour + normal textures. Call once after the GL context is ready.
-void initSun(void);
+void Sun_Init(void);
 
 // Opaque central disc. Writes depth (so it occludes geometry behind it) and
 // must be drawn with the main scene (depth test on, no blending).
-void drawSunDisc(mat4 proj, mat4 view, vec3 center, float radius);
+void Sun_DrawDisc(mat4 proj, mat4 view, vec3 center, float radius);
 
 // Additive corona halo. Never writes depth (so geometry in front still shows)
 // and must be drawn LAST, after all scene geometry.
-void drawSunGlow(mat4 proj, mat4 view, vec3 center, float radius);
+void Sun_DrawGlow(mat4 proj, mat4 view, vec3 center, float radius);
 
 #endif

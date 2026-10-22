@@ -6,28 +6,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-GLuint generateDepthCubemap(int width, int height)
-{
-	GLuint textureID;
-    glGenTextures(1, &textureID);
-
-    glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
-    for (int i = 0; i < 6; i++)
-    {
-        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-
-    }
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-
-    return textureID;
-}
-
-GLuint loadCubemap(char **faces)
+GLuint Texture_LoadCubemap(char **faces)
 {
 	GLuint textureID;
     glGenTextures(1, &textureID);
@@ -55,7 +34,7 @@ GLuint loadCubemap(char **faces)
     return textureID;
 }
 
-GLuint generateTextureAttachment(int depth, int stencil, int sizex, int sizey) {
+GLuint Texture_CreateAttachment(int depth, int stencil, int sizex, int sizey) {
 	GLuint textureID;
 	GLenum attachment_type;
 	if(!depth && !stencil)
@@ -82,7 +61,7 @@ GLuint generateTextureAttachment(int depth, int stencil, int sizex, int sizey) {
 	return textureID;
 }
 
-GLuint loadTexture(char const * path, int alphaFlag)
+GLuint Texture_Load(char const * path, int alphaFlag)
 {
     //Generate texture ID and load texture data
     GLuint textureID;
@@ -117,26 +96,3 @@ GLuint loadTexture(char const * path, int alphaFlag)
     return textureID;
 }
 
-GLuint loadSpriteTexture(char const * path)
-{
-    //Generate texture ID and load texture data
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    int width, height;
-    int channels;
-    unsigned char* image = stbi_load(path, &width, &height, &channels, 4);
-    if(!image) { printf("Failed to load %s\n", path); exit(1); }
-    // Assign texture to ID
-    glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    // Parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    stbi_image_free(image);
-    return textureID;
-}

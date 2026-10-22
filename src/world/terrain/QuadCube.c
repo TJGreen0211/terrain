@@ -108,7 +108,7 @@ int subdivideY(quadCube *qc, vec3 start, int divisions, float fdivisions, int in
 	return index;
 }
 
-void createCube(int divisions, quadCube *newQuadCube) {
+void QuadCube_Create(int divisions, quadCube *newQuadCube) {
 	/*
 	a,b,c,d,e,f,g,h
 			 (-1,1,1)e-------f(1,1,1)

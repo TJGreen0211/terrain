@@ -7,7 +7,7 @@ static GLuint litProgram;
 
 void BodyDraw_Init(void)
 {
-	createShader(&litProgram, "world/bodies/light.vert",
+	Shader_Create(&litProgram, "world/bodies/light.vert",
 		"world/bodies/light.frag");
 }
 

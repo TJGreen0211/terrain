@@ -315,7 +315,7 @@
    panel's "Wave scale" (default 10: stylized, larger seas; heights scale
    with it and time by its square root, so the waves keep their shape and
    a believable speed). The finest cascade stays at true size, for close-up
-   chop (waveCascadeScale, Water.c). From orbit they filter into the
+   chop (Water_CascadeScale, Water.c). From orbit they filter into the
    glint's roughness.
    OCEAN_CASCADES must match WAVE_CASCADES in wavecube.glsl. */
 #define OCEAN_CASCADES            3

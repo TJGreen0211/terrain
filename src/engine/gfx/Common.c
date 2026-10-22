@@ -4,15 +4,15 @@
 //GLfloat deltaTime = 0.0f;
 //GLfloat lastFrame = 0.0f;
 
-void createShader(GLuint *shader, char *vert, char *frag)
+void Shader_Create(GLuint *shader, char *vert, char *frag)
 {
-	createShaderDefines(shader, vert, frag, NULL);
+	Shader_CreateDefines(shader, vert, frag, NULL);
 }
 
-void createShaderDefines(GLuint *shader, char *vert, char *frag, const char *defines)
+void Shader_CreateDefines(GLuint *shader, char *vert, char *frag, const char *defines)
 {
-	GLuint vertShader = LoadShaderDefines(vert, GL_VERTEX_SHADER, defines);
-    GLuint fragShader = LoadShaderDefines(frag, GL_FRAGMENT_SHADER, defines);
+	GLuint vertShader = Shader_LoadDefines(vert, GL_VERTEX_SHADER, defines);
+    GLuint fragShader = Shader_LoadDefines(frag, GL_FRAGMENT_SHADER, defines);
     *shader = glCreateProgram();
     glAttachShader(*shader, vertShader);
     glAttachShader(*shader, fragShader);

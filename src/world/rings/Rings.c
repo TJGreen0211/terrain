@@ -406,9 +406,9 @@ static double ddot(dvec3 a, dvec3 b)
 
 void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[3])
 {
-	createShader(&g_ring.sheetShader, "world/rings/ring.vert", "world/rings/ring.frag");
-	createShader(&g_ring.rockShader, "world/rings/rock.vert", "world/rings/rock.frag");
-	createShader(&g_ring.dustShader, "world/rings/ringdust.vert", "world/rings/ringdust.frag");
+	Shader_Create(&g_ring.sheetShader, "world/rings/ring.vert", "world/rings/ring.frag");
+	Shader_Create(&g_ring.rockShader, "world/rings/rock.vert", "world/rings/rock.frag");
+	Shader_Create(&g_ring.dustShader, "world/rings/ringdust.vert", "world/rings/ringdust.frag");
 	/* The sheet and dust are generated from gl_VertexID. */
 	glGenVertexArrays(1, &g_ring.emptyVAO);
 	for (int i = 0; i < 3; i++) {
@@ -624,7 +624,7 @@ void Rings_DrawDust(mat4 proj, mat4 view)
 	glUniform1i(glGetUniformLocation(s, "perCell"), DUST_PER_CELL);
 	glUniform1f(glGetUniformLocation(s, "density"), DUST_DENSITY);
 	/* Pixels per world unit at unit distance. */
-	glUniform1f(glGetUniformLocation(s, "projScale"), getWindowHeight() / (2.0f * tanf(0.5f * (float)CAMERA_FOV_Y_DEG * (float)M_PI / 180.0f)));
+	glUniform1f(glGetUniformLocation(s, "projScale"), Window_Height() / (2.0f * tanf(0.5f * (float)CAMERA_FOV_Y_DEG * (float)M_PI / 180.0f)));
 	beginTranslucent();
 	glEnable(GL_PROGRAM_POINT_SIZE);
 	glBindVertexArray(g_ring.emptyVAO);

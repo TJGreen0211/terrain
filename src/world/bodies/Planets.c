@@ -19,7 +19,7 @@ static GLuint quadVAO, quadVBO;
 
 void Planets_Init(void)
 {
-	createShader(&shader, "world/bodies/planet_impostor.vert", "world/bodies/planet_impostor.frag");
+	Shader_Create(&shader, "world/bodies/planet_impostor.vert", "world/bodies/planet_impostor.frag");
 
 	/* Unit quad corners, perimeter order for a fan. */
 	GLfloat corners[] = { -1.0f, -1.0f,  1.0f, -1.0f,  1.0f, 1.0f,  -1.0f, 1.0f };
@@ -37,7 +37,7 @@ void Planets_Init(void)
 /* Screen pixels per radian at the view centre. */
 static double pixelsPerRadian(void)
 {
-	return 0.5 * getWindowHeight() / tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
+	return 0.5 * Window_Height() / tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
 }
 
 double Planets_ScreenRadiusPx(const Body *b, dvec3 cam)
@@ -54,7 +54,7 @@ int Planets_FullDetail(const Body *b, dvec3 cam)
 	return d <= b->radius || Planets_ScreenRadiusPx(b, cam) >= FULL_MIN_PX;
 }
 
-/* World vector -> view space (getViewMatrix is a pure rotation whose rows
+/* World vector -> view space (Camera_ViewMatrix is a pure rotation whose rows
    are the camera axes), in double. */
 static dvec3 toView(mat4 view, dvec3 w)
 {

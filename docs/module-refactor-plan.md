@@ -357,6 +357,25 @@ A phase is green only when all four checks pass:
     - The camera speeds use `Camera_MoveSpeed`/`_SetMoveSpeed` and
       `_ScrollStep`/`_SetScrollStep`.
     - Flags used only by their panel are now plain `static`.
+- 8b (function prefixes) done 2026-10-22, pixel-identical:
+  - Every public function now has its module prefix. The `engine/gfx` prefixes
+    already match the planned lowercase files, so the file renames won't need
+    to rename functions again: `Shader_` (`LoadShader` + `Common`), `Texture_`,
+    `Buffer_`, `Mesh_` (`Geometry`, `Sphere`, `Obj`) and `Framebuffer_`
+    (`CommonGL`).
+  - The other prefixes are `Camera_`, `UI_` (sliders), `Window_`, `Input_`
+    (including the GLFW callbacks, now declared in `Input.h`), `Atmosphere_`,
+    `Sun_`, `Skybox_`, `Water_`, `Clouds_`/`Nebula_` `_Defaults`, `QuadCube_`
+    and `TerrainGen_`.
+  - Left alone: `LinearAlg.h`. It's a math library with its own GLSL-style
+    names (`addvec3`, `multiplymat4`), and prefixing about 80 functions buys
+    nothing.
+  - Deleted as dead (unreferenced): `createRing` and its `ring` struct,
+    `initQuadVAO`, `initSubQuadX/Y/Z`, `loadSpriteTexture`,
+    `generateDepthCubemap`, `uiSliderCount` and `uiShutdown`. Warnings went from
+    185 to 127, all of the drop from `Geometry.c`.
+- Still to do: the lowercase file renames and merges from section 2, as their
+  own commit.
 
 **Phase 9 — split `TerrainGen.c`.**
 - Move its code, without changes, into `world/terrain/gen/{cubemap, erosion, climate,

@@ -10,7 +10,7 @@ typedef struct TerrainPyramid TerrainPyramid;
 /* One baked planet: sea level + ocean depth derived from the baked, eroded
    height field (both shaders must use the identical values or the water
    discard edge drifts off the drawn coastline), its climate and ocean maps
-   and its height-bounds pyramid. Filled by generatePlanetHeightmap(); owned
+   and its height-bounds pyramid. Filled by TerrainGen_BakeHeightmap(); owned
    by the caller (TerrainGen_FreePlanet). TerrainGen_GenParams() is the active planet:
    the one the body shaders and the bounds queries below use. */
 typedef struct {
@@ -80,12 +80,12 @@ PlanetStyle *TerrainGen_Style(void);
    TERRAIN_SURFACE_UNIT) and uploads TerrainGen_Style(); harmless for shaders
    that don't declare the uniforms. */
 #define TERRAIN_SURFACE_UNIT 16
-void setPlanetSurfaceUniforms(unsigned int shader, int unit);
+void TerrainGen_SetSurfaceUniforms(unsigned int shader, int unit);
 
 /* Binds the ocean map to texture unit `unit` for water.vert/.frag. */
-void setOceanUniforms(unsigned int shader, int unit);
+void TerrainGen_SetOceanUniforms(unsigned int shader, int unit);
 
-/* Bake inputs: everything generatePlanetHeightmap() reads besides fixed
+/* Bake inputs: everything TerrainGen_BakeHeightmap() reads besides fixed
    pipeline constants. Edited from the debug panel; changes apply on the
    next bake, not live. */
 #define TERRAIN_PLATE_MAX 32 /* MAX_PLATES in heightbake.frag */
@@ -137,7 +137,7 @@ TerrainBakeSettings *TerrainGen_BakeSettings(void);
 #define TERRAIN_THERMAL_STEPS 3    /* evenly spaced through the thermal passes */
 #define TERRAIN_HYDRO_STEPS   8    /* evenly spaced through the droplets */
 #define TERRAIN_BAKE_STEPS    (TERRAIN_THERMAL_STEPS + TERRAIN_HYDRO_STEPS)
-unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, const PlanetStyle *style,
+unsigned int TerrainGen_BakeHeightmap(const TerrainBakeSettings *settings, const PlanetStyle *style,
                                      PlanetGenParams *out, void (*step)(void));
 
 /* Background bake: the same bake without the stall. The GPU shaping pass
@@ -145,7 +145,7 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, const 
    the CPU part (erosion, climate maps, bounds pyramid: nearly all of the
    time) runs on a worker thread. Poll once a frame from the GL thread; it
    returns 1 when the job is ready, then Finish uploads the maps into out
-   and returns the height texture, like generatePlanetHeightmap but
+   and returns the height texture, like TerrainGen_BakeHeightmap but
    without making the planet active. Cancel drops a job. One bake at a
    time: a start or a blocking bake first completes a running one. */
 typedef struct TerrainBakeJob TerrainBakeJob;
@@ -156,7 +156,7 @@ unsigned int TerrainGen_BakeFinish(TerrainBakeJob *job, PlanetGenParams *out);
 void TerrainGen_BakeCancel(TerrainBakeJob *job);
 
 /* Frees a baked planet's climate / ocean maps and bounds pyramid (not its
-   height texture, which generatePlanetHeightmap returns separately). */
+   height texture, which TerrainGen_BakeHeightmap returns separately). */
 void TerrainGen_FreePlanet(PlanetGenParams *p);
 
 /* Height bounds of the active planet (TerrainGen_GenParams(); raw field units, like

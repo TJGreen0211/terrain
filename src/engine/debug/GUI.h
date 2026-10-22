@@ -25,17 +25,15 @@ typedef struct uiSlider {
 
 typedef void (*uiSliderChangedFn)(int id, float t);
 
-void attachGUIShaders();
-int  uiInit(void);
-int  uiAddSlider(int id, float t0, const float accent[3]);
-int  uiSliderCount(void);
-void uiLayoutSliders(int winW, int winH, int count);
-void uiSliderSetChangedFn(uiSliderChangedFn fn);
-int  uiSliderPress(float x, float y); // grabs a slider under the cursor, returns its id or -1
-int  uiSliderRelease(void);           // ends an active grab, returns the slider id or -1
-int  uiSliderGrabbed(void);           // 1 while a slider is being dragged
-void uiSetMouse(float x, float y);
-void uiDrawAll(void);
-void uiShutdown(void);
+void UI_InitShaders();
+int  UI_Init(void);
+int  UI_AddSlider(int id, float t0, const float accent[3]);
+void UI_LayoutSliders(int winW, int winH, int count);
+void UI_SetSliderChangedFn(uiSliderChangedFn fn);
+int  UI_SliderPress(float x, float y); // grabs a slider under the cursor, returns its id or -1
+int  UI_SliderRelease(void);           // ends an active grab, returns the slider id or -1
+int  UI_SliderGrabbed(void);           // 1 while a slider is being dragged
+void UI_SetMouse(float x, float y);
+void UI_DrawAll(void);
 
 #endif

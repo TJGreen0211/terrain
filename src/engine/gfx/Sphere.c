@@ -49,7 +49,7 @@ void divideTriangle(vec3 a, vec3 b, vec3 c, int count, sphere *s)
 	}
 }
 
-sphere tetrahedron(int count, sphere *s)
+sphere Mesh_Tetrahedron(int count, sphere *s)
 {
 	int numTriangles = pow(4, count+1);
 	int numVertices = 3 * numTriangles;

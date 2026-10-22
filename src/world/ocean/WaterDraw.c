@@ -12,13 +12,13 @@ static GLuint waterProgram;
 
 void WaterDraw_Init(void)
 {
-	createShader(&waterProgram, "world/ocean/water.vert",
+	Shader_Create(&waterProgram, "world/ocean/water.vert",
 		"world/ocean/water.frag");
 }
 
 GLuint WaterDraw_Program(void) { return waterProgram; }
 
-/* Each cascade's heights are further scaled by waveCascadeScale (Water.c),
+/* Each cascade's heights are further scaled by Water_CascadeScale (Water.c),
    with its patches, so slopes (and look) stay the same, only larger. */
 double Water_GeomScale(double radius)
 {
@@ -73,10 +73,10 @@ void WaterDraw_Draw(const waves *ocean, const Body *planet, const FrameContext *
 	                            ocean->dyTexture, 0,
 	                            ocean->slopeTexture, ocean->dispTexture, ocean->jacobTexture, skyTex);
 	/* Also feeds the sky water.frag reflects (E, G_M: same as the dome). */
-	setAtmosphereExtinction(waterProgram, atmoInner, Atmosphere_Params());
+	Atmosphere_SetExtinction(waterProgram, atmoInner, Atmosphere_Params());
 	glUniform1f(glGetUniformLocation(waterProgram, "waveGeomScale"), (float)Water_GeomScale(planet->radius));
 	/* Wind / fetch sea state. Unit 10: 0-9 are taken (Rings uses 9). */
-	setOceanUniforms(waterProgram, 10);
+	TerrainGen_SetOceanUniforms(waterProgram, 10);
 	Rings_BindReceiver(waterProgram);
 	Clouds_BindReceiver(waterProgram, bodyId);
 	/* Water.frag's back-face early-out is only safe from outside the

@@ -53,7 +53,7 @@ static void initGlobalMap(void)
 void Shadows_InitGL(void)
 {
 	initGlobalMap();
-	createShader(&depthProgram, "world/shadows/depth.vert", "world/shadows/depth.frag");
+	Shader_Create(&depthProgram, "world/shadows/depth.vert", "world/shadows/depth.frag");
 
 	/* Same format and sampling as the global map (initGlobalMap):
 	   float depth, LINEAR + compare mode = hardware 2x2 PCF per tap, border
@@ -189,7 +189,7 @@ void Shadows_Fit(dvec3 camWorld, dvec3 forward, dvec3 sunDir, double nearest, do
 		return;
 
 	double tanY = tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
-	double aspect = getWindowWidth() / fmax(getWindowHeight(), 1.0f);
+	double aspect = Window_Width() / fmax(Window_Height(), 1.0f);
 	double t2 = tanY * tanY * (1.0 + aspect * aspect);
 	dvec3 r, u, f;
 	lightBasis(sunDir, &r, &u, &f);

@@ -19,10 +19,17 @@ typedef struct InputUiHooks {
 } InputUiHooks;
 void Input_SetUiHooks(const InputUiHooks *hooks);
 
-void doMovement(float deltaTime);
-int getWireframeState(void);
-int getRotationPaused(void);
-int consumeRegenRequest(void);
-int consumeFocusStep(void);   /* Tab / Shift+Tab since the last call */
+void Input_ApplyMovement(float deltaTime);
+int Input_Wireframe(void);
+int Input_RotationPaused(void);
+int Input_ConsumeRegenRequest(void);
+int Input_ConsumeFocusStep(void);   /* Tab / Shift+Tab since the last call */
+
+/* GLFW callbacks; Window_Create installs them. */
+void Input_KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
+void Input_ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+void Input_CursorCallback(GLFWwindow* window, double xpos, double ypos);
+void Input_MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+void Input_CharCallback(GLFWwindow* window, unsigned int codepoint);
 
 #endif

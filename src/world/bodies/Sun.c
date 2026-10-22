@@ -7,12 +7,12 @@ static GLuint sunTexture;
 static GLuint sunShader;
 static GLuint sunQuadVAO, sunQuadVBO;
 
-void initSun(void)
+void Sun_Init(void)
 {
 	char path[260];
-	sunTexture = loadTexture(Paths_Asset(path, sizeof path, "textures/planets/sun2.jpg"), 0);
+	sunTexture = Texture_Load(Paths_Asset(path, sizeof path, "textures/planets/sun2.jpg"), 0);
 
-	createShader(&sunShader, "world/bodies/sun.vert", "world/bodies/sun.frag");
+	Shader_Create(&sunShader, "world/bodies/sun.vert", "world/bodies/sun.frag");
 
 	// Fullscreen-quad corners in NDC, in perimeter order (BL, BR, TR, TL).
 	GLfloat quadVertices[] = {
@@ -68,7 +68,7 @@ static void drawSunQuadPass(void)
 	glBindVertexArray(0);
 }
 
-void drawSunDisc(mat4 proj, mat4 view, vec3 center, float radius)
+void Sun_DrawDisc(mat4 proj, mat4 view, vec3 center, float radius)
 {
 	glUseProgram(sunShader);
 	setupSunUniforms(proj, view, center, radius, 1.0f);
@@ -85,7 +85,7 @@ void drawSunDisc(mat4 proj, mat4 view, vec3 center, float radius)
 // Drawn LAST: depth-tested against the scene (so a planet in front still
 // hides it) but never writes depth, so planets behind the halo stay visible
 // and the glow simply blends over them.
-void drawSunGlow(mat4 proj, mat4 view, vec3 center, float radius)
+void Sun_DrawGlow(mat4 proj, mat4 view, vec3 center, float radius)
 {
 	glUseProgram(sunShader);
 	setupSunUniforms(proj, view, center, radius, 0.0f);

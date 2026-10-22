@@ -16,7 +16,7 @@
 
 /* The default look: EVE-style teal/amber duotone, ridged filaments, a
    tilted galaxy band. A macro so the static initializer and
-   nebulaDefaults() share one copy. */
+   Nebula_Defaults() share one copy. */
 #define NEBULA_DEFAULTS { \
 	.seed = NEBULA_SEED_DEFAULT, \
 	.nearWavelength = 0.15f, \
@@ -97,7 +97,7 @@ const char * Nebula_SkyName(void)
 	return g_nebulaSkyName;
 }
 
-nebulaParams nebulaDefaults(void)
+nebulaParams Nebula_Defaults(void)
 {
 	nebulaParams p = NEBULA_DEFAULTS;
 	return p;
@@ -477,11 +477,11 @@ static void buildGrid(void)
 
 void Nebula_Init(void)
 {
-	createShader(&skyProgram, "world/sky/nebula.vert", "world/sky/nebula_sky.frag");
-	createShader(&volProgram, "world/sky/nebula.vert", "world/sky/nebula_vol.frag");
-	createShader(&gridProgram, "world/sky/nebula.vert", "world/sky/nebula_grid.frag");
-	createShader(&noiseProgram, "world/sky/nebula.vert", "world/sky/nebula_noise.frag");
-	createShader(&postProgram, "world/sky/nebula.vert", "world/sky/nebula_post.frag");
+	Shader_Create(&skyProgram, "world/sky/nebula.vert", "world/sky/nebula_sky.frag");
+	Shader_Create(&volProgram, "world/sky/nebula.vert", "world/sky/nebula_vol.frag");
+	Shader_Create(&gridProgram, "world/sky/nebula.vert", "world/sky/nebula_grid.frag");
+	Shader_Create(&noiseProgram, "world/sky/nebula.vert", "world/sky/nebula_noise.frag");
+	Shader_Create(&postProgram, "world/sky/nebula.vert", "world/sky/nebula_post.frag");
 	glGenVertexArrays(1, &emptyVAO);
 	glGenFramebuffers(1, &fbo);
 	buildNoise(g_nebula.seed);
@@ -770,8 +770,8 @@ static unsigned int xorshift(unsigned int *s)
 
 /* Six 8-bit faces from the RGBA16F cube, with triangular (+-1 LSB) dither:
    dark smooth gas bands at 8 bits otherwise. File for face f = entry f of
-   Skybox.c's list (loadCubemap uploads faces[i] to POSITIVE_X + i). Rows:
-   glGetTexImage returns row 0 (t = 0) first and loadCubemap uploads the
+   Skybox.c's list (Texture_LoadCubemap uploads faces[i] to POSITIVE_X + i). Rows:
+   glGetTexImage returns row 0 (t = 0) first and Texture_LoadCubemap uploads the
    PNG's top row as row 0, so no flip on write (Bench.c turns it on for its
    window captures, and sets it again before each). */
 static int writeSky(GLuint cube, int size, const char *name)
@@ -1073,5 +1073,5 @@ void Nebula_DebugPanel(struct nk_context *ctx)
 	if (nk_button_label(ctx, "Save sky"))
 		Nebula_RequestSave();
 	if (nk_button_label(ctx, "Reset nebula"))
-		*n = nebulaDefaults();
+		*n = Nebula_Defaults();
 }

@@ -49,7 +49,7 @@ typedef struct cloudParams {
    drops every planet's weather maps, so nothing is built, drawn or
    shadowed). */
 cloudParams *Clouds_Params(void);
-cloudParams cloudDefaults(void);   /* Earth's (WorldConfig.h) */
+cloudParams Clouds_Defaults(void);   /* Earth's (WorldConfig.h) */
 const char *Clouds_StyleName(int style);
 
 /* Programs and the map target; after Rings_Init. */

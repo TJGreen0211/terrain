@@ -21,7 +21,7 @@ static int uiWantsMouse(double x, double y)
     return ui.wantsMouse && ui.wantsMouse(x, y);
 }
 
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
+void Input_KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
     if (ui.key) ui.key(window, key, scancode, action, mode);
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
@@ -29,7 +29,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     if (key == GLFW_KEY_T && action == GLFW_PRESS && mode == 0)
         wireframe = !wireframe;
     if (key == GLFW_KEY_G && action == GLFW_PRESS && mode == 0)
-        toggleSurfaceCamera();
+        Camera_ToggleSurface();
     if (key == GLFW_KEY_R && action == GLFW_PRESS && mode == 0)
         rotationPaused = !rotationPaused;
     if (key == GLFW_KEY_H && action == GLFW_PRESS && mode == 0)
@@ -51,24 +51,24 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 }
 
 /* W/S forward/back, A/D left/right; opposite keys cancel. */
-void doMovement(float deltaTime) {
+void Input_ApplyMovement(float deltaTime) {
     float forward = (float)(keyW - keyS);
     float right = (float)(keyD - keyA);
-    processKeyboard(forward, right, deltaTime);
+    Camera_ProcessKeyboard(forward, right, deltaTime);
 }
 
-void char_callback(GLFWwindow* window, unsigned int codepoint) {
+void Input_CharCallback(GLFWwindow* window, unsigned int codepoint) {
 	if (ui.chr) ui.chr(window, codepoint);
 }
 
 /* The wheel scrolls the debug panel while over it, zooms the camera otherwise. */
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+void Input_ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
 	double mx, my;
 	if (ui.scroll) ui.scroll(window, xoffset, yoffset);
 	glfwGetCursorPos(window, &mx, &my);
 	if (uiWantsMouse(mx, my))
 		return;
-	processMouseScroll((float)yoffset);
+	Camera_ProcessScroll((float)yoffset);
 }
 
 /* Left press over the debug panel belongs to nuklear (it polls the button
@@ -76,7 +76,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
    until the release, so the arcball never sees that press. Otherwise the
    press starts an arcball drag and the release ends it, the moment each
    happens. */
-void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+void Input_MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
 	if (ui.mouseButton) ui.mouseButton(window, button, action, mods);
 	if (button != GLFW_MOUSE_BUTTON_LEFT)
 		return;
@@ -87,41 +87,41 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 		if (uiWantsMouse(mx, my))
 			return;
 		glfwGetWindowSize(window, &width, &height);
-		uiSliderPress((float)mx, (float)my);
-		if (!uiSliderGrabbed())
-			arcballBegin(mx, my, width, height);
+		UI_SliderPress((float)mx, (float)my);
+		if (!UI_SliderGrabbed())
+			Camera_ArcballBegin(mx, my, width, height);
 	}
 	else if (action == GLFW_RELEASE) {
-		uiSliderRelease();
-		arcballEnd();
+		UI_SliderRelease();
+		Camera_ArcballEnd();
 	}
 }
 
-void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-	uiSetMouse((float)xpos, (float)ypos);
-	if (uiSliderGrabbed() || !arcballDragging())
+void Input_CursorCallback(GLFWwindow* window, double xpos, double ypos) {
+	UI_SetMouse((float)xpos, (float)ypos);
+	if (UI_SliderGrabbed() || !Camera_ArcballDragging())
 		return;
 	int width, height;
 	glfwGetWindowSize(window, &width, &height);
-	arcballDrag(xpos, ypos, width, height);
+	Camera_ArcballDrag(xpos, ypos, width, height);
 }
 
-int getWireframeState(void) {
+int Input_Wireframe(void) {
 	return wireframe;
 }
 
-int getRotationPaused(void) {
+int Input_RotationPaused(void) {
 	return rotationPaused;
 }
 
-int consumeRegenRequest(void) {
+int Input_ConsumeRegenRequest(void) {
 	int r = regenRequested;
 	regenRequested = 0;
 	return r;
 }
 
 /* Focus-body steps requested since the last call (Tab +1, Shift+Tab -1). */
-int consumeFocusStep(void) {
+int Input_ConsumeFocusStep(void) {
 	int s = focusStep;
 	focusStep = 0;
 	return s;

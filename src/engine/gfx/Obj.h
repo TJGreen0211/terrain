@@ -14,6 +14,6 @@ typedef struct obj{
 	int nsize;
 } obj;
 
-obj ObjLoadModel(char *fname);
+obj Mesh_LoadObj(char *fname);
 
 #endif

@@ -271,7 +271,7 @@ static int levelForSpacing(double radius, double minSpacing)
 double QuadTree_SplitK(double trianglePx)
 {
 	double tanHalf = tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0);
-	return getWindowHeight() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
+	return Window_Height() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
 }
 
 static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, int cullNear,
@@ -379,7 +379,7 @@ static void useTree(const QuadTree_Body *body, double trianglePx)
 	k.detailAmp = body->detailAmp;
 	k.detailSeam = body->detailSeam;
 	k.relief = body->relief;
-	k.windowHeight = getWindowHeight();
+	k.windowHeight = Window_Height();
 	if(treeValid && memcmp(&k, &treeKey, sizeof k) == 0)
 		return;
 	treeKey = k;
@@ -598,7 +598,7 @@ static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, i
 	k.viewProj = viewProj;
 	k.horizon = useHorizon;
 	k.cullNear = cullNear;
-	k.windowHeight = getWindowHeight();
+	k.windowHeight = Window_Height();
 	return k;
 }
 

@@ -41,17 +41,17 @@ static const float sliderAccentScroll[3] = { 1.0f, 0.55f, 0.30f };
 
 void CameraSliders_Setup(void)
 {
-	uiSliderSetChangedFn(onCameraSliderChanged);
+	UI_SetSliderChangedFn(onCameraSliderChanged);
 	/* t0 puts each handle at the current camera default. */
-	uiAddSlider(UI_SLIDER_MOVEMENT,
+	UI_AddSlider(UI_SLIDER_MOVEMENT,
 		cameraSliderInitT(CAMERA_MOVEMENT_MIN, CAMERA_MOVEMENT_MAX, Camera_MoveSpeed()),
 		sliderAccentMovement);
-	uiAddSlider(UI_SLIDER_SCROLL,
+	UI_AddSlider(UI_SLIDER_SCROLL,
 		cameraSliderInitT(CAMERA_SCROLL_MIN, CAMERA_SCROLL_MAX, Camera_ScrollStep()),
 		sliderAccentScroll);
 }
 
 void CameraSliders_Layout(int w, int h)
 {
-	uiLayoutSliders(w, h, UI_SLIDER_COUNT);
+	UI_LayoutSliders(w, h, UI_SLIDER_COUNT);
 }

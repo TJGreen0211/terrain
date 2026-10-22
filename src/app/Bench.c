@@ -286,7 +286,7 @@ void Bench_UpdateCamera(void)
 	Bodies_Params()->focusBody = pivotBody;
 	const Body *e = Bodies_Get(pivotBody);
 	if (viewSurface) {
-		if (!isSurfaceCamera()) toggleSurfaceCamera();
+		if (!Camera_IsSurface()) Camera_ToggleSurface();
 		testSetSurfaceRadius((float)interpAlt((double)frame));
 		return;
 	}
@@ -315,12 +315,12 @@ void Bench_UpdateCamera(void)
 		   sea level (use with timescale 0, or the ground slides under). */
 		double base = pivotGround ? Earth_GroundRadius(dir, 1000.0 / e->radius) : e->radius;
 		pivot = daddvec3(e->position, dscalarvec3(dir, base + pivotOff));
-		setCameraPivot(pivot);
-		benchSetOrbitEyeDir(u.x, u.y, u.z, (float)dist);
+		Camera_SetPivot(pivot);
+		Camera_SetOrbitEyeDir(u.x, u.y, u.z, (float)dist);
 		return;
 	}
-	setCameraPivot(pivot);
-	benchSetOrbitPose(yaw, pitch, (float)dist);
+	Camera_SetPivot(pivot);
+	Camera_SetOrbitPose(yaw, pitch, (float)dist);
 }
 
 void Bench_MaybeCapture(void)
@@ -331,7 +331,7 @@ void Bench_MaybeCapture(void)
 		if (shots[i] == frame) { hit = 1; break; }
 	if (!hit) return;
 
-	int w = (int)getWindowWidth(), h = (int)getWindowHeight();
+	int w = (int)Window_Width(), h = (int)Window_Height();
 	unsigned char *px = malloc((size_t)w * h * 4);
 	if (!px) return;
 	glReadBuffer(GL_BACK);

@@ -125,7 +125,7 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 	/* Atmosphere: likelier on bigger planets. */
 	double atmoChance = dwarf ? DWARF_ATMO_CHANCE : fmin(fmax((sizeE - 0.25) / 0.5, 0.0), 1.0) * 0.85;
 	p->hasAtmosphere = rnd(r) < atmoChance;
-	p->atmo = atmosphereDefaults();
+	p->atmo = Atmosphere_Defaults();
 	if (p->hasAtmosphere) {
 		hsv(rnd(r), range(r, 0.35, 0.85), 1.0, &p->atmo.C_R.x);
 		p->atmo.shellHeight = (float)(ROCKY_SHELL_FRACTION * b->radius * range(r, 0.5, 1.4) * (dwarf ? 0.5 : 1.0));
@@ -201,7 +201,7 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 static void generateClouds(unsigned int seed, int id, PlanetInfo *p)
 {
 	cloudParams *c = &p->clouds;
-	*c = cloudDefaults();
+	*c = Clouds_Defaults();
 	c->style = CLOUD_STYLE_NONE;
 	if (!p->hasAtmosphere || p->atmo.shellHeight <= 0.0f)
 		return;
@@ -477,7 +477,7 @@ static void bakeInto(int body, void (*step)(void))
 		return;
 	}
 	PlanetInfo *p = &g_planetInfo[body];
-	p->heightTex = generatePlanetHeightmap(&p->bake, &p->style, &p->gen, step);
+	p->heightTex = TerrainGen_BakeHeightmap(&p->bake, &p->style, &p->gen, step);
 	bakeDone(body);
 }
 

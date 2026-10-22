@@ -82,7 +82,7 @@ void TerrainDetail_Init(void)
 	if (groundTex)
 		return;
 	GLuint prog, vao, fbo;
-	createShader(&prog, "world/terrain/groundtex.vert", "world/terrain/groundtex.frag");
+	Shader_Create(&prog, "world/terrain/groundtex.vert", "world/terrain/groundtex.frag");
 	glGenTextures(1, &groundTex);
 	glBindTexture(GL_TEXTURE_2D_ARRAY, groundTex);
 	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA16F, GROUND_TEX_SIZE, GROUND_TEX_SIZE, GROUND_LAYERS,
@@ -176,7 +176,7 @@ static DetailOctaves octavesFor(double radius)
 void TerrainDetail_SetUniforms(GLuint shader, double radius, double trianglePx)
 {
 	DetailOctaves o = octavesFor(radius);
-	double pix = 2.0 * tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0) / getWindowHeight();
+	double pix = 2.0 * tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0) / Window_Height();
 	glUniform1i(glGetUniformLocation(shader, "detailOctave0"), o.first);
 	glUniform1i(glGetUniformLocation(shader, "detailOctaves"), o.count);
 	glUniform1f(glGetUniformLocation(shader, "detailAmp0"), (float)o.amp0);

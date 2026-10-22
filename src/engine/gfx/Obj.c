@@ -1,9 +1,9 @@
 #include "engine/gfx/Obj.h"
 
-obj ObjLoadModel(char *fname);
+obj Mesh_LoadObj(char *fname);
 obj newObj;
 
-obj ObjLoadModel(char *fname)
+obj Mesh_LoadObj(char *fname)
 {	
 	FILE *fp;
 	fp = fopen(fname, "r");

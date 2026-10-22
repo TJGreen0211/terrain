@@ -26,11 +26,11 @@ static int dragging = 0;
 /* Point the camera orbits / looks at, relative to the focus body's centre
    (world axes, not turning with the body), so the camera rides along with
    the body's orbit. Double, so WASD accumulation never quantizes against
-   the scene scale (camera-relative rendering, see getViewMatrix). Starts
+   the scene scale (camera-relative rendering, see Camera_ViewMatrix). Starts
    where the camera used to spawn (in front of the planet) since the
    distance starts at 0. */
 static dvec3 Pivot = { 0.0, 0.0, 0.0 };
-/* Focus body, set every frame (setCameraFocus): its world centre, its
+/* Focus body, set every frame (Camera_SetFocus): its world centre, its
    radius, and the unit direction from it to the Sun. */
 static dvec3 FocusOrigin = { 0.0, 0.0, 0.0 };
 static double FocusRadius;
@@ -74,19 +74,19 @@ static vec3 Front = {0.0f, 0.0f, -1.0f};
 static vec3 Up = {0.0f, 1.0f, 0.0f};
 static vec3 Right = {1.0f, 0.0f, 0.0f};
 
-void setCameraPivot(dvec3 pivot)
+void Camera_SetPivot(dvec3 pivot)
 {
     Pivot = dsubvec3(pivot, FocusOrigin);
 }
 
-void setCameraFocus(dvec3 origin, double radius, dvec3 sunDir)
+void Camera_SetFocus(dvec3 origin, double radius, dvec3 sunDir)
 {
     FocusOrigin = origin;
     FocusRadius = radius;
     FocusSunDir = sunDir;
 }
 
-void resetCameraForFocus(double distance)
+void Camera_ResetForFocus(double distance)
 {
     Pivot = (dvec3){ 0.0, 0.0, 0.0 };
     CameraDistance = (float)fmin(distance, CameraDistanceMax);
@@ -150,7 +150,7 @@ static mat4 surfaceViewRotation(void);
 
 /* Rotation matrix of the unit orientation quaternion, in the same row layout
    as rotateX/rotateY (m[row][col], applied to column vectors). */
-mat4 getViewRotation()
+mat4 Camera_ViewRotation()
 {
     if (surfaceViewActive()) return surfaceViewRotation();
     quaternion q = orientation;
@@ -290,9 +290,9 @@ static quaternion quatFromRows(const float m[4][4])
 
 /* Pose the orbit camera by the unit direction from the pivot to the eye:
    the orientation is any rotation whose row 2 (the eye direction through
-   getCameraPosition) is exactly u. Used by bench subsolar scenes, where the
+   Camera_Position) is exactly u. Used by bench subsolar scenes, where the
    local "up" is not world +Y. */
-void benchSetOrbitEyeDir(double ux, double uy, double uz, float distMeters)
+void Camera_SetOrbitEyeDir(double ux, double uy, double uz, float distMeters)
 {
     float len = (float)sqrt(ux * ux + uy * uy + uz * uz);
     if (len < 1e-9f)
@@ -316,7 +316,7 @@ void benchSetOrbitEyeDir(double ux, double uy, double uz, float distMeters)
     dragging = 0;
 }
 
-void benchSetOrbitPose(double yawDeg, double pitchDeg, float distMeters)
+void Camera_SetOrbitPose(double yawDeg, double pitchDeg, float distMeters)
 {
     float yr = (float)(yawDeg * M_PI / 180.0);
     float pr = (float)(pitchDeg * M_PI / 180.0);
@@ -331,7 +331,7 @@ void benchSetOrbitPose(double yawDeg, double pitchDeg, float distMeters)
     dragging = 0;
 }
 
-void toggleSurfaceCamera(void)
+void Camera_ToggleSurface(void)
 {
     surfaceView = !surfaceView;
     /* The surface pose ignores the arcball, so a drag in flight would resume
@@ -340,7 +340,7 @@ void toggleSurfaceCamera(void)
     if (surfaceView && surfAlt < SURFACE_RAD) surfAlt = SURFACE_RAD;
 }
 
-int isSurfaceCamera(void)
+int Camera_IsSurface(void)
 {
     return surfaceView;
 }
@@ -351,18 +351,18 @@ int isSurfaceCamera(void)
    would re-quantize against the scene scale) enters the float pipeline.
    Algebraically identical to the old R * translate(-cam) applied to absolute
    positions: R*(v - cam) == R*v_rel. */
-mat4 getViewMatrix()
+mat4 Camera_ViewMatrix()
 {
-    return getViewRotation();
+    return Camera_ViewRotation();
 }
 
 /* Absolute world camera position in double: never hand it to the GPU.
    Subtract it from world positions in double and downcast only the
    difference. The orbit camera sits CameraDistance behind the pivot. */
-dvec3 getCameraPosition(void)
+dvec3 Camera_Position(void)
 {
     if (surfaceViewActive()) return surfaceEye();
-    mat4 r = getViewRotation();
+    mat4 r = Camera_ViewRotation();
     dvec3 c;
     c.x = FocusOrigin.x + Pivot.x + (double)CameraDistance * r.m[2][0];
     c.y = FocusOrigin.y + Pivot.y + (double)CameraDistance * r.m[2][1];
@@ -373,9 +373,9 @@ dvec3 getCameraPosition(void)
 /* The view transform is v_cam = R * (v_world + t), so a world direction d
    appears in the camera as R * d. The world direction that shows up as the
    camera's screen +x / +y / -z is a ROW of R, not a column. */
-void updateCameraVectors()
+void Camera_UpdateVectors()
 {
-    mat4 r = getViewRotation();
+    mat4 r = Camera_ViewRotation();
     vec3 right = { r.m[0][0], r.m[0][1], r.m[0][2] };
     vec3 front = { -r.m[2][0], -r.m[2][1], -r.m[2][2] };
     vec3 up    = { r.m[1][0], r.m[1][1], r.m[1][2] };
@@ -387,11 +387,11 @@ void updateCameraVectors()
 /* Pans the pivot (and the camera with it) along the view: forward/right are
    the summed key axes in [-1, 1]. The combined direction is normalized so a
    diagonal (W+D) is no faster than a single key. */
-void processKeyboard(float forward, float right, GLfloat deltaTime)
+void Camera_ProcessKeyboard(float forward, float right, GLfloat deltaTime)
 {
     if (surfaceViewActive()) return;   // WASD is orbit-pan; ignore in surface mode
     if (forward == 0.0f && right == 0.0f) return;
-    updateCameraVectors();
+    Camera_UpdateVectors();
 
     vec3 dir;
     dir.x = Front.x * forward + Right.x * right;
@@ -404,7 +404,7 @@ void processKeyboard(float forward, float right, GLfloat deltaTime)
 }
 
 /* Press: latch the cursor's point on the ball and the orientation it grabs. */
-void arcballBegin(double xpos, double ypos, int width, int height)
+void Camera_ArcballBegin(double xpos, double ypos, int width, int height)
 {
     if (surfaceViewActive()) return;
     dragStartPos = projectCursorToSphere(xpos, ypos, width, height);
@@ -414,7 +414,7 @@ void arcballBegin(double xpos, double ypos, int width, int height)
 
 /* Move: rotate the scene so the grabbed point follows the cursor across the
    ball, always relative to the press, never to the previous frame. */
-void arcballDrag(double xpos, double ypos, int width, int height)
+void Camera_ArcballDrag(double xpos, double ypos, int width, int height)
 {
     if (!dragging || surfaceViewActive()) return;
     vec3 current = projectCursorToSphere(xpos, ypos, width, height);
@@ -423,12 +423,12 @@ void arcballDrag(double xpos, double ypos, int width, int height)
 }
 
 /* Release: the orientation already holds the final drag, nothing to commit. */
-void arcballEnd(void)
+void Camera_ArcballEnd(void)
 {
     dragging = 0;
 }
 
-int arcballDragging(void)
+int Camera_ArcballDragging(void)
 {
     return dragging;
 }
@@ -436,7 +436,7 @@ int arcballDragging(void)
 /* Scroll in (yoffset < 0) shrinks the orbit radius to 0, out grows it to max.
    In surface mode the same scroll dollies the camera altitude through the
    atmosphere shell (SURFACE_RAD -> SURFACE_MAX) instead of the orbit radius. */
-void processMouseScroll(float yoffset)
+void Camera_ProcessScroll(float yoffset)
 {
     if (surfaceViewActive())
     {

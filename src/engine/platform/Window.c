@@ -1,10 +1,5 @@
 #include "engine/platform/Window.h"
-
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
-void mouse_callback(GLFWwindow* window, double xpos, double ypos);
-void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
-void char_callback(GLFWwindow* window, unsigned int codepoint);
+#include "engine/platform/Input.h"
 
 static float windowWidth = 1.0f, windowHeight = 1.0f;
 
@@ -18,7 +13,7 @@ static void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 	}
 }
 
-GLFWwindow *setupGLFW(const char *title, int fixedWidth, int fixedHeight) {
+GLFWwindow *Window_Create(const char *title, int fixedWidth, int fixedHeight) {
 	glfwInit();
 	glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -54,20 +49,20 @@ GLFWwindow *setupGLFW(const char *title, int fixedWidth, int fixedHeight) {
 	framebuffer_size_callback(window, fbw, fbh);
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 	//glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_ENABLED);
-	glfwSetKeyCallback(window, key_callback);
-	glfwSetCursorPosCallback(window, mouse_callback);
-	glfwSetScrollCallback(window, scroll_callback);
-	glfwSetMouseButtonCallback(window, mouse_button_callback);
-	glfwSetCharCallback(window, char_callback);
+	glfwSetKeyCallback(window, Input_KeyCallback);
+	glfwSetCursorPosCallback(window, Input_CursorCallback);
+	glfwSetScrollCallback(window, Input_ScrollCallback);
+	glfwSetMouseButtonCallback(window, Input_MouseButtonCallback);
+	glfwSetCharCallback(window, Input_CharCallback);
 	return window;
 }
 
 /* Cached framebuffer size: these are called many times per frame, and
    glfwGetVideoMode is an uncached EnumDisplaySettingsW call on Win32. */
-float getWindowHeight() {
+float Window_Height() {
 	return windowHeight;
 }
 
-float getWindowWidth() {
+float Window_Width() {
 	return windowWidth;
 }

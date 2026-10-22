@@ -26,40 +26,40 @@ void Camera_SetMoveSpeed(float metresPerSecond);
 float Camera_ScrollStep(void);
 void Camera_SetScrollStep(float metres);
 
-/* Camera-relative rendering: getViewMatrix() is rotation only, and the camera
-   sits at the origin of every space the GPU sees. getCameraPosition() is the
+/* Camera-relative rendering: Camera_ViewMatrix() is rotation only, and the camera
+   sits at the origin of every space the GPU sees. Camera_Position() is the
    absolute world camera in double: subtract it from world positions in double
    and downcast only the difference (see LinearAlg.h dvec3). */
-void setCameraPivot(dvec3 pivot);   /* world position (kept relative to the focus) */
+void Camera_SetPivot(dvec3 pivot);   /* world position (kept relative to the focus) */
 /* Focus body for this frame: the pivot rides with origin (world centre),
    the surface preset (G) stands on the body (radius) below the sun
    (sunDir: unit, body -> Sun). Call before using the camera each frame. */
-void setCameraFocus(dvec3 origin, double radius, dvec3 sunDir);
+void Camera_SetFocus(dvec3 origin, double radius, dvec3 sunDir);
 /* After a focus switch: pivot on the body's centre, orbit at distance. */
-void resetCameraForFocus(double distance);
-dvec3 getCameraPosition(void);
-mat4 getViewMatrix();
-mat4 getViewRotation();
+void Camera_ResetForFocus(double distance);
+dvec3 Camera_Position(void);
+mat4 Camera_ViewMatrix();
+mat4 Camera_ViewRotation();
 
-void updateCameraVectors();
-void toggleSurfaceCamera(void);   // G: lock to a surface/tangent view
-int isSurfaceCamera(void);
+void Camera_UpdateVectors();
+void Camera_ToggleSurface(void);   // G: lock to a surface/tangent view
+int Camera_IsSurface(void);
 /* forward/right: summed WASD axes in [-1, 1] (W/D positive). */
-void processKeyboard(float forward, float right, GLfloat deltaTime);
+void Camera_ProcessKeyboard(float forward, float right, GLfloat deltaTime);
 /* Arcball drag, driven by the real button press/release events. Cursor
    position and window size are both in GLFW screen coordinates. */
-void arcballBegin(double xpos, double ypos, int width, int height);
-void arcballDrag(double xpos, double ypos, int width, int height);
-void arcballEnd(void);
-int arcballDragging(void);
-void processMouseScroll(float yoffset);
+void Camera_ArcballBegin(double xpos, double ypos, int width, int height);
+void Camera_ArcballDrag(double xpos, double ypos, int width, int height);
+void Camera_ArcballEnd(void);
+int Camera_ArcballDragging(void);
+void Camera_ProcessScroll(float yoffset);
 
 /* Benchmark path pose: orientation = pitch (world X) * yaw (world Y), orbit
    radius distMeters, drag state cleared. (See Bench.h scene format.) */
-void benchSetOrbitPose(double yawDeg, double pitchDeg, float distMeters);
+void Camera_SetOrbitPose(double yawDeg, double pitchDeg, float distMeters);
 
 /* Benchmark subsolar pose: eye direction from the pivot given as a unit
    vector, so the pivot's local frame (not world +Y) can drive the camera. */
-void benchSetOrbitEyeDir(double ux, double uy, double uz, float distMeters);
+void Camera_SetOrbitEyeDir(double ux, double uy, double uz, float distMeters);
 
 #endif

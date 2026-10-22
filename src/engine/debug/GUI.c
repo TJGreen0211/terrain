@@ -12,9 +12,9 @@ static int activeSlider = -1;
 static uiSliderChangedFn sliderChanged = NULL;
 static int uiReady = 0;
 
-void attachGUIShaders()
+void UI_InitShaders()
 {
-	createShader(&UIShader, "engine/debug/UI.vert",
+	Shader_Create(&UIShader, "engine/debug/UI.vert",
 		"engine/debug/UI.frag");
 	uiLRect = glGetUniformLocation(UIShader, "uRect");
 	uiLColor = glGetUniformLocation(UIShader, "uColor");
@@ -28,7 +28,7 @@ void attachGUIShaders()
 	uiLTintTex = glGetUniformLocation(UIShader, "uTintTex");
 }
 
-int uiInit(void)
+int UI_Init(void)
 {
 	if (uiReady)
 		return 1;
@@ -68,7 +68,7 @@ static int pointInRect(float x, float y, const float rect[4])
 	       y >= rect[1] && y < rect[1] + rect[3];
 }
 
-int uiAddSlider(int id, float t0, const float accent[3])
+int UI_AddSlider(int id, float t0, const float accent[3])
 {
 	if (!uiReady || sliderCount >= UI_MAX_SLIDERS)
 		return -1;
@@ -98,13 +98,8 @@ int uiAddSlider(int id, float t0, const float accent[3])
 	return sliderCount - 1;
 }
 
-int uiSliderCount(void)
-{
-	return sliderCount;
-}
-
 /* Stacked horizontal sliders anchored at the bottom-left corner. */
-void uiLayoutSliders(int winW, int winH, int count)
+void UI_LayoutSliders(int winW, int winH, int count)
 {
 	if (!uiReady || count <= 0)
 		return;
@@ -136,7 +131,7 @@ void uiLayoutSliders(int winW, int winH, int count)
 	}
 }
 
-void uiSliderSetChangedFn(uiSliderChangedFn fn)
+void UI_SetSliderChangedFn(uiSliderChangedFn fn)
 {
 	sliderChanged = fn;
 }
@@ -156,7 +151,7 @@ static void sliderSetT(uiSlider *s, float x)
 	}
 }
 
-int uiSliderPress(float x, float y)
+int UI_SliderPress(float x, float y)
 {
 	if (!uiReady)
 		return -1;
@@ -171,7 +166,7 @@ int uiSliderPress(float x, float y)
 	return -1;
 }
 
-int uiSliderRelease(void)
+int UI_SliderRelease(void)
 {
 	if (activeSlider < 0)
 		return -1;
@@ -181,12 +176,12 @@ int uiSliderRelease(void)
 	return id;
 }
 
-int uiSliderGrabbed(void)
+int UI_SliderGrabbed(void)
 {
 	return activeSlider >= 0;
 }
 
-void uiSetMouse(float x, float y)
+void UI_SetMouse(float x, float y)
 {
 	if (!uiReady)
 		return;
@@ -218,7 +213,7 @@ static void uiDrawFlat(float x, float y, float w, float h,
    mode size, not the window, so the UI pass draws into the full framebuffer
    and maps window pixels through the window size: the rects then line up
    with glfwGetCursorPos regardless of the scene viewport. */
-void uiDrawAll(void)
+void UI_DrawAll(void)
 {
 	if (!uiReady || sliderCount == 0)
 		return;
@@ -276,14 +271,3 @@ void uiDrawAll(void)
 	glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 }
 
-void uiShutdown(void)
-{
-	if (!uiReady)
-		return;
-	uiReady = 0;
-	sliderCount = 0;
-	activeSlider = -1;
-	glDeleteVertexArrays(1, &UIvao);
-	glDeleteBuffers(1, &UIvbo);
-	glDeleteProgram(UIShader);
-}

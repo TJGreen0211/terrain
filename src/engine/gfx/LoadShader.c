@@ -123,12 +123,12 @@ static char *insertDefines(char *src, const char *defines)
 	return out;
 }
 
-GLuint LoadShader(char *shaderPath, int shaderType)
+GLuint Shader_Load(char *shaderPath, int shaderType)
 {
-	return LoadShaderDefines(shaderPath, shaderType, NULL);
+	return Shader_LoadDefines(shaderPath, shaderType, NULL);
 }
 
-GLuint LoadShaderDefines(char *shaderName, int shaderType, const char *defines)
+GLuint Shader_LoadDefines(char *shaderName, int shaderType, const char *defines)
 {
 	GLuint shader = glCreateShader(shaderType);
 

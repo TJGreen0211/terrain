@@ -8,7 +8,7 @@
 static GLuint skyboxShader;
 static GLuint skyboxVAO, skyboxVBO;
 
-// Six faces in the order loadCubemap expects: faces[i] goes to
+// Six faces in the order Texture_LoadCubemap expects: faces[i] goes to
 // CUBE_MAP_POSITIVE_X+i, so right, left, top, bottom, back, front are
 // +X, -X, +Y, -Y, +Z, -Z (the nebula bake writes them in this order).
 static const char *faceNames[6] = { "right", "left", "top", "bottom", "back", "front" };
@@ -36,10 +36,10 @@ static GLuint loadNebulaSky(void)
 	// turns seamless filtering on for every sky anyway: TerrainGen.c.)
 	Nebula_LoadParams(Nebula_SkyName());
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-	return loadCubemap(faces);
+	return Texture_LoadCubemap(faces);
 }
 
-GLuint loadSkyboxCube(void)
+GLuint Skybox_LoadCube(void)
 {
 	GLuint nebula = loadNebulaSky();
 	if (nebula)
@@ -48,10 +48,10 @@ GLuint loadSkyboxCube(void)
 	char *cubemapArray[6];
 	for (int i = 0; i < 6; i++)
 		cubemapArray[i] = Paths_Asset(paths[i], sizeof paths[i], "textures/skybox3/%s.png", faceNames[i]);
-	return loadCubemap(cubemapArray);
+	return Texture_LoadCubemap(cubemapArray);
 }
 
-void initSkybox(void)
+void Skybox_Init(void)
 {
 	// Cube corners (36 triangles, inward-facing so GL_BACK culling keeps them).
 	GLfloat skyboxVertices[] = {
@@ -104,7 +104,7 @@ void initSkybox(void)
 		-1.0f, -1.0f, -1.0f
 	};
 
-	createShader(&skyboxShader, "world/sky/skybox.vert", "world/sky/skybox.frag");
+	Shader_Create(&skyboxShader, "world/sky/skybox.vert", "world/sky/skybox.frag");
 
 	glGenVertexArrays(1, &skyboxVAO);
 	glBindVertexArray(skyboxVAO);
@@ -120,7 +120,7 @@ void initSkybox(void)
 	glBindVertexArray(0);
 }
 
-void drawSkybox(GLuint cubemap, mat4 projection, mat4 viewRotation)
+void Skybox_Draw(GLuint cubemap, mat4 projection, mat4 viewRotation)
 {
 	glUseProgram(skyboxShader);
 

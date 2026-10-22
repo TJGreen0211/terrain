@@ -13,7 +13,7 @@
 #include "engine/debug/nk.h"
 
 /* Earth's layer (WorldConfig.h). A macro so the static initializer and
-   cloudDefaults() share one copy. Colour: a slightly warm white. */
+   Clouds_Defaults() share one copy. Colour: a slightly warm white. */
 #define CLOUD_DEFAULTS { \
 	.style = CLOUD_STYLE_CLIMATE, \
 	.coverage = (float)CLOUD_EARTH_COVERAGE, \
@@ -39,7 +39,7 @@ cloudParams * Clouds_Params(void)
 	return &g_clouds;
 }
 
-cloudParams cloudDefaults(void)
+cloudParams Clouds_Defaults(void)
 {
 	cloudParams c = CLOUD_DEFAULTS;
 	return c;
@@ -114,7 +114,7 @@ static unsigned long long mix64(unsigned long long z)
 
 void Clouds_Init(void)
 {
-	createShader(&mapProgram, "world/clouds/cloudmap.vert", "world/clouds/cloudmap.frag");
+	Shader_Create(&mapProgram, "world/clouds/cloudmap.vert", "world/clouds/cloudmap.frag");
 
 	mapW = CLOUD_MAP_WIDTH;
 	mapH = CLOUD_MAP_WIDTH / 2;
@@ -369,7 +369,7 @@ static float cloudEdge(const cloudParams *c)
 /* Radians per screen pixel at the view centre. */
 static float pixelAngle(void)
 {
-	return (float)(2.0 * tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0) / getWindowHeight());
+	return (float)(2.0 * tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0) / Window_Height());
 }
 
 /* cloudlayer.glsl's uniforms. */
@@ -436,7 +436,7 @@ static GLuint slabProgram(int octaves)
 	if (!slabPrograms[octaves]) {
 		char defines[64];
 		snprintf(defines, sizeof defines, "#define SLAB_OCTAVES %d\n", octaves);
-		createShaderDefines(&slabPrograms[octaves], "world/clouds/clouds.vert", "world/clouds/clouds.frag", defines);
+		Shader_CreateDefines(&slabPrograms[octaves], "world/clouds/clouds.vert", "world/clouds/clouds.frag", defines);
 		Rings_AttachReceiver(slabPrograms[octaves]);
 	}
 	return slabPrograms[octaves];
@@ -491,7 +491,7 @@ static void setSlabUniforms(GLuint s, mat4 proj, mat4 view, dvec3 cam, int body)
 	glUniform1f(glGetUniformLocation(s, "windMax"), WIND_MAP_MAX_MS);
 
 	/* The air (extinction toward the camera, sunlight) and ring shadows. */
-	setAtmosphereExtinction(s, (float)R, Atmosphere_Params());
+	Atmosphere_SetExtinction(s, (float)R, Atmosphere_Params());
 	Rings_BindReceiver(s);
 }
 
@@ -577,5 +577,5 @@ void Clouds_DebugPanel(struct nk_context *ctx)
 
 	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
 	if (nk_button_label(ctx, "Reset clouds (Earth)"))
-		*c = cloudDefaults();
+		*c = Clouds_Defaults();
 }

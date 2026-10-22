@@ -15,6 +15,6 @@ typedef struct sphere {
 	int vertexNumber;
 } sphere;
 
-sphere tetrahedron(int count, sphere *s);
+sphere Mesh_Tetrahedron(int count, sphere *s);
 
 #endif

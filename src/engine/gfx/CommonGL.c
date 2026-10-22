@@ -1,10 +1,10 @@
 #include "engine/gfx/CommonGL.h"
 
-GLuint initFramebuffer(GLuint *textureID, float sizeX, float sizeY) {
+GLuint Framebuffer_Create(GLuint *textureID, float sizeX, float sizeY) {
 	GLuint fbo;
 	glGenFramebuffers(1, &fbo);
 	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	*textureID = generateTextureAttachment(0, 0, sizeX, sizeY);
+	*textureID = Texture_CreateAttachment(0, 0, sizeX, sizeY);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *textureID, 0);
 
 	GLuint rbo;

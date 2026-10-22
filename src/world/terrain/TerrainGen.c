@@ -674,7 +674,7 @@ static void ensureBakeResources(void)
 {
 	if (bakeProgram) return;
 
-	createShader(&bakeProgram, "world/terrain/heightbake.vert", "world/terrain/heightbake.frag");
+	Shader_Create(&bakeProgram, "world/terrain/heightbake.vert", "world/terrain/heightbake.frag");
 
 	static const float quadCoords[8] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
 	glGenVertexArrays(1, &bakeQuadVAO);
@@ -1355,7 +1355,7 @@ static unsigned short *surfacePixels(const PlanetStyle *ps, const float *h, floa
 	return px;
 }
 
-void setOceanUniforms(unsigned int shader, int unit)
+void TerrainGen_SetOceanUniforms(unsigned int shader, int unit)
 {
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_CUBE_MAP, g_planetGen.oceanTex);
@@ -1367,7 +1367,7 @@ void setOceanUniforms(unsigned int shader, int unit)
 /* ---------------- Surface style ---------------- */
 
 /* Earth-like defaults. Colours are sRGB (as a colour picker shows them);
-   setPlanetSurfaceUniforms converts them to linear albedo for the shader.
+   TerrainGen_SetSurfaceUniforms converts them to linear albedo for the shader.
    Linear targets roughly: forest ~0.02-0.05, grass ~0.05-0.10,
    desert ~0.15-0.50, fresh snow ~0.85. */
 static PlanetStyle g_planetStyle = {
@@ -1411,7 +1411,7 @@ static void uniformSrgb3(unsigned int shader, const char *name, const float *srg
 	glUniform3fv(glGetUniformLocation(shader, name), count, lin);
 }
 
-void setPlanetSurfaceUniforms(unsigned int shader, int unit)
+void TerrainGen_SetSurfaceUniforms(unsigned int shader, int unit)
 {
 	const PlanetStyle *ps = &g_planetStyle;
 	glActiveTexture(GL_TEXTURE0 + unit);
@@ -1863,7 +1863,7 @@ static void shapeStrips(TerrainBakeJob *job, int end)
 	}
 	glBindVertexArray(0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(0, 0, getWindowWidth(), getWindowHeight());
+	glViewport(0, 0, Window_Width(), Window_Height());
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	if (blend) glEnable(GL_BLEND);
@@ -2191,7 +2191,7 @@ static GLuint bakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
 	return heightTex;
 }
 
-unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, const PlanetStyle *style,
+unsigned int TerrainGen_BakeHeightmap(const TerrainBakeSettings *bs, const PlanetStyle *style,
                                      PlanetGenParams *out, void (*step)(void))
 {
 	TerrainBakeJob *job = newJob(bs, style, step);

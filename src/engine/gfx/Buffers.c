@@ -1,6 +1,6 @@
 #include "engine/gfx/Buffers.h"
 
-GLuint initBuffers(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
+GLuint Buffer_CreateMesh(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec2 *texCoords, int texSize) {
 	GLuint vbo, vao;
 	glGenVertexArrays(1, &vao);
 	glBindVertexArray(vao);
@@ -22,7 +22,7 @@ GLuint initBuffers(vec3 *vertices, int vertSize, vec3 *normals, int normSize, ve
 	return vao;
 }
 
-GLuint initBufferTangents(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec3 *tangents, int tanSize, vec2 *texCoords, int texSize) {
+GLuint Buffer_CreateMeshTangents(vec3 *vertices, int vertSize, vec3 *normals, int normSize, vec3 *tangents, int tanSize, vec2 *texCoords, int texSize) {
 	GLuint vbo, vao;
 	glGenVertexArrays(1, &vao);
 	glBindVertexArray(vao);

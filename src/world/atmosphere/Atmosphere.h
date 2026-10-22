@@ -20,11 +20,11 @@ typedef struct atmosphereParams {
 
 /* The active planet's live atmosphere (SolarSystem.c swaps it; debug panel). */
 atmosphereParams *Atmosphere_Params(void);
-atmosphereParams atmosphereDefaults(void); // OpenGLSolar Earth values
+atmosphereParams Atmosphere_Defaults(void); // OpenGLSolar Earth values
 
 // Build the atmosphere dome's program (atmosphere.vert/frag) and its VAO/VBO
 // (positions followed by normals) from the app's tetrahedron `planet` mesh.
-void initAtmosphere(sphere mesh);
+void Atmosphere_Init(sphere mesh);
 // The dome program, for hookups that need it (ring-shadow receivers).
 GLuint Atmosphere_Program(void);
 
@@ -34,7 +34,7 @@ GLuint Atmosphere_Program(void);
 // sits inside the outer shell the cull face swaps to GL_FRONT and depth testing
 // is disabled, so the far hemisphere still blends its (surface-clipped)
 // in-scatter over the planet. The planet/water passes apply the matching
-// out-scatter extinction (setAtmosphereExtinction) so fog is continuous across
+// out-scatter extinction (Atmosphere_SetExtinction) so fog is continuous across
 // the shell boundary.
 // modelmat is the planet's transform WITHOUT the dome scale (identity here:
 // the planet sits at the origin); the dome scale is fOuter. lightPosition is
@@ -43,7 +43,7 @@ GLuint Atmosphere_Program(void);
 // the scene's depth (Atmosphere_SetSceneDepth), so terrain standing above sea
 // level is not fogged by air behind it. It is added times (1 - the target's
 // alpha): the cloud cover Clouds_Draw leaves there (0 without clouds).
-void drawAtmosphereDome(mat4 proj, mat4 view, mat4 modelmat,
+void Atmosphere_DrawDome(mat4 proj, mat4 view, mat4 modelmat,
                         float fInner, const atmosphereParams *atmo, vec4 lightPosition);
 
 // The main pass's depth: a multisampled reversed-Z infinite depth texture
@@ -54,7 +54,7 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
 // the surface is dimmed by the transmittance along the surface-to-camera path
 // through the same shell the dome scatters in. The program must be bound.
 // shellHeight <= 0 switches extinction off.
-void setAtmosphereExtinction(GLuint shader, float fInner, const atmosphereParams *atmo);
+void Atmosphere_SetExtinction(GLuint shader, float fInner, const atmosphereParams *atmo);
 
 struct nk_context;
 /* The Atmosphere tab of the debug panel (Atmosphere.c). */

@@ -139,25 +139,25 @@ static GLuint createWaveArray(int dim, GLint internalFormat, GLenum format) {
 	return tex;
 }
 
-double waveCascadePatchM(int c) {
+double Water_CascadePatchM(int c) {
 	return OCEAN_WAVE_PATCH_M / pow(OCEAN_CASCADE_RATIO, c);
 }
 
-/* Each cascade's share of the calibrated rms height (initializeWaves). */
+/* Each cascade's share of the calibrated rms height (Water_Init). */
 static double s_cascadeRmsFrac[OCEAN_CASCADES];
 
-double waveCascadeRmsFrac(int c) {
+double Water_CascadeRmsFrac(int c) {
 	return s_cascadeRmsFrac[c];
 }
 
-double waveCascadeScale(int c) {
+double Water_CascadeScale(int c) {
 	return (c == OCEAN_CASCADES - 1) ? 1.0 : fmax(g_waveParams[3], 0.01);
 }
 
-void initializeWaves(waves *water, int dim, double time) {
+void Water_Init(waves *water, int dim, double time) {
 	water->dimension = dim;
 	for(int c = 0; c < OCEAN_CASCADES; c++)
-		water->patchM[c] = (float)waveCascadePatchM(c);
+		water->patchM[c] = (float)Water_CascadePatchM(c);
 
 	water->dyTexture = createWaveArray(dim, GL_R32F, GL_RED);
 	water->dispTexture = createWaveArray(dim, GL_RG32F, GL_RG);
@@ -263,9 +263,9 @@ static GLuint createLayerFBO(const GLuint *tex, int count, int layer) {
 
 static void initWavesGPU(waves *water) {
 	int dim = water->dimension;
-	createShader(&s_specProg, "world/ocean/wavefft.vert", "world/ocean/wavespectrum.frag");
-	createShader(&s_fftProg, "world/ocean/wavefft.vert", "world/ocean/wavefft.frag");
-	createShader(&s_packProg, "world/ocean/wavefft.vert", "world/ocean/wavepack.frag");
+	Shader_Create(&s_specProg, "world/ocean/wavefft.vert", "world/ocean/wavespectrum.frag");
+	Shader_Create(&s_fftProg, "world/ocean/wavefft.vert", "world/ocean/wavefft.frag");
+	Shader_Create(&s_packProg, "world/ocean/wavefft.vert", "world/ocean/wavepack.frag");
 	glGenVertexArrays(1, &s_emptyVAO);
 
 	/* h0(k) and conj(h0(-k)) per cascade, fixed for the run (initH0). */
@@ -348,10 +348,10 @@ static void generateWavesGPU(waves *water, double time) {
 		/* Spectrum at time t into pair 0. */
 		glBindFramebuffer(GL_FRAMEBUFFER, s_pingFBO[0]);
 		glUseProgram(s_specProg);
-		/* Froude scaling: the shaders draw this cascade waveCascadeScale
+		/* Froude scaling: the shaders draw this cascade Water_CascadeScale
 		   times larger, so it runs sqrt of that slower and keeps the speed
 		   of real waves of its drawn size. */
-		glUniform1f(s_specTime, (float)(time / sqrt(waveCascadeScale(c))));
+		glUniform1f(s_specTime, (float)(time / sqrt(Water_CascadeScale(c))));
 		glUniform1f(s_specPatch, water->patchM[c]);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, s_h0Tex[c]);
@@ -407,7 +407,7 @@ static void generateWavesGPU(waves *water, double time) {
 	if(cull) glEnable(GL_CULL_FACE);
 }
 
-void generateWaves(waves *water, double time) {
+void Water_Generate(waves *water, double time) {
 	static int frame = 0;
 	if(frame++ % WAVE_UPDATE_INTERVAL != 0)
 		return;

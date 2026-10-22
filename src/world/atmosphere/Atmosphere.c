@@ -30,7 +30,7 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane)
 }
 
 /* OpenGLSolar Earth values; shell and scale height from WorldConfig.h. A
-   macro so the static initializer below and atmosphereDefaults() share
+   macro so the static initializer below and Atmosphere_Defaults() share
    one copy. */
 #define ATMOSPHERE_DEFAULTS { \
 	.shellHeight = (float)ATMOSPHERE_SHELL_HEIGHT_M, \
@@ -49,7 +49,7 @@ atmosphereParams * Atmosphere_Params(void)
 	return &g_atmosphere;
 }
 
-atmosphereParams atmosphereDefaults(void)
+atmosphereParams Atmosphere_Defaults(void)
 {
 	atmosphereParams p = ATMOSPHERE_DEFAULTS;
 	return p;
@@ -92,9 +92,9 @@ static void setScatteringUniforms(GLuint shader, float fInner, const atmosphereP
 
 GLuint Atmosphere_Program(void) { return domeProgram; }
 
-void initAtmosphere(sphere mesh)
+void Atmosphere_Init(sphere mesh)
 {
-	createShader(&domeProgram, "world/atmosphere/atmosphere.vert",
+	Shader_Create(&domeProgram, "world/atmosphere/atmosphere.vert",
 		"world/atmosphere/atmosphere.frag");
 	GLuint shader = domeProgram;
 	atmosphereVertexCount = mesh.vertexNumber;
@@ -128,7 +128,7 @@ void initAtmosphere(sphere mesh)
 	glBindVertexArray(0);
 }
 
-void drawAtmosphereDome(mat4 proj, mat4 view, mat4 modelmat,
+void Atmosphere_DrawDome(mat4 proj, mat4 view, mat4 modelmat,
                         float fInner, const atmosphereParams *atmo, vec4 lightPosition)
 {
 	GLuint shader = domeProgram;
@@ -204,7 +204,7 @@ void drawAtmosphereDome(mat4 proj, mat4 view, mat4 modelmat,
 	glDisable(GL_BLEND);
 }
 
-void setAtmosphereExtinction(GLuint shader, float fInner, const atmosphereParams *atmo)
+void Atmosphere_SetExtinction(GLuint shader, float fInner, const atmosphereParams *atmo)
 {
 	glUniform1f(glGetUniformLocation(shader, "hasAtmosphere"), atmo->shellHeight > 0.0f ? 1.0f : 0.0f);
 	setScatteringUniforms(shader, fInner, atmo);
@@ -228,5 +228,5 @@ void Atmosphere_DebugPanel(struct nk_context *ctx)
 
 	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
 	if (nk_button_label(ctx, "Reset atmosphere"))
-		*a = atmosphereDefaults();
+		*a = Atmosphere_Defaults();
 }

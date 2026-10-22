@@ -113,7 +113,7 @@ int Nebula_Enabled(void);
 /* Sky set name: assets/textures/nebula_<name>/ ("" = skybox3). Starts at
    NEBULA_SKY_NAME, or --sky <name>. Also where "Save sky" writes. */
 const char *Nebula_SkyName(void);
-nebulaParams nebulaDefaults(void);
+nebulaParams Nebula_Defaults(void);
 
 /* Command line: --bake-sky <name> [--sky-size <n>] [--sky-axes]
    [--sky-params <set>: settings from nebula_<set>.txt]

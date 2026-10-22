@@ -99,14 +99,14 @@ static void setReversedDepth(int on) {
 
 /* Main camera projection for every main-pass draw (infinite reversed-Z). */
 static mat4 cameraProjection(void) {
-	return perspectiveReversedInf((float)CAMERA_FOV_Y_DEG, getWindowWidth()/getWindowHeight(), CAMERA_NEAR);
+	return perspectiveReversedInf((float)CAMERA_FOV_Y_DEG, Window_Width()/Window_Height(), CAMERA_NEAR);
 }
 
 /* Main camera projection * view (FrameContext.viewProj); the quadtree
    walks frustum-cull their nodes against it (with the infinite projection
    its far plane never culls). */
 static mat4 getViewProjection(void) {
-	return multiplymat4(cameraProjection(), getViewMatrix());
+	return multiplymat4(cameraProjection(), Camera_ViewMatrix());
 }
 
 void Render_Frame(App *app)
@@ -148,10 +148,10 @@ void Render_Frame(App *app)
 	FrameContext frame;
 	frame.cam = cam;
 	frame.proj = cameraProjection();
-	frame.view = getViewMatrix();
+	frame.view = Camera_ViewMatrix();
 	frame.viewProj = getViewProjection();
 	frame.nearPlane = CAMERA_NEAR;
-	frame.viewportH = getWindowHeight();
+	frame.viewportH = Window_Height();
 	frame.lightPos = lightPosition;
 	frame.time = App_Time();
 
@@ -215,7 +215,7 @@ void Render_Frame(App *app)
 			{
 				double nearest, farthest;
 				TerrainDraw_ViewRange(planetB, cam, &nearest, &farthest);
-				mat4 view = getViewMatrix();
+				mat4 view = Camera_ViewMatrix();
 				dvec3 forward = { -view.m[2][0], -view.m[2][1], -view.m[2][2] };
 				dvec3 toSun = dsubvec3(lightWorld, translation);
 				Shadows_Fit(cam, forward, dscalarvec3(toSun, 1.0 / dlengthvec3(toSun)), nearest, farthest);
@@ -239,7 +239,7 @@ void Render_Frame(App *app)
 	   requests from the debug panel (blocking). */
 	Nebula_Update();
 
-	int sceneW = (int)getWindowWidth(), sceneH = (int)getWindowHeight();
+	int sceneW = (int)Window_Width(), sceneH = (int)Window_Height();
 	ensureSceneTarget(sceneW, sceneH);
 	glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
 	glViewport(0, 0, sceneW, sceneH);
@@ -250,9 +250,9 @@ void Render_Frame(App *app)
 
 	//Skybox: full-screen background, drawn first (far plane, no depth write)
 	mat4 skyboxProj = cameraProjection();
-	drawSkybox(Nebula_SkyTexture(app->skyboxTex), skyboxProj, getViewRotation());
+	Skybox_Draw(Nebula_SkyTexture(app->skyboxTex), skyboxProj, Camera_ViewRotation());
 
-	glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
+	glPolygonMode(GL_FRONT_AND_BACK, Input_Wireframe() ? GL_LINE : GL_FILL);
 	if (moonFull) {
 		Prof_Begin(PROF_MOON);
 		BodyDraw_Moon(app->moonTex, moon, &frame);
@@ -261,9 +261,9 @@ void Render_Frame(App *app)
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	//Sun (billboard): opaque disc drawn with the scene; glow drawn last (below)
 	mat4 sunProj = cameraProjection();
-	mat4 sunView = getViewMatrix();
+	mat4 sunView = Camera_ViewMatrix();
 	float sunGlowRadius = (float)(sun->radius * SUN_GLOW_RADII);
-	drawSunDisc(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
+	Sun_DrawDisc(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
 
 	//Distant bodies: every planet not drawn in full this frame (gas
 	//giants always; terrain planets and the Moon while small or
@@ -272,7 +272,7 @@ void Render_Frame(App *app)
 
 	//Quadtree planet: LOD sphere built from six instanced face grids,
 	//centred camera-relative (the walk runs with the camera at the origin).
-	glPolygonMode(GL_FRONT_AND_BACK, getWireframeState() ? GL_LINE : GL_FILL);
+	glPolygonMode(GL_FRONT_AND_BACK, Input_Wireframe() ? GL_LINE : GL_FILL);
 
 	//Planet (land + seafloor), then the water shell over it (Earth
 	//only for now), alpha-blended over the seafloor.
@@ -335,13 +335,13 @@ void Render_Frame(App *app)
 	//the scene depth, so this runs after everything opaque.
 	if (planetFull && Atmosphere_Params()->shellHeight > 0.0f) {
 		Prof_Begin(PROF_ATMOSPHERE);
-		drawAtmosphereDome(sunProj, sunView, camRelTranslate(translation, cam),
+		Atmosphere_DrawDome(sunProj, sunView, camRelTranslate(translation, cam),
 		                   atmoInner, Atmosphere_Params(), lightPosition);
 		Prof_End(PROF_ATMOSPHERE);
 	}
 
 	//Sun corona halo — must be drawn LAST (additive, does not write depth)
-	drawSunGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
+	Sun_DrawGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
 
 	/* Resolve the scene into the window; the UI draws there directly,
 	   with the standard depth convention restored. */
@@ -360,7 +360,7 @@ void Render_Frame(App *app)
 		CameraSliders_Layout(ww, wh);
 	}
 	Bench_MaybeCapture();
-	uiDrawAll();
+	UI_DrawAll();
 
 	//Debug panel (F1): drawn last, over the sliders.
 	DebugGUI_Frame();

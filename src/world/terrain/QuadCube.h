@@ -15,6 +15,6 @@ typedef struct quadCube {
 	int vertexNumber;
 } quadCube;
 
-void createCube(int divisions, quadCube *newQuadCube);
+void QuadCube_Create(int divisions, quadCube *newQuadCube);
 
 #endif
