@@ -1,6 +1,6 @@
 #include "engine/gfx/Common.h"
 #include "LoadingScreen.h"
-#include "TerrainGen.h"
+#include "world/terrain/TerrainGen.h"
 
 static GLFWwindow *loadWindow = NULL;
 static GLuint loadingShader, loadingVAO, loadingVBO;

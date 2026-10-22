@@ -1,16 +1,16 @@
 #define _CRT_SECURE_NO_WARNINGS // nuklear's NK_INCLUDE_STANDARD_IO uses fopen
 #include "DebugGUI.h"
-#include "Atmosphere.h"
-#include "Nebula.h"
-#include "Clouds.h"
-#include "TerrainGen.h"
-#include "TerrainDetail.h"
-#include "Shadows.h"
-#include "Water.h"
-#include "Bodies.h"
-#include "SolarSystem.h"
+#include "world/atmosphere/Atmosphere.h"
+#include "world/sky/Nebula.h"
+#include "world/clouds/Clouds.h"
+#include "world/terrain/TerrainGen.h"
+#include "world/terrain/TerrainDetail.h"
+#include "world/shadows/Shadows.h"
+#include "world/ocean/Water.h"
+#include "world/bodies/Bodies.h"
+#include "world/bodies/SolarSystem.h"
 #include "engine/debug/Profiler.h"
-#include "WorldConfig.h"
+#include "world/WorldConfig.h"
 #include <limits.h>
 #include <math.h>
 #include <string.h>

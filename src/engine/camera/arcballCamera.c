@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include "engine/camera/arcballCamera.h"
-#include "WorldConfig.h"
+#include "world/WorldConfig.h"
 #include <math.h>
 
 static const float toRadians = (float)(M_PI / 180.0f);

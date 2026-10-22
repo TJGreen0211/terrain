@@ -1,20 +1,20 @@
 #include "Main.h"
-#include "Sun.h"
-#include "Planets.h"
-#include "SolarSystem.h"
-#include "Skybox.h"
-#include "Nebula.h"
-#include "Atmosphere.h"
-#include "Clouds.h"
+#include "world/bodies/Sun.h"
+#include "world/bodies/Planets.h"
+#include "world/bodies/SolarSystem.h"
+#include "world/sky/Skybox.h"
+#include "world/sky/Nebula.h"
+#include "world/atmosphere/Atmosphere.h"
+#include "world/clouds/Clouds.h"
 #include "LoadingScreen.h"
 #include "engine/debug/GUI.h"
 #include "DebugGUI.h"
-#include "TerrainGen.h"
-#include "TerrainDetail.h"
-#include "Shadows.h"
-#include "Rings.h"
-#include "WorldConfig.h"
-#include "Bodies.h"
+#include "world/terrain/TerrainGen.h"
+#include "world/terrain/TerrainDetail.h"
+#include "world/shadows/Shadows.h"
+#include "world/rings/Rings.h"
+#include "world/WorldConfig.h"
+#include "world/bodies/Bodies.h"
 #include "engine/debug/Profiler.h"
 #include "Bench.h"
 #include "engine/core/paths.h"
@@ -91,17 +91,17 @@ GLuint initQuadShader(int depthPrepass) {
 	char defines[128];
 	snprintf(defines, sizeof defines, "%s#define DETAIL_PIXEL_OCTAVES %d\n",
 	         depthPrepass ? "#define DEPTH_PREPASS\n" : "", TERRAIN_DETAIL_PIXEL_OCTAVES);
-	createShaderDefines(&shader, "quad.vert", "quad.frag", defines);
+	createShaderDefines(&shader, "world/terrain/quad.vert", "world/terrain/quad.frag", defines);
 	return shader;
 }
 
 GLuint initPlanetShader() {
 	GLuint shader;
-	GLuint vertShader = LoadShader("planet.vert", GL_VERTEX_SHADER);
-	GLuint tcshShader = LoadShader("planet.tcsh", GL_TESS_CONTROL_SHADER);
-	GLuint teshShader = LoadShader("planet.tesh", GL_TESS_EVALUATION_SHADER);
-	//GLuint geomShader = LoadShader("tess.geom", GL_GEOMETRY_SHADER);
-	GLuint fragShader = LoadShader("planet.frag", GL_FRAGMENT_SHADER);
+	GLuint vertShader = LoadShader("world/bodies/planet.vert", GL_VERTEX_SHADER);
+	GLuint tcshShader = LoadShader("world/bodies/planet.tcsh", GL_TESS_CONTROL_SHADER);
+	GLuint teshShader = LoadShader("world/bodies/planet.tesh", GL_TESS_EVALUATION_SHADER);
+	//GLuint geomShader = LoadShader("world/terrain/tess.geom", GL_GEOMETRY_SHADER);
+	GLuint fragShader = LoadShader("world/bodies/planet.frag", GL_FRAGMENT_SHADER);
 	shader = glCreateProgram();
 	glAttachShader(shader, vertShader);
 	glAttachShader(shader, tcshShader);
@@ -169,47 +169,47 @@ void uiSetupCameraSliders()
 
 GLuint initAtmosphereShader() {
 	GLuint shader;
-	createShader(&shader, "atmosphere.vert",
-		"atmosphere.frag");
+	createShader(&shader, "world/atmosphere/atmosphere.vert",
+		"world/atmosphere/atmosphere.frag");
 	return shader;
 }
 
 GLuint initLightingShader() {
 	GLuint shader;
-	createShader(&shader, "light.vert",
-		"light.frag");
+	createShader(&shader, "world/bodies/light.vert",
+		"world/bodies/light.frag");
 	return shader;
 }
 
 GLuint initWaterShader() {
 	GLuint shader;
-	createShader(&shader, "water.vert",
-		"water.frag");
+	createShader(&shader, "world/ocean/water.vert",
+		"world/ocean/water.frag");
 	return shader;
 }
 
 GLuint initWTestShader() {
 	GLuint shader;
-	createShader(&shader, "wtest.vert",
-		"wtest.frag");
+	createShader(&shader, "world/ocean/wtest.vert",
+		"world/ocean/wtest.frag");
 	return shader;
 }
 
 GLuint initDepthShader() {
 	GLuint shader;
-	createShader(&shader, "depth.vert",
-		"depth.frag");
+	createShader(&shader, "world/shadows/depth.vert",
+		"world/shadows/depth.frag");
 
 	return shader;
 }
 
 GLuint initTessShader() {
 	GLuint shader;
-	GLuint vertShader = LoadShader("tess.vert", GL_VERTEX_SHADER);
-	GLuint tcshShader = LoadShader("tess.tcsh", GL_TESS_CONTROL_SHADER);
-	GLuint teshShader = LoadShader("tess.tesh", GL_TESS_EVALUATION_SHADER);
-	//GLuint geomShader = LoadShader("tess.geom", GL_GEOMETRY_SHADER);
-	GLuint fragShader = LoadShader("tess.frag", GL_FRAGMENT_SHADER);
+	GLuint vertShader = LoadShader("world/terrain/tess.vert", GL_VERTEX_SHADER);
+	GLuint tcshShader = LoadShader("world/terrain/tess.tcsh", GL_TESS_CONTROL_SHADER);
+	GLuint teshShader = LoadShader("world/terrain/tess.tesh", GL_TESS_EVALUATION_SHADER);
+	//GLuint geomShader = LoadShader("world/terrain/tess.geom", GL_GEOMETRY_SHADER);
+	GLuint fragShader = LoadShader("world/terrain/tess.frag", GL_FRAGMENT_SHADER);
 	shader = glCreateProgram();
 	glAttachShader(shader, vertShader);
 	glAttachShader(shader, tcshShader);
@@ -1206,8 +1206,8 @@ int main(int argc, char *argv[])
 	g_waveParams[3] = 10.0f;  // wave scale: patches 10x true size (stylized)
 	g_waveParams[4] = 1.0f;
 
-	/*char *vertCheck = "water.vert";
-	char *fragCheck = "water.frag";
+	/*char *vertCheck = "world/ocean/water.vert";
+	char *fragCheck = "world/ocean/water.frag";
 	time_t vertTime = getFileLastChangeTime(vertCheck);
 	time_t fragTime = getFileLastChangeTime(fragCheck);*/
 

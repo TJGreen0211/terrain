@@ -2,22 +2,9 @@
 # docs\module-refactor-plan.md empties this list.
 OBJS = $(OBJS) \
 	$(OBJDIR)\Main.obj \
-	$(OBJDIR)\Sun.obj \
-	$(OBJDIR)\Skybox.obj \
-	$(OBJDIR)\Atmosphere.obj \
-	$(OBJDIR)\Clouds.obj \
-	$(OBJDIR)\Nebula.obj \
-	$(OBJDIR)\Rings.obj \
-	$(OBJDIR)\Bodies.obj \
 	$(OBJDIR)\Bench.obj \
 	$(OBJDIR)\LoadingScreen.obj \
-	$(OBJDIR)\DebugGUI.obj \
-	$(OBJDIR)\TerrainGen.obj \
-	$(OBJDIR)\TerrainDetail.obj \
-	$(OBJDIR)\Shadows.obj \
-	$(OBJDIR)\Planets.obj \
-	$(OBJDIR)\SolarSystem.obj \
-	$(OBJDIR)\Water.obj
+	$(OBJDIR)\DebugGUI.obj
 
 {.}.c{$(OBJDIR)}.obj::
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
