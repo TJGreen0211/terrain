@@ -1,6 +1,6 @@
 #version 410
 
-// The far layer's 3D noise textures (Nebula.c), one slice per draw, as in
+// The far layer's 3D noise textures (nebula.c), one slice per draw, as in
 // Guerrilla's Nubis clouds (Schneider, "The Real-time Volumetric
 // Cloudscapes of Horizon Zero Dawn", SIGGRAPH 2015):
 // - shape (128^3): R = Perlin-Worley (Perlin FBM remapped onto Worley FBM:

@@ -1,6 +1,6 @@
 #version 410
 
-// Full-screen triangle with no vertex buffer (Clouds.c's map builds).
+// Full-screen triangle with no vertex buffer (clouds.c's map builds).
 void main()
 {
 	vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));

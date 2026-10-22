@@ -1,6 +1,6 @@
 // Air density relative to sea level, shared by every shader that marches
 // the atmosphere shell (atmosphere.frag, quad.frag, water.frag) and mirrored
-// on the CPU for the zenith optical depth (atmoDensity in Atmosphere.c).
+// on the CPU for the zenith optical depth (atmoDensity in atmosphere.c).
 // Needs fInnerRadius, fOuterRadius and fScaleHeight declared first.
 //
 // An exponential (one e-fold per fScaleHeight) shifted down so it reaches

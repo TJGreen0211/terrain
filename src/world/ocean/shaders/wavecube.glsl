@@ -9,7 +9,7 @@
 // q is in body radii near the face centre, so q * waveTilings[c] (cascade
 // c's patches per body radius) is the wave maps' uv in layer c.
 
-// FFT cascades (Water.c), largest first: must match OCEAN_CASCADES
+// FFT cascades (water.c), largest first: must match OCEAN_CASCADES
 // (WorldConfig.h).
 const int WAVE_CASCADES = 3;
 const float WAVE_FACE_BLEND = 0.03;

@@ -1,6 +1,6 @@
 #version 410
 
-// Builds one weather map (Clouds.c) for a planet at one simulation time:
+// Builds one weather map (clouds.c) for a planet at one simulation time:
 // R = coverage field (signed, + 0.5), G = column thickness, in an equirect layout
 // over the body-fixed frame (pole = +Z). The climate and wind maps it reads
 // are cube maps, looked up by direction (planetmap.glsl).
@@ -16,13 +16,13 @@ const float PI = 3.14159265359;
 out vec4 FragColor;
 
 uniform vec2 mapSize;
-uniform samplerCube climateMap; // R = moisture (TerrainGen.c)
+uniform samplerCube climateMap; // R = moisture (terrain_gen.c)
 uniform samplerCube windMap;    // the ocean map: wind speed and direction
 uniform float windMax;
 uniform float planetRadius;     // m
 uniform float texelM;           // map texel at the equator, m
 
-uniform int style;              // CloudStyle (Clouds.h)
+uniform int style;              // CloudStyle (clouds.h)
 uniform float coverage;
 uniform float climateWeight;
 uniform float weatherScale;     // planet radii

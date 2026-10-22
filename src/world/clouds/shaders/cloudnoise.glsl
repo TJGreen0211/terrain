@@ -2,7 +2,7 @@
 // texture, FBM that fades its octaves out below a footprint, and the
 // two-phase flow map that moves it along the wind.
 //
-// The lattice lives in a 2D RG texture (Clouds.c): R holds lattice slice z
+// The lattice lives in a 2D RG texture (clouds.c): R holds lattice slice z
 // at (x + 37 z, y + 17 z), G the next slice at the same texel, so one
 // bilinear fetch gives both z-neighbours and a mix in z finishes the
 // trilinear interpolation (Quilez's 3D noise from a 2D texture). Sampling at
@@ -99,7 +99,7 @@ float cloudFbm(vec3 p, float lambda0, float foot, int octaves)
 // flow period half a cycle apart, blended by triangle weights. Each cycle
 // re-seeds its copy (seed offsets in lattice units), so the pattern never
 // repeats, and nothing is integrated, so a latitude-varying wind never shears
-// it apart. Computed on the CPU in double (Clouds.c).
+// it apart. Computed on the CPU in double (clouds.c).
 uniform vec2 cloudFlowTau;      // seconds into each phase's cycle
 uniform vec2 cloudFlowWeight;   // triangle weights, sum 1
 uniform vec3 cloudFlowSeed0;
@@ -114,7 +114,7 @@ float cloudFlowBlend(float n0, float n1)
 }
 
 // East and north at body-fixed direction d (pole = body +Z), and the wind
-// vector there (m/s) from a wind map texel (TerrainGen.c's ocean map: R =
+// vector there (m/s) from a wind map texel (terrain_gen.c's ocean map: R =
 // speed / windMax, G, B = east, north components * 0.5 + 0.5).
 vec3 cloudWindAt(vec3 d, vec4 texel, float windMax)
 {

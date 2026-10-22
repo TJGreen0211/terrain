@@ -374,8 +374,24 @@ A phase is green only when all four checks pass:
     `initQuadVAO`, `initSubQuadX/Y/Z`, `loadSpriteTexture`,
     `generateDepthCubemap`, `uiSliderCount` and `uiShutdown`. Warnings went from
     185 to 127, all of the drop from `Geometry.c`.
-- Still to do: the lowercase file renames and merges from section 2, as their
-  own commit.
+- 8c (file renames and merges) done 2026-10-22, pixel-identical, 127 warnings
+  (unchanged):
+  - Each file is named after its function prefix in lower snake_case:
+    `QuadTree_` → `quad_tree.c`, `DebugGUI_` → `debug_gui.c`, `UI_` → `ui.c`,
+    `Camera_` → `camera.c`, `SolarSystem_` → `solar_system.c`.
+  - Merges: `shader.c/h` holds `LoadShader` and `Common`, and `mesh.c/h` holds
+    `Geometry`, `Sphere` and `Obj`. `buffer`, `texture`, `framebuffer`
+    (`CommonGL`) and `frame.h` are one-to-one renames.
+  - Exceptions:
+    - `WorldConfig.h` keeps its name (rule 7).
+    - `LinearAlg` became `linalg`, the name in section 2.
+    - `ComplexMath.h` became `complex_math.h`, because `complex.h` would
+      shadow the C standard header.
+  - Includes, include guards, `module.mk` lists, and file names mentioned in C
+    and shader comments all follow the renames.
+  - Section 2 names a few files differently (`arcball.c`, `gui.c`, `loading.c`,
+    `quadtree`); the prefix rule wins over those.
+  - Phase 9 now splits `world/terrain/terrain_gen.c`.
 
 **Phase 9 — split `TerrainGen.c`.**
 - Move its code, without changes, into `world/terrain/gen/{cubemap, erosion, climate,

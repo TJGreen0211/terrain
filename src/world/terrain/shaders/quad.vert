@@ -13,7 +13,7 @@ uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 lightPosition;
-// Baked height field (TerrainGen.c): the land is geometrically displaced
+// Baked height field (terrain_gen.c): the land is geometrically displaced
 // above the unit sphere and the seafloor below it along a squared shelf
 // profile, so sea level is exactly radius 1 where the water shell sits and
 // vertices near the coast stay close to it. lodK/lodCameraPos drive the vertex texture-fetch
@@ -29,7 +29,7 @@ uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 // Mip by vertex distance, as wide as the widest patch the walk can have
-// there (TerrainDraw.c lodCellKFor): continuous across patch levels.
+// there (terrain_draw.c lodCellKFor): continuous across patch levels.
 uniform float lodCellK;
 
 // The depth prepass and the colour pass are separate programs built from

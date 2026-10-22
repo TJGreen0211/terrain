@@ -1,6 +1,6 @@
 #version 410
 
-// Bakes one layer of the procedural ground textures (TerrainDetail.c) once
+// Bakes one layer of the procedural ground textures (terrain_detail.c) once
 // at startup: tileable height fields for close-up surface detail, shaded in
 // quad.frag on the terrain detail lattice.
 //   layer 0 rock, 1 ground (soil / vegetation), 2 sand, 3 snow

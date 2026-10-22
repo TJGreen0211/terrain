@@ -1,6 +1,6 @@
 #version 410
 
-// Camera-facing quad around a body's silhouette (Planets.c). All in view
+// Camera-facing quad around a body's silhouette (planets.c). All in view
 // space: the camera is the origin, the view is the main camera's.
 
 in vec2 vCorner;            // unit quad corner in [-1,1]^2

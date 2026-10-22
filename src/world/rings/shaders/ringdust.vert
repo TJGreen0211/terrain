@@ -1,6 +1,6 @@
 #version 410
 
-// Ring dust (Rings.c): GL_POINTS generated from gl_VertexID, perCell points
+// Ring dust (rings.c): GL_POINTS generated from gl_VertexID, perCell points
 // per cell of the same hashed ring-plane grid the rocks use (see rock.vert),
 // finer and closer to the camera. Lit per vertex; ringdust.frag only shapes
 // the sprite.

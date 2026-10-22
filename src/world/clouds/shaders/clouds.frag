@@ -1,6 +1,6 @@
 #version 410
 
-// The cloud layer as one slab at its middle altitude (Clouds.c; step 1 of
+// The cloud layer as one slab at its middle altitude (clouds.c; step 1 of
 // docs/volumetric-clouds.md), over the full-detail planet.
 //
 // - Ray-traced against the sphere at the layer's middle, in planet radii
@@ -43,7 +43,7 @@ uniform vec3 cloudColor;
 #include "engine/gfx/tonemap.glsl"
 
 // The dome's march for the air in front of the cloud.
-uniform float E;     // solar brightness (Atmosphere.c)
+uniform float E;     // solar brightness (atmosphere.c)
 uniform float G_M;   // Mie asymmetry
 vec2 rayIntersection(vec3 p, vec3 dir, float radius)
 {
@@ -57,7 +57,7 @@ float scatterRingT(vec3 p, vec3 l)
 #include "cloudnoise.glsl"
 #include "cloudlayer.glsl"
 
-// Detail below the map: up to SLAB_OCTAVES octaves (Clouds.c builds a
+// Detail below the map: up to SLAB_OCTAVES octaves (clouds.c builds a
 // program per count), both flow phases side by side. Octaves under the
 // footprint fade to the mean, as in cloudFbm. The count is a constant at
 // every call, so the loop unrolls and its fetches issue together. Texture

@@ -1,11 +1,11 @@
 #version 410
 
-// GPU port of Water.c calcH0Row: the time-t Tessendorf spectra, two complex
+// GPU port of water.c calcH0Row: the time-t Tessendorf spectra, two complex
 // fields per RGBA target, in the same layout as the CPU arrays (texel x = M
 // = east wave number, y = N = north wave number, natural FFT order).
 uniform sampler2D h0;        // h0(k).re, h0(k).im, conj(h0(-k)).re, conj(h0(-k)).im
 uniform float time;
-uniform float patchSize;     // Water.c PATCH_SIZE (m)
+uniform float patchSize;     // water.c PATCH_SIZE (m)
 
 layout(location = 0) out vec4 outHD;   // h + i*dDx/dz,  Dx + i*Dz
 layout(location = 1) out vec4 outSJ;   // dh/dx + i*dh/dz,  dDx/dx + i*dDz/dz
@@ -21,7 +21,7 @@ void main()
 {
 	ivec2 id = ivec2(gl_FragCoord.xy);
 	float N = float(textureSize(h0, 0).x);
-	// Water.c waveNumber: indices past N/2 are the negative frequencies.
+	// water.c waveNumber: indices past N/2 are the negative frequencies.
 	vec2 idx = vec2(id);
 	idx -= N * step(N * 0.5, idx);
 	vec2 k = 2.0 * PI * idx / patchSize;

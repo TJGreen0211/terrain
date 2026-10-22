@@ -1,6 +1,6 @@
 #version 410
 
-// Instanced ring rocks (Rings.c). There is no instance buffer: gl_InstanceID
+// Instanced ring rocks (rings.c). There is no instance buffer: gl_InstanceID
 // picks one cell of a gridN x gridN window of ring-plane cells around the
 // camera, and the cell's integer coordinates seed a hash for everything
 // else (presence, position, height, size, shape, spin). Cells are anchored

@@ -1,6 +1,6 @@
 # engine/camera: arcball camera.
 OBJS = $(OBJS) \
-	$(OBJDIR)\engine\camera\arcballCamera.obj
+	$(OBJDIR)\engine\camera\camera.obj
 
 {engine\camera}.c{$(OBJDIR)\engine\camera}.obj::
 	@if not exist $(OBJDIR)\engine\camera mkdir $(OBJDIR)\engine\camera

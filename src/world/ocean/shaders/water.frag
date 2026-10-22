@@ -9,7 +9,7 @@ out vec4 FragColor;
 uniform mat4 model;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
-// FFT ocean (Water.c): slopes and displacement derivatives per patch
+// FFT ocean (water.c): slopes and displacement derivatives per patch
 // length, one layer per cascade, largest first.
 uniform sampler2DArray waveSlope;     // dh/dx, dh/dz, (dh/dx)^2, (dh/dz)^2
 uniform sampler2DArray waveJacobian;  // dDx/dx, dDz/dz, dDx/dz
@@ -20,7 +20,7 @@ uniform samplerCube skybox;
 #define SHADOW_TAPS 4
 #include "world/shadows/shadow.glsl"
 uniform float waveNormalStrength;
-// Each cascade's patches per body radius (TerrainDraw.c: true size), on the cube
+// Each cascade's patches per body radius (terrain_draw.c: true size), on the cube
 // faces of wavecube.glsl.
 #include "wavecube.glsl"
 uniform float waveTilings[WAVE_CASCADES];
@@ -39,7 +39,7 @@ uniform float time;
 uniform samplerCube heightMap;
 #include "world/terrain/planetmap.glsl"
 uniform float lodK;
-// Sea level + ocean depth from the baked, eroded height field (TerrainGen.c).
+// Sea level + ocean depth from the baked, eroded height field (terrain_gen.c).
 // The identical seaLevel quad.frag ramps with, so the discard edge lands on
 // the drawn coastline; oceanDepth normalizes the depth tint (it replaces the
 // old hardcoded 0.22 constant).
@@ -63,11 +63,11 @@ const float PI = 3.14159265359;
 uniform vec3 lodCameraPos;
 uniform vec3 bodyCenter;
 
-// Extinction toward the camera, sunlight colour, skylight (Atmosphere.c).
+// Extinction toward the camera, sunlight colour, skylight (atmosphere.c).
 #include "world/atmosphere/atmosurface.glsl"
 
 #include "world/rings/ringshadow.glsl"
-// Cloud shadows (Clouds.c).
+// Cloud shadows (clouds.c).
 #include "world/clouds/cloudlayer.glsl"
 
 // Seascape (Alexander Alekseev aka TDM) sea palette and lighting terms.
@@ -106,7 +106,7 @@ const vec3 SUN_RADIANCE = vec3(1.0, 0.97, 0.90) * 1.15;
 const float GLINT_INTENSITY = 4.0;
 const vec2 GLINT_GAIN_VIEW = vec2(0.15, 0.6);
 
-// ---- Living-planet sea state (TerrainGen.c bakeOcean) ----
+// ---- Living-planet sea state (terrain_gen.c bakeOcean) ----
 // R wind speed / windMax, GB wind direction (east, north) * 0.5 + 0.5,
 // A fetch (0 in the lee of land, 1 over a long run of open ocean). The
 // same prevailing winds carry the land's rain, so stormy seas, calm
@@ -603,7 +603,7 @@ void main()
 	}
 
 	// Opacity: the seafloor shows through what the water column, the surface
-	// reflection and foam let pass. Premultiplied (WaterDraw.c blends ONE,
+	// reflection and foam let pass. Premultiplied (water_draw.c blends ONE,
 	// ONE_MINUS_SRC_ALPHA): where the column turns clear the surface's own
 	// reflection and glint are added over the floor instead of fading out
 	// with the water body, which left a dark ring around every shallow.

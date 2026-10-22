@@ -1,6 +1,6 @@
 // The cloud layer as the slab (clouds.frag) and the shadow receivers
 // (quad.frag, water.frag) see it: the weather maps and the layer's shape.
-// Uniforms from Clouds.c. Needs PI defined first.
+// Uniforms from clouds.c. Needs PI defined first.
 //
 // Weather map texel: R = coverage field + 0.5 (signed: cloud where it is
 // above 0 once the detail noise is added), G = column thickness (fraction of

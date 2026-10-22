@@ -1,6 +1,6 @@
 #version 410
 
-// The near layer's presence grid (Nebula.c), one slice of the 3D texture
+// The near layer's presence grid (nebula.c), one slice of the 3D texture
 // per draw.
 // - level 0 (reduce == 0): each texel holds the max of the layer's density
 //   bound (nearBound, nebula.glsl) over 4^3 points spanning the texel and

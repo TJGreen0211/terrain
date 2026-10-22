@@ -8,10 +8,10 @@ uniform vec3 shellCenter;   // camera-relative body centre (shell sphere origin)
 
 uniform float fInnerRadius;
 uniform float fOuterRadius;
-uniform float fScaleHeight;   // metres per e-fold of density (Atmosphere.c)
+uniform float fScaleHeight;   // metres per e-fold of density (atmosphere.c)
 #include "atmodensity.glsl"
 
-// Rings (Rings.c). Everything here is planet-local, and the ring is centred
+// Rings (rings.c). Everything here is planet-local, and the ring is centred
 // on the planet, so positions need no ringCenter offset.
 uniform float hasRing;
 uniform sampler1D ringProfile;
@@ -37,7 +37,7 @@ const float PI = 3.14159265359;
 // atmosphere shells can be millions of world units across.
 const float MAX = 1e30;
 
-uniform float K_R; // Rayleigh constant > thicker (default 0.166, Atmosphere.c)
+uniform float K_R; // Rayleigh constant > thicker (default 0.166, atmosphere.c)
 uniform float K_M; // Mie constant > thicker (default 0.0025)
 uniform float G_M; // Mie phase asymmetry, -0.75..-0.999 (default -0.85)
 

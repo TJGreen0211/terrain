@@ -1,6 +1,6 @@
 #version 410
 
-// Analytic ring sheet (Rings.c). fragPos is the camera-relative ray-plane
+// Analytic ring sheet (rings.c). fragPos is the camera-relative ray-plane
 // hit; its radius indexes the baked profile (RGB single-scattering albedo,
 // A normal optical depth). Shaded as a single-scattering slab, output as
 // premultiplied alpha (blend ONE, ONE_MINUS_SRC_ALPHA).

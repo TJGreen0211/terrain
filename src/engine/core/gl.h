@@ -1,5 +1,5 @@
-#ifndef ENGINE_CORE_GL_H
-#define ENGINE_CORE_GL_H
+#ifndef GL_H
+#define GL_H
 
 /* The one place the platform and GL headers are included; everything else
    includes this (tools/check_modules.ps1 enforces it). windows.h comes first:

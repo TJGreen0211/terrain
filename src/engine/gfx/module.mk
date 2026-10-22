@@ -1,13 +1,10 @@
 # engine/gfx: shader loading, textures, buffers, meshes, framebuffer quad.
 OBJS = $(OBJS) \
-	$(OBJDIR)\engine\gfx\LoadShader.obj \
-	$(OBJDIR)\engine\gfx\Common.obj \
-	$(OBJDIR)\engine\gfx\Textures.obj \
-	$(OBJDIR)\engine\gfx\CommonGL.obj \
-	$(OBJDIR)\engine\gfx\Buffers.obj \
-	$(OBJDIR)\engine\gfx\Geometry.obj \
-	$(OBJDIR)\engine\gfx\Sphere.obj \
-	$(OBJDIR)\engine\gfx\Obj.obj
+	$(OBJDIR)\engine\gfx\shader.obj \
+	$(OBJDIR)\engine\gfx\texture.obj \
+	$(OBJDIR)\engine\gfx\framebuffer.obj \
+	$(OBJDIR)\engine\gfx\buffer.obj \
+	$(OBJDIR)\engine\gfx\mesh.obj
 
 {engine\gfx}.c{$(OBJDIR)\engine\gfx}.obj::
 	@if not exist $(OBJDIR)\engine\gfx mkdir $(OBJDIR)\engine\gfx

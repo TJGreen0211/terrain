@@ -1,4 +1,4 @@
-// Baked planet maps (TerrainGen.c): the height, climate and ocean fields are
+// Baked planet maps (terrain_gen.c): the height, climate and ocean fields are
 // cube maps over the body-local unit sphere, in GL's face layout with the
 // quadtree's plain (gnomonic) projection, so a body-local direction is the
 // lookup coordinate as it is (seamless filtering across the face edges).
@@ -7,7 +7,7 @@
 // (planetMapTexel radians at mip 0; the CPU's lodK / lodCellK use the same).
 // Texels shrink toward the face corners, their smallest extent by m^2
 // (m = the direction's major component, 1/sqrt(3) at a corner), so
-// planetMapLodBias moves the mip up by up to log2(3) there. TerrainGen.c's
+// planetMapLodBias moves the mip up by up to log2(3) there. terrain_gen.c's
 // height bounds add the same bias.
 
 float planetMapTexel(samplerCube map)

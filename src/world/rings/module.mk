@@ -1,6 +1,6 @@
 # world/rings: planetary rings and ring rocks.
 OBJS = $(OBJS) \
-	$(OBJDIR)\world\rings\Rings.obj
+	$(OBJDIR)\world\rings\rings.obj
 
 {world\rings}.c{$(OBJDIR)\world\rings}.obj::
 	@if not exist $(OBJDIR)\world\rings mkdir $(OBJDIR)\world\rings

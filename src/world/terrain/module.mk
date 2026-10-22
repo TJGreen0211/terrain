@@ -1,11 +1,11 @@
 # world/terrain: quad cube, quadtree LOD, terrain bake, surface detail, surface drawing, debug panel.
 OBJS = $(OBJS) \
-	$(OBJDIR)\world\terrain\QuadCube.obj \
-	$(OBJDIR)\world\terrain\QuadTree.obj \
-	$(OBJDIR)\world\terrain\TerrainGen.obj \
-	$(OBJDIR)\world\terrain\TerrainDetail.obj \
-	$(OBJDIR)\world\terrain\TerrainDraw.obj \
-	$(OBJDIR)\world\terrain\TerrainPanel.obj
+	$(OBJDIR)\world\terrain\quad_cube.obj \
+	$(OBJDIR)\world\terrain\quad_tree.obj \
+	$(OBJDIR)\world\terrain\terrain_gen.obj \
+	$(OBJDIR)\world\terrain\terrain_detail.obj \
+	$(OBJDIR)\world\terrain\terrain_draw.obj \
+	$(OBJDIR)\world\terrain\terrain_panel.obj
 
 {world\terrain}.c{$(OBJDIR)\world\terrain}.obj::
 	@if not exist $(OBJDIR)\world\terrain mkdir $(OBJDIR)\world\terrain

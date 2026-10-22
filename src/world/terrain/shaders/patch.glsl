@@ -1,4 +1,4 @@
-// Quadtree patch vertex positions (QuadTree.c), shared by quad.vert,
+// Quadtree patch vertex positions (quad_tree.c), shared by quad.vert,
 // water.vert, depth.vert and light.vert so the caster, the surface and the
 // water shell are always the same mesh.
 //
@@ -48,7 +48,7 @@ float patchCell()
 
 // How far (body radii) this patch's skirt wall hangs below its surface:
 // sized per patch by the walk from its height range (skirtDrop in
-// QuadTree.c, whose culling bounds include it).
+// quad_tree.c, whose culling bounds include it).
 float patchSkirt()
 {
 	return pC0.w;

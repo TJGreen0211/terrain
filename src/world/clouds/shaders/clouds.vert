@@ -1,6 +1,6 @@
 #version 410
 
-// The cloud slab's coverage (Clouds.c): a camera-facing quad around the
+// The cloud slab's coverage (clouds.c): a camera-facing quad around the
 // layer's silhouette, as the stand-ins use (planet_impostor.vert), or the
 // whole screen when the camera is near or inside the layer. The fragment
 // shader ray-traces the layer and writes its own depth. Drawn as a 4-vertex

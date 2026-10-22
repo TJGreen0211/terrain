@@ -1,7 +1,7 @@
 // Atmosphere as seen by lit surfaces (quad.frag, water.frag, clouds.frag):
 // extinction toward the camera, the sun's colour after its path through the
 // air, and the skylight fraction. Needs PI defined first. Uniforms are set
-// by setAtmosphereExtinction (Atmosphere.c).
+// by setAtmosphereExtinction (atmosphere.c).
 
 // Atmospheric extinction (OpenGLSolar planet.frag port): dims the surface by
 // the transmittance along the surface-to-camera path through the dome's shell.
@@ -11,17 +11,17 @@
 uniform float hasAtmosphere;
 uniform float fInnerRadius;
 uniform float fOuterRadius;
-uniform float fScaleHeight;   // metres per e-fold of density (Atmosphere.c)
+uniform float fScaleHeight;   // metres per e-fold of density (atmosphere.c)
 #include "atmodensity.glsl"
 uniform vec3 C_R;
 
 // Keep the miss sentinel beyond the largest supported shell radius.
 const float ATMO_MAX = 1e30;
-uniform float K_R; // Rayleigh / Mie constants, shared with atmosphere.frag (Atmosphere.c)
+uniform float K_R; // Rayleigh / Mie constants, shared with atmosphere.frag (atmosphere.c)
 uniform float K_M;
 const int NUM_ATMO_STEPS = 5;
 // atmoOptic straight up from fInnerRadius to fOuterRadius (the same
-// 5-sample midpoint march), computed once on the CPU (Atmosphere.c).
+// 5-sample midpoint march), computed once on the CPU (atmosphere.c).
 uniform float atmoTauZenith;
 
 vec2 shellIntersection(vec3 p, vec3 dir, float radius)

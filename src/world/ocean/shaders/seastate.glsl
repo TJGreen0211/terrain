@@ -1,6 +1,6 @@
 // Sea state over the planet, shared by water.vert (geometry) and water.frag
 // (slopes, roughness, foam) so both see the same waves: how strong each FFT
-// cascade (Water.c) is at a point. Needs wavecube.glsl and the tempOffset,
+// cascade (water.c) is at a point. Needs wavecube.glsl and the tempOffset,
 // snowTemp, oceanRelief and planetRadiusM uniforms declared before it is
 // included.
 //
@@ -15,7 +15,7 @@
 const float SEA_STATE_REF_WIND = 7.0;
 // Water depth (m) over which each cascade's waves ramp from flat at the
 // coast to full height: a few of its drawn rms heights, about where waves
-// that size break (TerrainDraw.c). In metres, not normalized depth: the seafloor
+// that size break (terrain_draw.c). In metres, not normalized depth: the seafloor
 // drops oceanRelief * depthT^2 (64 km at depthT 1 on an Earth), so a
 // normalized ramp calmed the sea out to kilometres of depth and left every
 // shelf a glassy mirror. The short wind waves now run right up to the
@@ -101,7 +101,7 @@ float seaSwell(vec3 d)
 }
 
 // Water depth (m) at normalized depth depthT: the seafloor profile quad.frag
-// draws (TerrainDraw.c's height bounds use the same).
+// draws (terrain_draw.c's height bounds use the same).
 float seaDepthM(float depthT)
 {
 	return oceanRelief * depthT * depthT * planetRadiusM;

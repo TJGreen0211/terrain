@@ -8,7 +8,7 @@
 //
 // Face basis: the GL cube-map table (spec 8.13), so the direction that
 // samples a texel is the one that rendered it. Texture t runs with the
-// framebuffer's rows (row 0 = t 0), and Nebula.c reads the rows back in
+// framebuffer's rows (row 0 = t 0), and nebula.c reads the rows back in
 // that order for the PNGs.
 
 #ifndef NEBULA_OCTAVES

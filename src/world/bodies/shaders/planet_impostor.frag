@@ -1,6 +1,6 @@
 #version 410
 
-// A body drawn as a stand-in (Planets.c): an exact ray-traced sphere with
+// A body drawn as a stand-in (planets.c): an exact ray-traced sphere with
 // an atmosphere glow and a ring sheet, or a soft dot when it is below
 // ~1.5 px.
 //

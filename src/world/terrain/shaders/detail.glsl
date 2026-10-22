@@ -1,5 +1,5 @@
 // Terrain detail below the baked height map's resolution (step 3b):
-// fractal gradient noise on land, set up by TerrainDetail.c from the
+// fractal gradient noise on land, set up by terrain_detail.c from the
 // TERRAIN_DETAIL_* constants in WorldConfig.h. Shared by quad.vert and
 // depth.vert (geometry) and quad.frag (shading normals).
 //
@@ -16,7 +16,7 @@
 // edge, so the slope is continuous over it too (no crease along the 12
 // edges).
 //
-// Gradient table (TerrainDetail.c): random 3D gradients on a 64^3 lattice
+// Gradient table (terrain_detail.c): random 3D gradients on a 64^3 lattice
 // that tiles (each octave also shifts it, so they do not line up). It is
 // stored once per constant axis as a 2D array texture (layer = that axis,
 // texels = the other two in increasing order, RG = their gradient
@@ -30,7 +30,7 @@ uniform float detailGain;      // amplitude ratio per octave (wavelength halves)
 uniform float detailAmpTotal;  // sum of every octave's amplitude, metres
 uniform float detailPlains;    // least local scale (flat ground)
 uniform float detailLocalMax;  // most local scale (bounds the detail)
-uniform float detailSlopeToStep; // |map slope| -> local scale (TerrainDetail.c)
+uniform float detailSlopeToStep; // |map slope| -> local scale (terrain_detail.c)
 uniform float detailRadius;    // body radius, metres
 uniform float detailPix;       // radians per pixel: 2 tan(fov/2) / H
 uniform float detailTriPx;     // this pass's LOD target, px per triangle edge
@@ -61,7 +61,7 @@ const ivec3 DETAIL_SHIFT = ivec3(17, 31, 47);
 #endif
 
 // Cube axes (0 = x, 1 = y, 2 = z) along a face's s and t node coordinates
-// (faceA / faceB in QuadTree.c). The third axis is constant on the face:
+// (faceA / faceB in quad_tree.c). The third axis is constant on the face:
 // face >> 1, at +1 for even faces and -1 for odd ones.
 const ivec2 DETAIL_FACE_ST[6] = ivec2[6](
 	ivec2(1, 2), ivec2(2, 1),   // +X, -X

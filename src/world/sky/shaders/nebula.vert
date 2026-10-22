@@ -1,6 +1,6 @@
 #version 410
 
-// Full-screen triangle with no vertex buffer (Nebula.c's passes).
+// Full-screen triangle with no vertex buffer (nebula.c's passes).
 void main()
 {
 	vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));

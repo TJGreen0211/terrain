@@ -1,7 +1,7 @@
 #version 410
 
 // One radix-2 Stockham stage of the unnormalized inverse FFT (same sign as
-// Water.c fft()), along rows or columns. Stockham reorders as it goes, so
+// water.c fft()), along rows or columns. Stockham reorders as it goes, so
 // natural-order input comes out in natural order with no bit reversal.
 // Each RGBA texel carries two complex values; both targets (four spectra)
 // go through every stage together. Run log2(N) stages per axis with

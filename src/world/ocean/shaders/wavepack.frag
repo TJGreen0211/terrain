@@ -2,7 +2,7 @@
 
 // GPU port of generateWaves' packing loop: the transformed spectra, scaled
 // to sphere radii (heights) and per patch length (derivatives), written
-// straight into the textures water.vert/.frag sample (Water.h layouts).
+// straight into the textures water.vert/.frag sample (water.h layouts).
 uniform sampler2D srcA;      // h + i*dDx/dz,  Dx + i*Dz
 uniform sampler2D srcB;      // dh/dx + i*dh/dz,  dDx/dx + i*dDz/dz
 uniform float scale;         // waves.heightScale

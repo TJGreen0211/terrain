@@ -1,10 +1,10 @@
 # world/bodies: bodies table, procedural solar system, planet impostors, sun, lit bodies.
 OBJS = $(OBJS) \
-	$(OBJDIR)\world\bodies\Bodies.obj \
-	$(OBJDIR)\world\bodies\SolarSystem.obj \
-	$(OBJDIR)\world\bodies\Planets.obj \
-	$(OBJDIR)\world\bodies\Sun.obj \
-	$(OBJDIR)\world\bodies\BodyDraw.obj
+	$(OBJDIR)\world\bodies\bodies.obj \
+	$(OBJDIR)\world\bodies\solar_system.obj \
+	$(OBJDIR)\world\bodies\planets.obj \
+	$(OBJDIR)\world\bodies\sun.obj \
+	$(OBJDIR)\world\bodies\body_draw.obj
 
 {world\bodies}.c{$(OBJDIR)\world\bodies}.obj::
 	@if not exist $(OBJDIR)\world\bodies mkdir $(OBJDIR)\world\bodies

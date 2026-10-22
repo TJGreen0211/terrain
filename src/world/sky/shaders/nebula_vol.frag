@@ -6,7 +6,7 @@
 //
 // - The chord comes from a ray-sphere intersection from the camera, which
 //   works inside the sphere or outside it looking through.
-// - A presence grid (Nebula.c: max of the near layer's density bound over
+// - A presence grid (nebula.c: max of the near layer's density bound over
 //   [-1, 1]^3, dilated, max-reduced mips) skips empty rays with a coarse
 //   walk, then empty steps.
 // - Light: the layer's emission plus a weak forward-scatter of the sun (at

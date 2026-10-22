@@ -9,7 +9,7 @@
 
    Precision rule: positions, orbits, rotations and time are double on the
    CPU. The GPU only ever sees camera-relative (or body-local) floats; see
-   Bodies.c and camRelTranslate in Main.c.
+   bodies.c and camRelTranslate in main.c.
 
    Shading / look constants that are already expressed as fractions of a
    body radius (atmosphere shell, terrain relief, ring radii, ...) stay with
@@ -22,9 +22,9 @@
 
 /* ---- Bodies ------------------------------------------------------------
    The Sun is the world origin; every other body follows a Kepler ellipse
-   around its parent (Bodies.c). Earth (the Earth-like planet we build on)
+   around its parent (bodies.c). Earth (the Earth-like planet we build on)
    and its Moon are fixed here; every other planet is generated from the
-   system seed (SolarSystem.c, "Procedural system" below).
+   system seed (solar_system.c, "Procedural system" below).
 
    _ORBIT lists: a (m), e, i, node, peri, L, period (s)
      a       semi-major axis (before ORBIT_DISTANCE_SCALE)
@@ -67,7 +67,7 @@
 /* Tidally locked: one spin per orbit. */
 #define MOON_ROTATION_PERIOD_S    2360591.5
 
-/* ---- Procedural system (SolarSystem.c) ----------------------------------
+/* ---- Procedural system (solar_system.c) ----------------------------------
    Generated from the system seed (debug panel; separate from Earth's
    terrain seed). Planets keep their names and order outward from the Sun:
    Mercury, Venus, [Earth], Mars, Ceres, Jupiter, Saturn, Uranus, Neptune,
@@ -165,7 +165,7 @@
 #define QT_SKIRT_RANGE_FACTOR     1.5
 #define QT_SKIRT_WIDTH_FRACTION   0.02
 
-/* ---- Baked terrain maps (TerrainGen.c, shaders/planetmap.glsl) ------------
+/* ---- Baked terrain maps (terrain_gen.c, shaders/planetmap.glsl) ------------
    Height, climate and ocean maps are cube maps over the body-local sphere:
    GL's face layout with the plain (gnomonic) projection the quadtree uses,
    so a face's texel grid lines up with its quadtree nodes. Texels per face
@@ -173,7 +173,7 @@
    toward the corners. Bake time and map memory grow with its square. */
 #define TERRAIN_MAP_SIZE          1024
 
-/* ---- Terrain detail (shaders/detail.glsl, TerrainDetail.c) ---------------
+/* ---- Terrain detail (shaders/detail.glsl, terrain_detail.c) ---------------
    Fractal noise on land below the baked height map's resolution. Each
    octave halves the wavelength; octaves fade in with camera distance, as
    geometry while the triangles can carry them and as shading normals down
@@ -206,7 +206,7 @@
    integrated GPU at 2880x1880. Compiled into quad.frag (restart to change). */
 #define TERRAIN_DETAIL_PIXEL_OCTAVES    3
 
-/* ---- Atmosphere (Atmosphere.c, atmosphere.frag) -------------------------
+/* ---- Atmosphere (atmosphere.c, atmosphere.frag) -------------------------
    A stylised single-scattering shell (O'Neill, GPU Gems 2 ch. 16), tuned
    for look rather than measured Earth (which is ~100 km with 8 km air and
    1.2 km haze scale heights). Defaults reproduce the original look. The
@@ -218,8 +218,8 @@
 #define ATMOSPHERE_SHELL_HEIGHT_M   (0.0424 * EARTH_RADIUS_M)          /* 270 km */
 #define ATMOSPHERE_SCALE_HEIGHT_M   (0.25 * ATMOSPHERE_SHELL_HEIGHT_M) /* 67.5 km */
 
-/* ---- Clouds (Clouds.c, clouds.frag, docs/volumetric-clouds.md) ---------
-   Earth's cloud layer; every other planet's is generated (SolarSystem.c)
+/* ---- Clouds (clouds.c, clouds.frag, docs/volumetric-clouds.md) ---------
+   Earth's cloud layer; every other planet's is generated (solar_system.c)
    from the ranges further down. The debug panel's Clouds section edits the
    active planet's live. Step 1 shades the layer as one slab at its middle
    altitude.
@@ -230,7 +230,7 @@
    Keep wind x period well under the weather scale: winds differ between
    latitude belts, and a long period shears the noise into streaks.
    Heights follow the stylised terrain, not real Earth: land rises up to
-   landRelief = 0.025 radii (~160 km, TerrainGen.c), so a real 5 km layer
+   landRelief = 0.025 radii (~160 km, terrain_gen.c), so a real 5 km layer
    would sit under every continent. Earth's layer floats at half the land
    relief, so high ground and ranges stand above it. */
 /* Clouds start switched off (work in progress, docs/volumetric-clouds.md);
@@ -265,7 +265,7 @@
 #define CLOUD_GEN_THICKNESS_MAX     0.6
 #define CLOUD_GEN_MAX_SHELL         0.6
 
-/* ---- Nebula (Nebula.c, nebula*.glsl/frag) --------------------------------
+/* ---- Nebula (nebula.c, nebula*.glsl/frag) --------------------------------
    One density function in nebula units n = (p - sun) / NEBULA_RADIUS_M,
    in two layers that never overlap (.kilo/plans/...-volumetric-nebula-
    skybox.md):
@@ -303,10 +303,10 @@
    Geometric swell: rms height (m) the water shell's vertices are displaced
    by at "Wave height" 1.0 (debug panel). Shading (slopes, foam) uses the
    normalised wave field and does not change with it. The FFT field itself
-   is calibrated in body radii (Water.c), so without this the swell would
+   is calibrated in body radii (water.c), so without this the swell would
    be kilometres tall at Earth scale. */
 #define OCEAN_SWELL_RMS_M         2.0
-/* FFT wave cascades (Water.c, Tessendorf): OCEAN_CASCADES patches, the
+/* FFT wave cascades (water.c, Tessendorf): OCEAN_CASCADES patches, the
    largest OCEAN_WAVE_PATCH_M on a side and each next one OCEAN_CASCADE_RATIO
    smaller (1000, 173, 30 m), each simulating its own band of wavelengths.
    The ratio is deliberately not an integer, so the patches' periods never
@@ -315,7 +315,7 @@
    panel's "Wave scale" (default 10: stylized, larger seas; heights scale
    with it and time by its square root, so the waves keep their shape and
    a believable speed). The finest cascade stays at true size, for close-up
-   chop (Water_CascadeScale, Water.c). From orbit they filter into the
+   chop (Water_CascadeScale, water.c). From orbit they filter into the
    glint's roughness.
    OCEAN_CASCADES must match WAVE_CASCADES in wavecube.glsl. */
 #define OCEAN_CASCADES            3
@@ -343,7 +343,7 @@
 #define SHADOW_MAP_SIZE           4096
 #define SHADOW_BOUND_MARGIN       1.02
 
-/* Cascades (Shadows.c, shaders/shadow.glsl): finer maps around the camera,
+/* Cascades (shadows.c, shaders/shadow.glsl): finer maps around the camera,
    each fitted to a slice of the view distance, from the nearest visible
    terrain out to SHADOW_CASCADE_MAX_DIST_M with logarithmic splits (every
    cascade covers the same distance ratio). Past them, and from far orbit
@@ -359,8 +359,8 @@
 #define SHADOW_CASCADE_MIN_DIST_M   2.0
 
 /* ---- Rings: close-up field (metres) -------------------------------------
-   Rock + dust streaming around the camera (Rings.c). The ring radii
-   themselves are in planet radii in Rings.c. These keep the old look;
+   Rock + dust streaming around the camera (rings.c). The ring radii
+   themselves are in planet radii in rings.c. These keep the old look;
    real ring particles are cm to ~10 m. */
 #define RING_ROCK_RANGE_M         1.5e6
 #define RING_ROCK_CELL_M          7.5e4

@@ -1,16 +1,16 @@
 #version 410
 
 // Bakes the planet's shaped height field into the six faces of a cube map
-// once at startup (and on every re-bake); TerrainGen.c reads it back, runs
+// once at startup (and on every re-bake); terrain_gen.c reads it back, runs
 // thermal + hydraulic erosion on the CPU, then uploads the final cube map +
 // mip chain that the body shaders sample by direction (planetmap.glsl). The
 // faces are stacked bottom to top in one faceSize x 6*faceSize target, in GL
-// cube-map order and orientation (TerrainGen.c faceM/S/T).
+// cube-map order and orientation (terrain_gen.c faceM/S/T).
 //
 // Shaping recipe: a plate-tectonics sketch instead of thresholded noise
 // (which always yields noodly fractal continents).
 //   - Plates: warped spherical Voronoi over the CPU-generated plate centres
-//     (TerrainGen.c). ~40% of the area is continental crust; continents are
+//     (terrain_gen.c). ~40% of the area is continental crust; continents are
 //     plate-sized and chunky, noise only roughens their coasts.
 //   - Each plate rotates about its own pole, so every boundary is
 //     convergent or divergent:
@@ -23,11 +23,11 @@
 //   - Continental interiors: low rolling plains (Midwest), patches of
 //     raised flat plateaus with scarp edges (Colorado/Mongolia), worn-down
 //     old ranges and hill country.
-// Sea level is raw height 0 (TerrainGen.c keeps it through normalization),
+// Sea level is raw height 0 (terrain_gen.c keeps it through normalization),
 // so the coastline is wherever the crust says, never a percentile slicing
 // through a plain.
 // Output: raw h in BakeOut.r; BakeOut.g carries a low-frequency climate
-// anomaly (~[-0.5,0.5]) that TerrainGen.c folds into the moisture map.
+// anomaly (~[-0.5,0.5]) that terrain_gen.c folds into the moisture map.
 
 in vec2 fUV;
 out vec4 BakeOut;
@@ -42,7 +42,7 @@ uniform vec4 plateMotion[MAX_PLATES];  // xyz = angular velocity, w = passive ma
 const float PI = 3.14159265359;
 
 /* ---- Shaping recipe; distances are radians on the sphere. The uniforms are
-   TerrainBakeSettings (TerrainGen.c, debug panel); defaults noted inline.
+   TerrainBakeSettings (terrain_gen.c, debug panel); defaults noted inline.
    The #defines are fixed here. ---- */
 #define PLATE_WARP      0.28   // boundary waviness (warp of the Voronoi lookup)
 #define PLATE_WARP_FREQ 1.3

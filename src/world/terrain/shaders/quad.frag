@@ -1,7 +1,7 @@
 #version 410
 #extension GL_ARB_conservative_depth : enable
 
-// Two programs are built from this source (TerrainDraw.c), for a depth prepass:
+// Two programs are built from this source (terrain_draw.c), for a depth prepass:
 // DEPTH_PREPASS writes only depth (the surface, with seafloor pushed behind
 // the water, seafloorDepth below) and returns before any shading; the
 // colour pass then runs the full shader with depth test >= and no depth
@@ -37,7 +37,7 @@ out vec4 FragColor;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
-// Sun shadows: cascades + the global map (shadow.glsl, Shadows.c).
+// Sun shadows: cascades + the global map (shadow.glsl, shadows.c).
 #define SHADOW_TAPS 9
 #include "world/shadows/shadow.glsl"
 // Camera-relative rendering: fragPos, lightPosition and bodyCenter (the
@@ -45,7 +45,7 @@ uniform sampler2D texture1;
 // (cameraPos = lodCameraPos = 0). Planet-local positions are fragPos -
 // bodyCenter.
 uniform vec3 bodyCenter;
-// Height field baked at startup (TerrainGen.c, heightbake.frag), a cube map
+// Height field baked at startup (terrain_gen.c, heightbake.frag), a cube map
 // looked up by body-local direction (planetmap.glsl). lodK folds the
 // pixel/texel angular-size ratio into log2(dist*lodK), plus the grazing and
 // face-corner corrections, clamped to the map's mips.
@@ -53,7 +53,7 @@ uniform samplerCube heightMap;
 #include "planetmap.glsl"
 uniform vec3 lodCameraPos;
 uniform float lodK;
-// Sea level from the baked + eroded height field (TerrainGen.c); the height
+// Sea level from the baked + eroded height field (terrain_gen.c); the height
 // ramp and the material bands all key off this single value, and water.frag
 // gets the identical value so the discard edge sits on the coastline.
 uniform float seaLevel;
@@ -68,7 +68,7 @@ uniform float oceanRelief;
 // along the view axis.
 uniform float depthNear;
 // Clearance (body radii) the pushed seafloor keeps under sea level: the
-// water shell's largest wave excursion (WaterDraw.c Water_Excursion), so troughs
+// water shell's largest wave excursion (water_draw.c Water_Excursion), so troughs
 // never dip below it. It used to be a fixed 0.0005 radii, 3.2 km at Earth's
 // size: coastal pixels pushed that far back fell behind skirt walls and
 // neighbouring land patches, which then showed through the clear shallows
@@ -77,7 +77,7 @@ uniform float seaClearance;
 
 const float PI = 3.14159265359;
 
-// Extinction toward the camera, sunlight colour, skylight (Atmosphere.c).
+// Extinction toward the camera, sunlight colour, skylight (atmosphere.c).
 #include "world/atmosphere/atmosurface.glsl"
 
 // Terrain height field + lighting controls (tweak here). The *_LOD offsets
@@ -92,13 +92,13 @@ const float PI = 3.14159265359;
 #define LAKE_LOD        2.65    // lakes must survive this many mips (no pit specks)
 #define COAST_LOD       4.65    // beaches need open sea within ~2^COAST_LOD texels
 
-// Climate map baked with the height field (TerrainGen.c): R moisture
+// Climate map baked with the height field (terrain_gen.c): R moisture
 // (wind-carried rain + rain shadow, stored at half scale for headroom),
 // G river strength, B alluvial deposits, A lake depth. The style uniforms
 // (palette, temperature/humidity response) come from g_planetStyle and are
 // free to change for alien worlds.
 uniform samplerCube climateMap;
-uniform samplerCube surfaceMap;   // RGB slope, A ambient occlusion (TerrainGen.h)
+uniform samplerCube surfaceMap;   // RGB slope, A ambient occlusion (terrain_gen.h)
 // Occlusion strength (debug panel): the skylight takes all of it, the sun
 // TERRAIN_AO_SUN of it, a cavity term that reads as depth from orbit where
 // the shadow maps are too coarse to.
@@ -161,7 +161,7 @@ float vnoiseLod(vec3 d, float f, float pixAng) {
 	return mix(0.5, vnoise(d * f), fade);
 }
 
-// Procedural ground textures (TerrainDetail.c, groundtex.frag): tileable
+// Procedural ground textures (terrain_detail.c, groundtex.frag): tileable
 // rock / ground / sand / snow layers for close-up surface detail. RG =
 // height slope per tile, B = albedo factor, A = height. A tile is one cell
 // of the detail lattice at some level (detail.glsl), so texture coordinates
@@ -226,7 +226,7 @@ float hadleyFactor(float absLatDeg) {
 }
 
 #include "world/rings/ringshadow.glsl"
-// Cloud shadows (Clouds.c).
+// Cloud shadows (clouds.c).
 #include "world/clouds/cloudlayer.glsl"
 #include "engine/gfx/tonemap.glsl"
 
@@ -297,7 +297,7 @@ void main()
 		}
 	}
 	// Slope (raw height per radian, body-local) and ambient occlusion, baked
-	// with the field (TerrainGen.c surfacePixels) and read at the same mip:
+	// with the field (terrain_gen.c surfacePixels) and read at the same mip:
 	// one fetch instead of four height differences, and the slope filters
 	// smoothly instead of showing the height texels.
 	vec4 surf = textureLod(surfaceMap, dObj, lod);

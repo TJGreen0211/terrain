@@ -4,7 +4,7 @@
 /* Nuklear with this project's configuration. Every file that includes
    nuklear must see the same NK_INCLUDE_* set (it changes struct layouts),
    so they all include it through here. The implementation is compiled
-   once, in DebugGUI.c. */
+   once, in debug_gui.c. */
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_STANDARD_IO
 #define NK_INCLUDE_STANDARD_VARARGS

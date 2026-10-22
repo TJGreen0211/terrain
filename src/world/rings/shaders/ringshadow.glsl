@@ -1,4 +1,4 @@
-// Ring shadow (Rings.c) for lit surfaces (quad.frag, water.frag,
+// Ring shadow (rings.c) for lit surfaces (quad.frag, water.frag,
 // clouds.frag); uniforms from Rings_BindReceiver. Analytic rather than
 // shadow-mapped: the ring is semi-transparent and banded, which a depth map
 // cannot store. The sun ray from p crosses the ring plane at t; the

@@ -1,6 +1,6 @@
 #version 410
 
-// Full-screen triangle for the ground texture bake (TerrainDetail.c); no
+// Full-screen triangle for the ground texture bake (terrain_detail.c); no
 // vertex attributes.
 void main()
 {

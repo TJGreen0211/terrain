@@ -1,4 +1,4 @@
-// The nebula's one density function (Nebula.c): shared by the sky bake
+// The nebula's one density function (nebula.c): shared by the sky bake
 // (nebula_sky.frag, far layer), the in-system pass (nebula_vol.frag, near
 // layer) and the presence grid (nebula_grid.frag).
 //
@@ -24,7 +24,7 @@
 #define NEBULA_OCTAVES 5
 #endif
 
-uniform vec3 nebulaSeed;       // lattice-unit offset from the seed (Nebula.c)
+uniform vec3 nebulaSeed;       // lattice-unit offset from the seed (nebula.c)
 uniform vec3 nebulaColA;       // palette ends (linear)
 uniform vec3 nebulaColB;
 uniform float nebulaTurbulence;  // domain warp, in wavelengths
@@ -40,7 +40,7 @@ uniform float nebulaFarEnd;      // farEnd / farStart (shell units)
 uniform vec3 nebulaBandAxis;     // galaxy band: unit normal of its plane
 uniform float nebulaBand;        // 0 = no band, 1 = gas only near the band
 
-// Far-layer light sources (Nebula.c, seeded): bright cores in the shell
+// Far-layer light sources (nebula.c, seeded): bright cores in the shell
 // (shell units) that light the dust (nebula_sky.frag), one per cloud body
 // on its far side from the sun (backlit). Gas gathers around them (as
 // emission nebulae do around hot stars): coverage is raised within
@@ -193,7 +193,7 @@ float farCoverage(vec3 q, float coverage)
 }
 
 // Composition (plan Phase 1b step 3): the far layer's gas lives only in a
-// few seeded cloud bodies (Nebula.c), stretched ellipsoids biased toward
+// few seeded cloud bodies (nebula.c), stretched ellipsoids biased toward
 // the galaxy band, so the sky reads as a few large structures with empty
 // starfield between them, not haze everywhere. nebulaBodyInv maps an
 // offset from a body's centre to its unit sphere; the edge is broken up by

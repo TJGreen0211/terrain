@@ -1,7 +1,7 @@
 // Sun shadows for the planet surface and water (quad.frag, water.frag).
 // Define SHADOW_TAPS (9 or 4) before including.
 //
-// Two levels (Shadows.c):
+// Two levels (shadows.c):
 // - Cascades: SHADOW_CASCADES orthographic maps along the sun direction,
 //   each a bounding sphere around a slice of the camera's view distance
 //   (finest first). Casters are the very mesh the main pass draws.

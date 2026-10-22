@@ -10,7 +10,7 @@ layout (location = 3) in vec3 vTangent;
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-// FFT cascades (Water.c), one layer each, largest first.
+// FFT cascades (water.c), one layer each, largest first.
 uniform sampler2DArray waveHeight;
 uniform sampler2DArray waveDisp;    // choppy horizontal displacement (face axes)
 uniform float waveChoppy;
@@ -37,7 +37,7 @@ uniform float planetRadiusM;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 
-// Sea state (TerrainGen.c bakeOcean): R wind speed / windMax, A fetch.
+// Sea state (terrain_gen.c bakeOcean): R wind speed / windMax, A fetch.
 uniform samplerCube oceanMap;
 uniform float windMax;
 // Planet temperature response (g_planetStyle), for the sea-ice mask.

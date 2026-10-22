@@ -1,6 +1,6 @@
 #version 410
 
-// Ring sheet proxy (Rings.c): one quad in the ring plane covering the outer
+// Ring sheet proxy (rings.c): one quad in the ring plane covering the outer
 // radius, built from gl_VertexID. It only marks where the view ray meets the
 // plane, so the rasterized depth is the exact ray-plane hit; ring.frag does
 // all of the ring itself from the interpolated hit position.
