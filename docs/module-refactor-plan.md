@@ -305,6 +305,23 @@ A phase is green only when all four checks pass:
 **Phase 7 — break up `main()`.**
 - Split it into `App_Create`, `App_Update`, `Render_Frame` and `App_Destroy`, with
   the explicit pass list in `render.c`.
+- Done 2026-10-22, pixel-identical, 185 warnings (unchanged). Where things went:
+  - `app/App.c/h`: the `App` struct (window, ocean, the quad-cube, sun-marker,
+    sky, moon and dummy textures, sim clock, last focus, this frame's `cam`).
+    It also holds `App_Create` (all setup; it returns 0 with an exit code for
+    failures and `--bake-sky`), `App_Update` (re-bakes, waves, clocks, bodies,
+    focus, camera, `SolarSystem_Update`, `Clouds_Update`), `App_Destroy`, and
+    the mesh helpers, which are now static.
+  - `app/Render.c/h`: `Render_Frame(App*)`, which builds the `FrameContext` and
+    runs every pass from the shadow maps to the debug panel. The scene target,
+    `setReversedDepth`, the projection and the camera-relative helpers are
+    static there; `g_cam` became `app->cam`.
+  - `app/CameraSliders.c/h`: the camera sliders (`_Setup`, `_Layout`).
+  - `app/Main.c` (~40 lines): chdir, create, loop, destroy.
+  - The new files are CamelCase like the rest of `app/`. The lowercase
+    renames stay in phase 8.
+  - `Nebula_Update` still runs between the shadow pass and the main pass, as
+    before, so it is inside `Render_Frame`.
 
 **Phase 8 — debug panels and tuning globals.**
 - Move each `DebugGUI.c` section into its module as `X_DebugPanel`.
