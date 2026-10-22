@@ -132,13 +132,15 @@ extern TerrainBakeSettings g_terrainBake;
    mip-chain upload. Reentrant:
    call again with a new seed to re-bake (the shader program and working FBO
    are cached; only the returned texture is new and owned by the caller).
+   style: the baked planet's look (its humidity, rain belts and relief
+   shape the rivers and occlusion), not necessarily the active planet's.
    step (may be NULL) is invoked TERRAIN_BAKE_STEPS times through the CPU
    erosion so a loading screen can advance and keep the window responsive. */
 #define TERRAIN_THERMAL_STEPS 3    /* evenly spaced through the thermal passes */
 #define TERRAIN_HYDRO_STEPS   8    /* evenly spaced through the droplets */
 #define TERRAIN_BAKE_STEPS    (TERRAIN_THERMAL_STEPS + TERRAIN_HYDRO_STEPS)
-unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, PlanetGenParams *out,
-                                     void (*step)(void));
+unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, const PlanetStyle *style,
+                                     PlanetGenParams *out, void (*step)(void));
 
 /* Background bake: the same bake without the stall. The GPU shaping pass
    is drawn in strips over successive polls and read back asynchronously;
@@ -149,7 +151,7 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *settings, Planet
    without making the planet active. Cancel drops a job. One bake at a
    time: a start or a blocking bake first completes a running one. */
 typedef struct TerrainBakeJob TerrainBakeJob;
-TerrainBakeJob *TerrainGen_BakeStart(const TerrainBakeSettings *settings);
+TerrainBakeJob *TerrainGen_BakeStart(const TerrainBakeSettings *settings, const PlanetStyle *style);
 int TerrainGen_BakePoll(TerrainBakeJob *job);
 float TerrainGen_BakeProgress(const TerrainBakeJob *job);   /* 0..1, rough */
 unsigned int TerrainGen_BakeFinish(TerrainBakeJob *job, PlanetGenParams *out);

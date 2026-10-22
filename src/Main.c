@@ -1155,7 +1155,7 @@ int main(int argc, char *argv[])
 	/* Bake the planet height field: GPU shaping + CPU erosion + sea level
 	   stats (TerrainGen.c), from g_terrainBake. The seed advances on every
 	   H-key re-bake; the debug panel edits the rest and re-bakes on demand. */
-	planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetGen, LoadingScreen_Step);
+	planetHeightTex = generatePlanetHeightmap(&g_terrainBake, &g_planetStyle, &g_planetGen, LoadingScreen_Step);
 	TerrainDetail_Init();
 
 	/* Procedural rings, seeded with the planet (re-rolled with it when the

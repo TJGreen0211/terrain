@@ -93,9 +93,14 @@
 /* Rocky planets: atmosphere shell as a fraction of the radius (Earth's look
    is ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M), times a random factor. */
 #define ROCKY_SHELL_FRACTION      (ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M)
+/* Habitable zone (AU): a planet with air orbiting inside it may have
+   water. Stylised, far wider than a real one, so the inner and outer
+   neighbours (Venus to Mars slots and a bit beyond) can be wet worlds. */
+#define HABITABLE_AU_MIN          0.5
+#define HABITABLE_AU_MAX          2.5
 /* Water on every planet but Earth: generated (hasWater) but not drawn
    until the water rendering is reworked. 0 = dry worlds. */
-#define OTHER_PLANET_WATER        0
+#define OTHER_PLANET_WATER        1
 
 /* ---- Time --------------------------------------------------------------
    Simulation seconds per real second (R pauses). 1440 = one Earth day per

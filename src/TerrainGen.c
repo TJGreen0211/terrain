@@ -868,10 +868,10 @@ static void computeMoisture(const float *h, const float *anom, float sea, float 
 
 /* quad.frag's hadleyFactor (latitude rain belts), mirrored so river
    discharge follows the same climate the surface is shaded with. Uses the
-   style at bake time; re-bake (H) after changing it to update rivers. */
-static float hadleyFactorC(double absLatDeg)
+   style of the planet being baked; re-bake (H) after changing it to update
+   rivers. */
+static float hadleyFactorC(const PlanetStyle *ps, double absLatDeg)
 {
-	const PlanetStyle *ps = &g_planetStyle;
 	double itcz    = exp(-pow(absLatDeg / 14.0, 2.0));
 	double subtrop = exp(-pow((absLatDeg - 27.0) / 9.0, 2.0));
 	double midlat  = exp(-pow((absLatDeg - 55.0) / 12.0, 2.0));
@@ -922,7 +922,7 @@ static inline PQNode pqPop(void)
    river constants hold at any map size). River strength = log2 discharge,
    widened by RIVER_WIDEN per texel so big rivers survive the mip chain.
    Runs on the cube faces; edge texels' neighbours are across the edge. */
-static void computeDrainage(const float *h, const float *moist, float sea,
+static void computeDrainage(const PlanetStyle *ps, const float *h, const float *moist, float sea,
                             float *river, float *lake)
 {
 	const int N = FACE_N;
@@ -990,7 +990,7 @@ static void computeDrainage(const float *h, const float *moist, float sea,
 				texelDir(f, i, j, d);
 				float area = texArea[(size_t)j * N + i];
 				double latDeg = asin(fmin(fabs(d[2]), 1.0)) * (180.0 / M_PI);
-				float r = 2.0f * moist[c] * hadleyFactorC(latDeg) * area;
+				float r = 2.0f * moist[c] * hadleyFactorC(ps, latDeg) * area;
 				acc[c] = RIVER_RAIN_FLOOR * area + (r > 0.0f ? r : 0.0f);
 			}
 	for (size_t k = m; k-- > 0; ) {
@@ -1080,8 +1080,8 @@ static int refToCubeTexels(double r)
 /* Builds the RGBA8 climate map's pixels (layout in TerrainGen.h), one cube
    field each. hEq / anomEq: the height and anomaly on the equirect grid,
    for the moisture's latitude streams. CPU only: runs on the bake worker. */
-static unsigned char *climatePixels(const float *h, const float *hEq, const float *anomEq,
-                                    float *dep, float sea)
+static unsigned char *climatePixels(const PlanetStyle *ps, const float *h, const float *hEq,
+                                    const float *anomEq, float *dep, float sea)
 {
 	size_t n = CUBE_TEXELS;
 	float *moistEq = malloc((size_t)EQ_W * EQ_H * sizeof(float));
@@ -1090,7 +1090,7 @@ static unsigned char *climatePixels(const float *h, const float *hEq, const floa
 	free(moistEq);
 	float *river = malloc(n * sizeof(float));
 	float *lake = malloc(n * sizeof(float));
-	computeDrainage(h, moist, sea, river, lake);
+	computeDrainage(ps, h, moist, sea, river, lake);
 
 	/* Alluvium: soften, then normalize by its 99th area percentile. */
 	static Histo dh;
@@ -1313,12 +1313,12 @@ static unsigned __stdcall surfaceFace(void *arg)
 }
 
 /* Builds the surface map's half-float pixels, one thread per face. Uses
-   the style's relief at bake time (re-bake after changing landRelief /
+   the baked planet's relief (re-bake after changing landRelief /
    oceanRelief to update the occlusion). stepRms: RMS height step between
    neighbouring land texels (raw units), the detail noise's reference. */
-static unsigned short *surfacePixels(const float *h, float sea, float oceanDepth, float *stepRms)
+static unsigned short *surfacePixels(const PlanetStyle *ps, const float *h, float sea,
+                                     float oceanDepth, float *stepRms)
 {
-	const PlanetStyle *ps = &g_planetStyle;
 	float *rel = malloc(CUBE_TEXELS * sizeof(float));
 	unsigned short *px = malloc(CUBE_TEXELS * 4 * sizeof(unsigned short));
 	double landScale = ps->landRelief / fmax(1.0 - sea, 1e-3);
@@ -1800,6 +1800,7 @@ typedef enum { STAGE_SHAPE, STAGE_READBACK, STAGE_CPU, STAGE_UPLOAD } BakeStage;
 
 struct TerrainBakeJob {
 	TerrainBakeSettings bs;
+	PlanetStyle style;            /* the baked planet's (not the active one's) */
 	void (*step)(void);
 	BakeStage stage;
 	int strip;                    /* next strip to draw (STAGE_SHAPE) */
@@ -2023,9 +2024,9 @@ static void bakeCPU(TerrainBakeJob *job)
 	/* 7. Climate map (moisture, rivers, alluvium, lakes) and ocean map. The
 	   latitude streams (moisture, fetch) run on an equirect copy. */
 	float *hEq = cubeToEquirect(h), *anomEq = cubeToEquirect(anom);
-	job->climatePx = climatePixels(h, hEq, anomEq, dep, seaLevel);
+	job->climatePx = climatePixels(&job->style, h, hEq, anomEq, dep, seaLevel);
 	job->oceanPx = oceanPixels(hEq, anom, seaLevel);
-	job->surfacePx = surfacePixels(h, seaLevel, oceanDepth, &job->landStepRms);
+	job->surfacePx = surfacePixels(&job->style, h, seaLevel, oceanDepth, &job->landStepRms);
 	free(hEq);
 	free(anomEq);
 	free(anom);
@@ -2091,7 +2092,8 @@ static void completeJob(TerrainBakeJob *job)
 	}
 }
 
-static TerrainBakeJob *newJob(const TerrainBakeSettings *bs, void (*step)(void))
+static TerrainBakeJob *newJob(const TerrainBakeSettings *bs, const PlanetStyle *style,
+                              void (*step)(void))
 {
 	if (bgJob)
 		completeJob(bgJob);   /* one bake at a time */
@@ -2101,6 +2103,7 @@ static TerrainBakeJob *newJob(const TerrainBakeSettings *bs, void (*step)(void))
 		exit(1);
 	}
 	job->bs = *bs;
+	job->style = *style;
 	job->step = step;
 	return job;
 }
@@ -2185,10 +2188,10 @@ static GLuint bakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
 	return heightTex;
 }
 
-unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenParams *out,
-                                     void (*step)(void))
+unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, const PlanetStyle *style,
+                                     PlanetGenParams *out, void (*step)(void))
 {
-	TerrainBakeJob *job = newJob(bs, step);
+	TerrainBakeJob *job = newJob(bs, style, step);
 	shapeStrips(job, BAKE_SHAPE_STRIPS);
 	readbackNow(job);
 	bakeCPU(job);
@@ -2198,9 +2201,9 @@ unsigned int generatePlanetHeightmap(const TerrainBakeSettings *bs, PlanetGenPar
 	return heightTex;
 }
 
-TerrainBakeJob *TerrainGen_BakeStart(const TerrainBakeSettings *bs)
+TerrainBakeJob *TerrainGen_BakeStart(const TerrainBakeSettings *bs, const PlanetStyle *style)
 {
-	TerrainBakeJob *job = newJob(bs, workerStep);
+	TerrainBakeJob *job = newJob(bs, style, workerStep);
 	job->background = 1;
 	InterlockedExchange(&workerSteps, 0);
 	bgJob = job;

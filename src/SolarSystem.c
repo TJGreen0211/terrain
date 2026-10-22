@@ -121,9 +121,13 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 	} else {
 		p->atmo.shellHeight = 0.0f;
 	}
-	/* Liquid water needs air and a temperate orbit; recorded for later,
-	   drawn only on Earth for now. */
-	p->hasWater = p->hasAtmosphere && temp > 0.85 && temp < 1.2 && rnd(r) < 0.6;
+	/* Liquid water needs air and an orbit in the habitable zone; recorded
+	   for later, drawn only on Earth for now. The roll has its own stream,
+	   so the zone can change without reshuffling the rest of the planet. */
+	double aAU = 1.0 / (temp * temp);
+	Rng wr = { r->s ^ 0x5741544552ull };
+	p->hasWater = p->hasAtmosphere && aAU >= HABITABLE_AU_MIN && aAU <= HABITABLE_AU_MAX &&
+	              rnd(&wr) < 0.6;
 
 	/* Surface palette: one base hue, varied per biome cell. With no water
 	   (humidity 0) only the dry column shows; temperature picks the row. */
@@ -446,7 +450,7 @@ static void requestBake(int body)
 	if (bakeJob || !bakeable(body) || g_planetInfo[body].baked)
 		return;
 	fprintf(stderr, "[system] baking %s (background)\n", g_bodies[body].name);
-	bakeJob = TerrainGen_BakeStart(&g_planetInfo[body].bake);
+	bakeJob = TerrainGen_BakeStart(&g_planetInfo[body].bake, &g_planetInfo[body].style);
 	bakeBody = body;
 }
 
@@ -459,7 +463,7 @@ static void bakeInto(int body, void (*step)(void))
 		return;
 	}
 	PlanetInfo *p = &g_planetInfo[body];
-	p->heightTex = generatePlanetHeightmap(&p->bake, &p->gen, step);
+	p->heightTex = generatePlanetHeightmap(&p->bake, &p->style, &p->gen, step);
 	bakeDone(body);
 }
 
