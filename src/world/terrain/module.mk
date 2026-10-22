@@ -1,8 +1,7 @@
-# world/terrain: quad cube, quadtree LOD, terrain bake, surface detail, surface drawing, debug panel.
+# world/terrain: quad cube, quadtree LOD, surface detail, surface drawing, debug panel (the bake is in gen/).
 OBJS = $(OBJS) \
 	$(OBJDIR)\world\terrain\quad_cube.obj \
 	$(OBJDIR)\world\terrain\quad_tree.obj \
-	$(OBJDIR)\world\terrain\terrain_gen.obj \
 	$(OBJDIR)\world\terrain\terrain_detail.obj \
 	$(OBJDIR)\world\terrain\terrain_draw.obj \
 	$(OBJDIR)\world\terrain\terrain_panel.obj

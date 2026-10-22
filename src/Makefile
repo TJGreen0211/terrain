@@ -31,6 +31,7 @@ OBJS =
 !include engine\debug\module.mk
 !include world\bodies\module.mk
 !include world\terrain\module.mk
+!include world\terrain\gen\module.mk
 !include world\ocean\module.mk
 !include world\atmosphere\module.mk
 !include world\clouds\module.mk

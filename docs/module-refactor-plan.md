@@ -397,6 +397,24 @@ A phase is green only when all four checks pass:
 - Move its code, without changes, into `world/terrain/gen/{cubemap, erosion, climate,
   bake_job, upload, surface}.c`, with a private `gen_internal.h`.
 - This is last because it is the largest move.
+- Done 2026-10-22, pixel-identical, 127 warnings (unchanged). The startup bake
+  timings match the previous build within noise (3 runs each, alternated).
+  - `world/terrain/gen/` holds `cubemap.c`, `erosion.c`, `climate.c`,
+    `surface.c`, `upload.c`, `bake_job.c` and `bounds.c`. `bounds.c` is an
+    addition for the height-bounds pyramid and the quadtree's range queries.
+    The public API is still `world/terrain/terrain_gen.h`.
+  - The code moved line for line, checked by comparing the old and new lines.
+    The deliberate differences are:
+    - Definitions shared across the new files lost `static`, and
+      `gen_internal.h` declares them.
+    - The constants, the `Histo` and `TerrainPyramid` types, and the cube
+      geometry helpers (`static inline`, so the hot loops still inline) moved
+      to `gen_internal.h`.
+    - Two comments now say "gen/" instead of "this file".
+    - The empty "Full bake" banner was dropped.
+  - `TerrainGen_SetOceanUniforms` lives with the ocean map in `climate.c`.
+  - The `#pragma optimize` is in `gen_internal.h`, so it still covers exactly
+    the bake's code.
 
 ## 5. Non-goals
 
