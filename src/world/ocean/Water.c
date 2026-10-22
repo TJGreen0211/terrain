@@ -10,7 +10,7 @@
 #include "world/ocean/Water.h"
 #include "engine/gfx/Common.h"
 #include "engine/math/ComplexMath.h"
-#include "Bench.h"
+#include "app/Bench.h"
 #include "world/WorldConfig.h"
 #include <stdio.h>
 #include <stdlib.h>

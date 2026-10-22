@@ -23,7 +23,6 @@ COMPILE = $(CC) $(CFLAGS) $(INCLUDE_PATHS) /MP /c
 
 OBJS =
 
-!include module.mk
 !include engine\core\module.mk
 !include engine\math\module.mk
 !include engine\platform\module.mk
@@ -38,6 +37,7 @@ OBJS =
 !include world\sky\module.mk
 !include world\rings\module.mk
 !include world\shadows\module.mk
+!include app\module.mk
 !include ..\third_party\module.mk
 
 # First target = the default goal, so it must come before deps.mk's targets.

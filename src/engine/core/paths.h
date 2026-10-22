@@ -9,7 +9,7 @@
    Shaders are named "<module folder>/<file>", relative to src/: each module
    keeps its shaders in a shaders/ subfolder, which the name leaves out.
        "world/clouds/clouds.frag" -> src/world/clouds/shaders/clouds.frag
-       "quad.vert"                -> src/shaders/quad.vert (not yet moved)
+       "app/loading.vert"         -> src/app/shaders/loading.vert
    Loaders take shader names and resolve them themselves (LoadShader.c), and
    GLSL #include uses the same names (after trying the includer's folder).
    Assets and bench files: build the path with Paths_Asset / Paths_Bench.

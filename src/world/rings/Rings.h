@@ -1,7 +1,7 @@
 #ifndef RINGS_H
 #define RINGS_H
 
-#include "Main.h"
+#include "app/Main.h"
 
 /* Procedural planetary rings.
 

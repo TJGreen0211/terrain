@@ -1,5 +1,5 @@
 #include "engine/gfx/Common.h"
-#include "LoadingScreen.h"
+#include "app/LoadingScreen.h"
 #include "world/terrain/TerrainGen.h"
 
 static GLFWwindow *loadWindow = NULL;
@@ -19,8 +19,8 @@ void LoadingScreen_Init(GLFWwindow *window)
 {
 	loadWindow = window;
 
-	createShader(&loadingShader, "loading.vert",
-		"loading.frag");
+	createShader(&loadingShader, "app/loading.vert",
+		"app/loading.frag");
 
 	GLfloat quadVertices[] = {
 		-1.0f, -1.0f, 0.0f,

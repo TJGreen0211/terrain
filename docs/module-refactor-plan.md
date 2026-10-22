@@ -233,6 +233,16 @@ A phase is green only when all four checks pass:
 - `git mv` everything into the §2 layout, including the shaders into each module's
   `shaders/`. Then update includes, `module.mk` files and shader path strings.
 - No logic edits. Make one commit per tier: engine, then world, then app.
+- Done 2026-10-22. Notes:
+  - Files kept their names. `src/shaders/` and the old `math/`, `camera/`,
+    `common/` and `geometry/` folders are gone.
+  - The only `-I` paths left are `src/` and `third_party/include`; every
+    include is a path from `src/`.
+  - Dead files found during the move, kept for a later deletion:
+    `app/shaders/instance.*` (`drawInstanced` is never called) and
+    `world/terrain/shaders/tess.geom` (used only in commented-out code).
+  - `check_modules.ps1` lost its legacy map, resolves includes exactly, and
+    now checks shader includes too (tier rule, plus a "missing" rule).
 - Watch stderr for "Shader include not found".
 
 **Phase 5 — kill `Main.h` and the upward includes.**

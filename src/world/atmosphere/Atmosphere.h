@@ -1,7 +1,7 @@
 #ifndef ATMOSPHERE_H
 #define ATMOSPHERE_H
 
-#include "Main.h"
+#include "app/Main.h"
 
 // Scattering parameters shared by the dome (in-scatter) and the planet/water
 // passes (extinction, water's sky reflection). Live: edited from the debug

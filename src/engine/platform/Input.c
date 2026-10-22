@@ -1,6 +1,6 @@
 #include "engine/platform/Input.h"
 #include "engine/debug/GUI.h"
-#include "DebugGUI.h"
+#include "app/DebugGUI.h"
 
 /* Held state per movement key, so any combination (W+D, W+A, ...) moves at
    once and releasing one key leaves the others held. */

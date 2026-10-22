@@ -2,7 +2,7 @@
    run derives from the frame index, so two runs of a build render identical
    frames and their timings are comparable. */
 
-#include "Bench.h"
+#include "app/Bench.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-#include "Main.h"
+#include "app/Main.h"
 #include "world/terrain/TerrainGen.h"
 #include "world/WorldConfig.h"
 #include <stdio.h>

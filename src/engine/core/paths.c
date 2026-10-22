@@ -21,7 +21,8 @@ static char *joinv(char *out, size_t n, const char *root, const char *fmt, va_li
 }
 
 /* "<module folder>/<file>" -> SHADER_ROOT "<module folder>/shaders/<file>".
-   A bare "<file>" has an empty module folder: src/shaders/<file>. */
+   A bare "<file>" would be src/shaders/<file>; every shader now lives in a
+   module, so a bare name only shows up in the include-not-found message. */
 char *Paths_Shader(char *out, size_t n, const char *fmt, ...)
 {
 	char name[260];

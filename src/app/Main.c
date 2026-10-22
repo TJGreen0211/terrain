@@ -1,4 +1,4 @@
-#include "Main.h"
+#include "app/Main.h"
 #include "world/bodies/Sun.h"
 #include "world/bodies/Planets.h"
 #include "world/bodies/SolarSystem.h"
@@ -6,9 +6,9 @@
 #include "world/sky/Nebula.h"
 #include "world/atmosphere/Atmosphere.h"
 #include "world/clouds/Clouds.h"
-#include "LoadingScreen.h"
+#include "app/LoadingScreen.h"
 #include "engine/debug/GUI.h"
-#include "DebugGUI.h"
+#include "app/DebugGUI.h"
 #include "world/terrain/TerrainGen.h"
 #include "world/terrain/TerrainDetail.h"
 #include "world/shadows/Shadows.h"
@@ -16,7 +16,7 @@
 #include "world/WorldConfig.h"
 #include "world/bodies/Bodies.h"
 #include "engine/debug/Profiler.h"
-#include "Bench.h"
+#include "app/Bench.h"
 #include "engine/core/paths.h"
 /* stb_image_write lives here; Bench.c uses it for its PNG captures. */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -115,8 +115,8 @@ GLuint initPlanetShader() {
 
 GLuint initInstanceShader() {
 	GLuint shader;
-	createShader(&shader, "instance.vert",
-		"instance.frag");
+	createShader(&shader, "app/instance.vert",
+		"app/instance.frag");
 	return shader;
 }
 

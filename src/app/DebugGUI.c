@@ -1,5 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS // nuklear's NK_INCLUDE_STANDARD_IO uses fopen
-#include "DebugGUI.h"
+#include "app/DebugGUI.h"
 #include "world/atmosphere/Atmosphere.h"
 #include "world/sky/Nebula.h"
 #include "world/clouds/Clouds.h"
