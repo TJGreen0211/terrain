@@ -23,6 +23,7 @@
 #include "world/bodies/solar_system.h"
 #include "world/bodies/sun.h"
 #include "world/clouds/clouds.h"
+#include "world/gasgiant/gas_giant.h"
 #include "world/ocean/water_draw.h"
 #include "world/rings/rings.h"
 #include "world/shadows/shadows.h"
@@ -116,6 +117,7 @@ static void addDebugPanels(void)
 	DebugGUI_AddPanel("Shadows", Shadows_DebugPanel, NULL);
 	DebugGUI_AddPanel("Atmosphere", Atmosphere_DebugPanel, NULL);
 	DebugGUI_AddPanel("Clouds", Clouds_DebugPanel, NULL);
+	DebugGUI_AddPanel("Gas giants", GasGiant_DebugPanel, NULL);
 	DebugGUI_AddPanel("Nebula", Nebula_DebugPanel, NULL);
 	DebugGUI_AddPanel("Water", Water_DebugPanel, Water_DebugPanelStartup);
 }
@@ -207,6 +209,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	LoadingScreen_Step();
 
 	Sun_Init();
+	GasGiant_Init();
 	Planets_Init();
 	LoadingScreen_Step();
 

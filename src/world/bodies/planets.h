@@ -9,7 +9,8 @@
    this frame: gas giants always, terrain planets while they are inactive or
    small, the Moon while small. Each is a camera-facing quad around its
    silhouette (and rings / atmosphere), ray-traced as an exact sphere,
-   Lambert-lit with body-fixed mottling, an atmosphere glow at the limb and
+   Lambert-lit with body-fixed mottling (gas giants: bands, storms and
+   haze from world/gasgiant), an atmosphere glow at the limb and
    a ring sheet (the body's baked ring profile, shaded as the full passes
    shade it) that shadows the planet and is shadowed by it; it writes
    depth. Below ~1.5 px a body becomes a soft additive dot that keeps the

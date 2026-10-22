@@ -37,6 +37,7 @@ OBJS =
 !include world\clouds\module.mk
 !include world\sky\module.mk
 !include world\rings\module.mk
+!include world\gasgiant\module.mk
 !include world\shadows\module.mk
 !include app\module.mk
 !include ..\third_party\module.mk

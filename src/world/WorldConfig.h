@@ -90,6 +90,14 @@
 #define DWARF_RADIUS_MAX_M        1.2e6
 #define GAS_RADIUS_MIN_M          2.2e7
 #define GAS_RADIUS_MAX_M          7.5e7
+/* Gas giant looks (world/gasgiant): the chance of an ice giant rises (log a)
+   from 0 at GAS_ICE_AU_INNER to GAS_ICE_P_OUTER at GAS_ICE_AU_OUTER. The
+   haze shell (the glow beyond the limb) is a fraction of the radius. */
+#define GAS_ICE_P_OUTER           0.6
+#define GAS_ICE_AU_INNER          3.0
+#define GAS_ICE_AU_OUTER          15.0
+#define GAS_SHELL_FRACTION_MIN    0.012
+#define GAS_SHELL_FRACTION_MAX    0.03
 /* Rocky planets: atmosphere shell as a fraction of the radius (Earth's look
    is ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M), times a random factor. */
 #define ROCKY_SHELL_FRACTION      (ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M)

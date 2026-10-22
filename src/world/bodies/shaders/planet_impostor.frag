@@ -2,7 +2,7 @@
 
 // A body drawn as a stand-in (planets.c): an exact ray-traced sphere with
 // an atmosphere glow and a ring sheet, or a soft dot when it is below
-// ~1.5 px. The rings are the full passes' (rings.c): the body's baked
+// ~1.5 px. Gas giants are shaded by gasgiant.glsl (bands, storms, haze). The rings are the full passes' (rings.c): the body's baked
 // profile, shaded by the same slab model (ringshade.glsl), shadowing the
 // sphere through the profile's optical depth.
 //
@@ -17,10 +17,8 @@ uniform vec3 centerView;    // body centre, view space (m)
 uniform float radius;       // m
 uniform vec3 camBody;       // camera relative to the body, view axes, body radii
 uniform vec3 sunView;       // unit, body -> Sun, view axes
-uniform vec3 poleView;      // unit, the body's spin axis, view axes
 uniform mat3 viewToBody;    // view axes -> body-fixed axes (mottling)
 uniform vec3 color;
-uniform int banded;         // gas giant latitude bands
 uniform float mottle;       // rocky surface variation (0 = none)
 uniform float seed;
 uniform float atmoThick;    // shell height / radius; 0 = no atmosphere
@@ -52,6 +50,7 @@ out vec4 FragColor;
 
 #include "engine/gfx/tonemap.glsl"
 #include "world/rings/ringshade.glsl"
+#include "world/gasgiant/gasgiant.glsl"
 
 // Cloud cover over body-fixed direction nb seen at cosine mu: alpha and
 // reflectance, as clouds.frag shades a slab from above (map coverage with
@@ -167,33 +166,31 @@ void main()
 
 	if (cover > 0.0) {
 		vec3 n = normalize(cross(d, c) - sqrt(max(1.0 - h2, 0.0)) * d);
-		vec3 albedo = color;
-		if (banded == 1) {
-			float lat = dot(n, poleView);
-			float band = sin(lat * 22.0 + 1.3 * sin(lat * 7.0) + seed);
-			albedo *= mix(0.82, 1.08, 0.5 + 0.5 * band);
-			albedo *= 0.65 + 0.35 * max(dot(n, -d), 0.0);   // limb darkening
-		}
-		if (mottle > 0.0) {
-			vec3 nb = viewToBody * n;
-			float m = fbm(nb * 3.0);
-			albedo *= mottle * (0.65 + 0.7 * m) + (1.0 - mottle);
-		}
 		float ndl = dot(n, sunView);
-		float light = max(ndl, 0.0);
 		// Ring shadow on the planet.
-		if (ringOn == 1)
-			light *= ringShadowOnSphere(n);
-		vec3 lit = albedo * (light + 0.02);
-		if (cloudsOn > 0.5) {
-			vec2 cl = standInCloud(viewToBody * n, max(dot(n, -d), 0.0));
-			lit = mix(lit, cloudColor * cl.y * (light + 0.02), cl.x);
-		}
-		// Air at the limb: a tinted rim on the day side.
-		if (atmoThick > 0.0) {
-			float mu = max(dot(n, -d), 0.0);
-			float day = clamp(ndl + 0.3, 0.0, 1.0);
-			lit += atmoColor * pow(1.0 - mu, 3.0) * 0.8 * day;
+		float sunVis = ringOn == 1 ? ringShadowOnSphere(n) : 1.0;
+		vec3 lit;
+		if (gasOn == 1) {
+			lit = gasGiantSurface(n, d, sunView, viewToBody * n, viewToBody * sunView, pixelR, sunVis);
+		} else {
+			vec3 albedo = color;
+			if (mottle > 0.0) {
+				vec3 nb = viewToBody * n;
+				float m = fbm(nb * 3.0);
+				albedo *= mottle * (0.65 + 0.7 * m) + (1.0 - mottle);
+			}
+			float light = max(ndl, 0.0) * sunVis;
+			lit = albedo * (light + 0.02);
+			if (cloudsOn > 0.5) {
+				vec2 cl = standInCloud(viewToBody * n, max(dot(n, -d), 0.0));
+				lit = mix(lit, cloudColor * cl.y * (light + 0.02), cl.x);
+			}
+			// Air at the limb: a tinted rim on the day side.
+			if (atmoThick > 0.0) {
+				float mu = max(dot(n, -d), 0.0);
+				float day = clamp(ndl + 0.3, 0.0, 1.0);
+				lit += atmoColor * pow(1.0 - mu, 3.0) * 0.8 * day;
+			}
 		}
 		col = vec4(lit, cover);
 		depthT = tS;
@@ -202,10 +199,16 @@ void main()
 	if (cover < 1.0 && atmoThick > 0.0 && front > 0.0 && h < 1.0 + atmoThick) {
 		float x = max(h - 1.0, 0.0) / atmoThick;
 		vec3 limbDir = normalize(cross(d, c));
-		float day = clamp(dot(limbDir, sunView) + 0.4, 0.0, 1.0);
-		float glow = exp(-4.0 * x) * (1.0 - x) * day;
-		col.rgb = mix(atmoColor * 0.9, col.rgb, col.a);
-		col.a = max(col.a, glow);
+		if (gasOn == 1) {
+			vec4 g = gasGiantGlow(x, limbDir, d, sunView);
+			col.rgb = mix(g.rgb, col.rgb, col.a);
+			col.a = max(col.a, g.a);
+		} else {
+			float day = clamp(dot(limbDir, sunView) + 0.4, 0.0, 1.0);
+			float glow = exp(-4.0 * x) * (1.0 - x) * day;
+			col.rgb = mix(atmoColor * 0.9, col.rgb, col.a);
+			col.a = max(col.a, glow);
+		}
 		if (depthT < 0.0)
 			depthT = front;
 	}

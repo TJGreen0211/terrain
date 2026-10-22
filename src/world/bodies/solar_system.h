@@ -6,6 +6,7 @@
 #include "world/terrain/terrain_gen.h"
 #include "world/atmosphere/atmosphere.h"
 #include "world/clouds/clouds.h"
+#include "world/gasgiant/gas_giant.h"
 
 /* The procedural solar system: every planet but Earth (and its Moon) is
    generated from the system seed (separate from Earth's terrain seed),
@@ -39,6 +40,7 @@ typedef struct PlanetInfo {
 	PlanetStyle style;
 	atmosphereParams atmo;   /* shellHeight 0 = no atmosphere */
 	cloudParams clouds;      /* style none = no cloud layer */
+	GasGiantStyle gas;       /* gas giants: bands, storms, haze (world/gasgiant) */
 	/* Baked terrain (rocky / dwarf / Earth). */
 	int baked;
 	GLuint heightTex;

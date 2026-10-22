@@ -292,6 +292,7 @@ void SolarSystem_Generate(unsigned int seed)
 		Body *b = Bodies_Get(id);
 		PlanetInfo *p = &g_planetInfo[id];
 		freeBake(p);
+		GasGiant_Free(&p->gas);
 		memset(p, 0, sizeof *p);
 		Rng r = rngFor(seed, id);
 		randomOrbit(&r, &b->orbit, aAU[i], 0.08, 4.0);
@@ -300,16 +301,19 @@ void SolarSystem_Generate(unsigned int seed)
 		b->axialTilt = randomTilt(&r);
 		if (gas) {
 			b->kind = BODY_KIND_SIMPLE;
-			b->banded = 1;
 			b->radius = logRange(&r, GAS_RADIUS_MIN_M, GAS_RADIUS_MAX_M);
 			b->rotationPeriod = range(&r, 0.35, 0.75) * 86400.0;
-			/* Gas giant tones, as before: warm tans to cool blues. */
+			/* (Kept for the stream: the colour comes from the style below.) */
 			double hue = rnd(&r) < 0.6 ? range(&r, 0.06, 0.13) : range(&r, 0.5, 0.62);
 			hsv(hue, range(&r, 0.2, 0.55), range(&r, 0.75, 0.9), b->color);
 			p->hasRings = rnd(&r) < GAS_RING_CHANCE;
+			p->hasAtmosphere = 1;
+			/* Look: its own stream, so the rest of the planet is as before. */
+			Rng gr = rngFor(seed, 4000 + id);
+			GasGiant_Generate(&p->gas, (unsigned int)(splitmix(&gr.s) & 0x7fffffff), aAU[i]);
+			GasGiant_MeanColor(&p->gas, b->color);
 		} else {
 			b->kind = BODY_KIND_TERRAIN;
-			b->banded = 0;
 			b->radius = logRange(&r, ROCKY_RADIUS_MIN_M, ROCKY_RADIUS_MAX_M);
 			b->rotationPeriod = logRange(&r, 0.4, 60.0) * 86400.0;
 			generateRocky(&r, p, b, 1.0 / sqrt(aAU[i]), 0);
@@ -333,7 +337,6 @@ void SolarSystem_Generate(unsigned int seed)
 		randomOrbit(&r, &b->orbit, a, k == 0 ? 0.1 : 0.3, k == 0 ? 10.0 : 25.0);
 		p->type = PLANET_DWARF;
 		b->kind = BODY_KIND_TERRAIN;
-		b->banded = 0;
 		b->radius = logRange(&r, DWARF_RADIUS_MIN_M, DWARF_RADIUS_MAX_M);
 		b->rotationPeriod = logRange(&r, 0.2, 6.0) * 86400.0;
 		b->axialTilt = randomTilt(&r);
@@ -362,6 +365,9 @@ void SolarSystem_Generate(unsigned int seed)
 		        SolarSystem_TypeName(p->type), Bodies_Get(id)->orbit.a / AU_M, Bodies_Get(id)->radius / 1000.0,
 		        p->hasAtmosphere ? "  atmosphere" : "", p->hasRings ? "  rings" : "",
 		        p->hasWater ? "  (water)" : "");
+		if (p->type == PLANET_GAS)
+			fprintf(stderr, "            look: %s, %d bands, %d storms\n",
+			        GasGiant_FamilyName(p->gas.family), p->gas.bandCount, p->gas.stormCount);
 		if (p->clouds.style != CLOUD_STYLE_NONE)
 			fprintf(stderr, "            clouds: %s, %.0f km up, coverage %.2f\n",
 			        Clouds_StyleName(p->clouds.style), p->clouds.altitude / 1000.0, p->clouds.coverage);

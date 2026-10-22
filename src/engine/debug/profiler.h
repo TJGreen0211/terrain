@@ -9,6 +9,7 @@ typedef enum ProfSection {
 	PROF_WAVES,      /* FFT ocean simulation */
 	PROF_SHADOW,     /* sun shadow map */
 	PROF_MOON,
+	PROF_STANDINS,   /* planet stand-ins (planets.c): gas giants, far planets */
 	PROF_PLANET,
 	PROF_WATER,
 	PROF_CLOUDS,

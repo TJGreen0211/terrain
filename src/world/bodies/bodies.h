@@ -58,7 +58,6 @@ typedef struct Body {
 	double rotationPeriod;  /* s; 0 = no spin */
 	double axialTilt;       /* deg from world +Y */
 	float color[3];         /* surface / cloud-top colour (simple bodies) */
-	int banded;             /* gas giant: latitude bands */
 
 	/* Per frame (Bodies_Update). */
 	dvec3 position;         /* world, m */

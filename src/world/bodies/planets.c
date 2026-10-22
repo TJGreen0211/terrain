@@ -4,6 +4,7 @@
 #include "world/bodies/solar_system.h"
 #include "world/rings/rings.h"
 #include "world/clouds/clouds.h"
+#include "world/gasgiant/gas_giant.h"
 #include "engine/platform/window.h"
 #include "world/WorldConfig.h"
 #include <math.h>
@@ -22,6 +23,7 @@ void Planets_Init(void)
 	Shader_Create(&shader, "world/bodies/planet_impostor.vert", "world/bodies/planet_impostor.frag");
 	/* ringProfile on the ring unit (it would alias a cloud map's otherwise). */
 	Rings_AttachReceiver(shader);
+	GasGiant_AttachStandIn(shader);
 
 	/* Unit quad corners, perimeter order for a fan. */
 	GLfloat corners[] = { -1.0f, -1.0f,  1.0f, -1.0f,  1.0f, 1.0f,  -1.0f, 1.0f };
@@ -99,7 +101,9 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 		return;
 
 	/* Extent around the centre: the sphere, its air and its rings. */
-	double atmoThick = pi->atmo.shellHeight > 0.0f ? pi->atmo.shellHeight / R : 0.0;
+	int gas = pi->type == PLANET_GAS;
+	double atmoThick = gas ? pi->gas.shellFraction
+	                 : pi->atmo.shellHeight > 0.0f ? pi->atmo.shellHeight / R : 0.0;
 	int rings = pi->hasRings;
 	double extent = R * fmax(1.0 + atmoThick, rings ? RING_OUTER * 1.02 : 1.0);
 	extent = fmin(extent, d / 1.02);   /* inside the rings: they are cut off */
@@ -115,7 +119,6 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 		half = fmax(R * d / sqrt(d * d - R * R), 3.0 * DOT_SIGMA_PX * d / pixelsPerRadian());
 
 	dvec3 toSun = unit(dsubvec3(Bodies_Get(BODY_SUN)->position, b->position));
-	dvec3 pole = { b->rotation.m[0][2], b->rotation.m[1][2], b->rotation.m[2][2] };
 	dvec3 ringN = SolarSystem_RingNormal(id);
 
 	glUniform3f(glGetUniformLocation(shader, "centerView"), (float)cv.x, (float)cv.y, (float)cv.z);
@@ -124,9 +127,9 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 	/* Camera relative to the body, in body radii (o in the ray-sphere). */
 	glUniform3f(glGetUniformLocation(shader, "camBody"), (float)(-cv.x / R), (float)(-cv.y / R), (float)(-cv.z / R));
 	uniformV3("sunView", toView(view, toSun));
-	uniformV3("poleView", toView(view, pole));
 	uniformV3("ringNormalView", toView(view, ringN));
-	/* View -> body-fixed axes (body rotation^T * view^T), for the mottling. */
+	/* View -> body-fixed axes (body rotation^T * view^T), for the mottling
+	   and the gas giants' bands. */
 	{
 		float m[9];
 		for (int i = 0; i < 3; i++)        /* body axis i */
@@ -139,7 +142,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 		glUniformMatrix3fv(glGetUniformLocation(shader, "viewToBody"), 1, GL_FALSE, m);
 	}
 	glUniform3f(glGetUniformLocation(shader, "color"), b->color[0], b->color[1], b->color[2]);
-	glUniform1i(glGetUniformLocation(shader, "banded"), b->banded);
+	GasGiant_BindStandIn(shader, gas && !isDot ? &SolarSystem_Info(id)->gas : NULL);
 	glUniform1f(glGetUniformLocation(shader, "mottle"),
 	            pi->type == PLANET_ROCKY || pi->type == PLANET_DWARF ? 1.0f : 0.0f);
 	glUniform1f(glGetUniformLocation(shader, "seed"), (float)(pi->ringSeed % 997u) * 0.137f + (float)id);

@@ -275,7 +275,9 @@ void Render_Frame(App *app)
 	//Distant bodies: every planet not drawn in full this frame (gas
 	//giants always; terrain planets and the Moon while small or
 	//inactive).
+	Prof_Begin(PROF_STANDINS);
 	Planets_Draw(sunProj, sunView, cam, planetFull ? activeId : -1, moonFull, ringId);
+	Prof_End(PROF_STANDINS);
 
 	//Quadtree planet: LOD sphere built from six instanced face grids,
 	//centred camera-relative (the walk runs with the camera at the origin).
