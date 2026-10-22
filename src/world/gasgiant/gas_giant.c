@@ -156,16 +156,17 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 		hsv(rnd(&r) < 0.3 ? range(&r, 0.52, 0.58) : h, range(&r, 0.15, 0.25), range(&r, 0.62, 0.72), s->pole);
 		hsv(h + 0.01, 0.1, 0.98, s->accent);
 		hsv(h, range(&r, 0.22, 0.32), range(&r, 0.85, 0.92), s->hazeColor);
-		s->bandCount = 10 + (int)(rnd(&r) * 7.0);
+		s->bandCount = 6 + (int)(rnd(&r) * 5.0);
 		s->bandJitter = frange(&r, 0.3, 0.7);
 		s->contrast = frange(&r, 0.3, 0.55);
 		s->edgeSharpness = frange(&r, 0.15, 0.45);
-		s->fineBands = frange(&r, 0.5, 0.9);
+		s->fineBands = frange(&r, 0.2, 0.45);
 		s->turbulence = frange(&r, 0.25, 0.5);
 		s->streak = frange(&r, 4.0, 7.0);
 		s->detail = frange(&r, 0.15, 0.3);
 		s->relief = frange(&r, 0.2, 0.4);
 		s->hazeTau = frange(&r, 0.25, 0.45);
+		s->wisps = 0.25f;
 		s->poleLat = frange(&r, 62.0, 74.0);
 		break;
 	case GASGIANT_ICE:
@@ -175,16 +176,17 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 		hsv(h + 0.02, range(&r, 0.18, 0.28), range(&r, 0.62, 0.72), s->pole);
 		hsv(h + 0.05, range(&r, 0.40, 0.55), range(&r, 0.24, 0.32), s->accent);
 		hsv(h - 0.03, range(&r, 0.10, 0.18), range(&r, 0.82, 0.9), s->hazeColor);
-		s->bandCount = 5 + (int)(rnd(&r) * 6.0);
+		s->bandCount = 3 + (int)(rnd(&r) * 4.0);
 		s->bandJitter = frange(&r, 0.3, 0.8);
 		s->contrast = frange(&r, 0.45, 0.75);
 		s->edgeSharpness = frange(&r, 0.1, 0.35);
-		s->fineBands = frange(&r, 0.3, 0.6);
+		s->fineBands = frange(&r, 0.1, 0.3);
 		s->turbulence = frange(&r, 0.2, 0.45);
-		s->streak = frange(&r, 5.0, 8.0);
-		s->detail = frange(&r, 0.12, 0.25);
+		s->streak = frange(&r, 2.5, 4.0);
+		s->detail = frange(&r, 0.06, 0.15);
 		s->relief = frange(&r, 0.25, 0.45);
 		s->hazeTau = frange(&r, 0.18, 0.35);
+		s->wisps = 0.25f;
 		s->poleLat = frange(&r, 60.0, 72.0);
 		break;
 	case GASGIANT_EXOTIC: {
@@ -195,16 +197,17 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 		hsv(h, s0, range(&r, 0.55, 0.65), s->pole);
 		hsv(h + sgn(&r) * 0.08, fmin(s0 * 2.0, 1.0), 0.7, s->accent);
 		hsv(h, s0 * 0.8, range(&r, 0.85, 0.92), s->hazeColor);
-		s->bandCount = 8 + (int)(rnd(&r) * 13.0);
+		s->bandCount = 6 + (int)(rnd(&r) * 7.0);
 		s->bandJitter = frange(&r, 0.4, 0.9);
 		s->contrast = frange(&r, 0.55, 0.9);
 		s->edgeSharpness = frange(&r, 0.25, 0.7);
-		s->fineBands = frange(&r, 0.3, 0.8);
+		s->fineBands = frange(&r, 0.15, 0.4);
 		s->turbulence = frange(&r, 0.5, 0.9);
 		s->streak = frange(&r, 3.0, 6.0);
 		s->detail = frange(&r, 0.2, 0.45);
 		s->relief = frange(&r, 0.3, 0.6);
 		s->hazeTau = frange(&r, 0.1, 0.3);
+		s->wisps = 0.3f;
 		s->poleLat = frange(&r, 58.0, 70.0);
 		break;
 	}
@@ -225,6 +228,7 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 		s->detail = frange(&r, 0.3, 0.5);
 		s->relief = frange(&r, 0.4, 0.7);
 		s->hazeTau = frange(&r, 0.08, 0.18);
+		s->wisps = 0.7f;
 		s->poleLat = frange(&r, 58.0, 68.0);
 		break;
 	}
@@ -246,6 +250,25 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 			mix3(s->zone, (float[3]){ 1.0f, 1.0f, 1.0f }, 0.3, c);
 			addStorm(s, lat, range(&sr, -M_PI, M_PI), range(&sr, 0.015, 0.035), range(&sr, 1.2, 1.5),
 			         spinFor(&sr, lat, 2.0, 3.0), c, 0.65);
+		}
+		/* Barges: long dark ovals in the belts, slowly turning. */
+		int barges = (int)(rnd(&sr) * 3.0);
+		for (int i = 0; i < barges; i++) {
+			lat = sgn(&sr) * range(&sr, 12.0, 22.0);
+			mix3(s->belt, s->accent, 0.3, c);
+			for (int k = 0; k < 3; k++)
+				c[k] *= 0.72f;
+			addStorm(s, lat, range(&sr, -M_PI, M_PI), range(&sr, 0.03, 0.05), range(&sr, 2.5, 3.5),
+			         spinFor(&sr, lat, 0.8, 1.4), c, 0.7);
+		}
+		/* A string of pearls: small white ovals in a row. */
+		if (rnd(&sr) < 0.5) {
+			lat = -range(&sr, 35.0, 42.0);
+			double lon0 = range(&sr, -M_PI, M_PI), gap = range(&sr, 0.12, 0.2);
+			mix3(s->zone, (float[3]){ 1.0f, 1.0f, 1.0f }, 0.5, c);
+			for (int i = 0; i < 4; i++)
+				addStorm(s, lat, lon0 + i * gap, range(&sr, 0.011, 0.015), 1.3,
+				         spinFor(&sr, lat, 2.0, 2.5), c, 0.75);
 		}
 		break;
 	}
@@ -282,6 +305,25 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 		break;
 	}
 	}
+
+	/* Polar cyclones: their own stream too. Jovian poles crowd with them;
+	   Saturnian ones have a single vortex; ice giants rarely any. */
+	Rng pr = rngFor(seed, 5);
+	switch (family) {
+	case GASGIANT_JOVIAN:    s->polarCount = 5 + (int)(rnd(&pr) * 4.0); break;
+	case GASGIANT_SATURNIAN: s->polarCount = 0; break;
+	case GASGIANT_ICE:       s->polarCount = rnd(&pr) < 0.4 ? 0 : -1; break;
+	default:                 s->polarCount = -1 + (int)(rnd(&pr) * 8.0); break;
+	}
+	s->polarLat = frange(&pr, 81.0, 85.0);
+	s->polarSize = frange(&pr, 0.045, 0.065);
+	s->polarSpin = frange(&pr, 2.0, 3.0);
+	/* Darker and a touch cooler than the cap. */
+	float cool[3];
+	hsv(0.58, 0.15, 0.5, cool);
+	for (int k = 0; k < 3; k++)
+		c[k] = s->pole[k] * 0.85f;
+	mix3(c, cool, 0.3, s->polarColor);
 }
 
 void GasGiant_Generate(GasGiantStyle *s, unsigned int seed, double aAU)
@@ -295,6 +337,14 @@ void GasGiant_Free(GasGiantStyle *s)
 		glDeleteTextures(1, &s->profileTex);
 	s->profileTex = 0;
 	s->profileHash = 0;
+}
+
+/* generateStyle, keeping the profile texture (the hash rebuilds it). */
+static void restyle(GasGiantStyle *s, unsigned int seed, double aAU, int family)
+{
+	GLuint profile = s->profileTex;
+	generateStyle(s, seed, aAU, family);
+	s->profileTex = profile;
 }
 
 /* ---- Latitude profile ---- */
@@ -355,7 +405,8 @@ static void buildProfile(const GasGiantStyle *s, float *out)
 	}
 	memcpy(col[0], s->pole, sizeof col[0]);
 	memcpy(col[nb + 1], s->pole, sizeof col[0]);
-	turb[0] = turb[nb + 1] = 0.8;
+	/* The caps churn gently: strong warps there read as marbling. */
+	turb[0] = turb[nb + 1] = 0.4;
 
 	/* Edge half-widths: soft to sharp, never past half the narrower band
 	   (so neighbouring blends do not overlap). */
@@ -385,10 +436,15 @@ static void buildProfile(const GasGiantStyle *s, float *out)
 				rgb[c] += wk * col[k][c];
 			tb += wk * turb[k];
 		}
-		for (int k = 1; k <= nb + 1; k++) {
+		/* Edge turbulence between bands only: the caps fade in (below). */
+		for (int k = 2; k <= nb; k++) {
 			double d = (lat - edge[k]) / (0.35 * fmin(width[k - 1], width[k]));
 			edgeAmt = fmax(edgeAmt, exp(-d * d));
 		}
+		/* A wide fade into the cap instead of a hard rim. */
+		double cap = smoothstep(pole - 12.0, pole + 3.0, fabs(lat)) * 0.6;
+		for (int c = 0; c < 3; c++)
+			rgb[c] += (s->pole[c] - rgb[c]) * cap;
 		double fine = (noise1(fseed, lat * fineFreq) - 0.5) + 0.5 * (noise1(fseed + 1u, lat * fineFreq * 2.7) - 0.5);
 		double v = 1.0 + s->fineBands * 0.16 * fine;
 		for (int c = 0; c < 3; c++)
@@ -547,6 +603,12 @@ void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s)
 	glUniform1f(glGetUniformLocation(shader, "gasStreak"), s->streak);
 	glUniform1f(glGetUniformLocation(shader, "gasTurbulence"), s->turbulence);
 	glUniform1f(glGetUniformLocation(shader, "gasDetail"), s->detail);
+	glUniform1f(glGetUniformLocation(shader, "gasWisps"), s->wisps);
+	glUniform1i(glGetUniformLocation(shader, "gasPolarCount"),
+	            s->polarCount < -1 ? -1 : s->polarCount > GASGIANT_MAX_POLAR ? GASGIANT_MAX_POLAR : s->polarCount);
+	glUniform4f(glGetUniformLocation(shader, "gasPolar"), (float)((90.0 - s->polarLat) * M_PI / 180.0),
+	            s->polarSize, s->polarSpin, (float)(s->seed % 360u) * (float)(M_PI / 180.0));
+	uniform3(shader, "gasPolarColor", s->polarColor);
 	glUniform1f(glGetUniformLocation(shader, "gasRelief"), s->relief);
 	glUniform1f(glGetUniformLocation(shader, "gasHazeTau"), s->hazeTau);
 	uniform3(shader, "gasHazeColor", s->hazeColor);
@@ -638,11 +700,8 @@ void GasGiant_DebugPanel(struct nk_context *ctx)
 		nk_property_int(ctx, "Style seed", 0, &newSeed, INT_MAX, 1, 1.0f);
 		if (nk_button_label(ctx, "Re-roll"))
 			newSeed = seed + 1;
-		if (family != s->family || newSeed != seed) {
-			GLuint tex = s->profileTex;   /* keep the texture; the hash rebuilds it */
-			generateStyle(s, (unsigned int)newSeed, aAU, family != s->family ? family : -1);
-			s->profileTex = tex;
-		}
+		if (family != s->family || newSeed != seed)
+			restyle(s, (unsigned int)newSeed, aAU, family != s->family ? family : -1);
 
 		DebugGUI_Group(ctx, "Bands");
 		DebugGUI_SliderInt(ctx, "Bands", &s->bandCount, 1, 40);
@@ -661,7 +720,15 @@ void GasGiant_DebugPanel(struct nk_context *ctx)
 		DebugGUI_Slider(ctx, "Streak", &s->streak, 1.0f, 10.0f, 0.1f, "%.1f");
 		DebugGUI_Slider(ctx, "Detail", &s->detail, 0.0f, 1.0f, 0.01f, "%.2f");
 		DebugGUI_Slider(ctx, "Relief", &s->relief, 0.0f, 1.5f, 0.01f, "%.2f");
+		DebugGUI_Slider(ctx, "Wisps", &s->wisps, 0.0f, 1.5f, 0.01f, "%.2f");
 		DebugGUI_SliderInt(ctx, "Storms", &s->stormCount, 0, GASGIANT_MAX_STORMS);
+
+		DebugGUI_Group(ctx, "Polar cyclones");
+		DebugGUI_SliderInt(ctx, "Ring (-1 none)", &s->polarCount, -1, GASGIANT_MAX_POLAR);
+		DebugGUI_Slider(ctx, "Ring latitude", &s->polarLat, 70.0f, 89.0f, 0.1f, "%.1f");
+		DebugGUI_Slider(ctx, "Size (rad)", &s->polarSize, 0.01f, 0.12f, 0.001f, "%.3f");
+		DebugGUI_Slider(ctx, "Spin", &s->polarSpin, -5.0f, 5.0f, 0.05f, "%.2f");
+		colorRow(ctx, "Core colour", s->polarColor);
 
 		DebugGUI_Group(ctx, "Haze");
 		DebugGUI_Slider(ctx, "Haze tau", &s->hazeTau, 0.0f, 1.5f, 0.01f, "%.2f");

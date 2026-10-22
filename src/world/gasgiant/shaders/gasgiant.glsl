@@ -3,19 +3,27 @@
 //
 // The bands are a 1D latitude profile (RGB band colour as display values,
 // A turbulence weight). The lookup latitude is spun around each storm and
-// then warped by two levels of domain-warped noise, stretched east-west, so
-// band edges curl into streamers. A second noise is the cloud texture: it
-// varies brightness and, through its slope toward the Sun, gives the cloud
-// masses a sculpted look. Light: Minnaert limb darkening, wrap light past
-// the terminator tinted warm, a forward-scattering haze veil, and a glow
-// beyond the limb. Colours are lit in linear (displayToLinear) and tone
-// mapped back, so full sunlight straight down returns the profile colour.
+// around the polar cyclones, then warped by two levels of domain-warped
+// noise, stretched east-west, so band edges curl into streamers. Thin
+// ridges of the warped noise are the wisps: bright cirrus-like strands
+// along the streamers. A second noise is the cloud texture: it varies
+// brightness and, through its slope toward the Sun, gives the cloud
+// masses a sculpted look. Octaves finer than a pixel fade out, so close
+// views gain detail and far ones stay smooth.
+//
+// Light: Minnaert limb darkening, wrap light past the terminator tinted
+// warm, a forward-scattering haze veil, and a glow beyond the limb.
+// Colours are lit in linear (displayToLinear) and tone mapped back, so
+// full sunlight straight down returns the profile colour.
+//
+// Body-fixed axes: pole = +Z, latitude asin(p.z), longitude atan(p.y, p.x).
 
 const float GAS_PI = 3.14159265;
-#define GAS_MAX_STORMS 6    // GASGIANT_MAX_STORMS
+#define GAS_MAX_STORMS 10   // GASGIANT_MAX_STORMS
+#define GAS_MAX_POLAR  8    // GASGIANT_MAX_POLAR
 
 uniform int gasOn;
-uniform sampler1D gasProfile;
+uniform sampler1D gasProfile;   // RGB band colour (display), A turbulence weight
 uniform sampler3D gasNoiseTex;  // 4 independent periodic value noises
 uniform vec3 gasSeedOffset;
 uniform float gasFreq;          // noise frequency north-south, per radius
@@ -23,12 +31,16 @@ uniform float gasStreak;        // east-west stretch
 uniform float gasTurbulence;
 uniform float gasDetail;
 uniform float gasRelief;
+uniform float gasWisps;
 uniform float gasHazeTau;
 uniform vec3 gasHazeColor;
 uniform int gasStormCount;
 uniform vec4 gasStorm[GAS_MAX_STORMS];       // lat, lon (rad), half-length (rad), aspect
 uniform vec4 gasStormColor[GAS_MAX_STORMS];  // display rgb, opacity
 uniform float gasStormSpin[GAS_MAX_STORMS];  // swirl at the centre, rad
+uniform int gasPolarCount;      // cyclones in each polar ring, plus one on the pole; -1 = none
+uniform vec4 gasPolar;          // ring colatitude, size (rad), spin (rad), phase
+uniform vec3 gasPolarColor;     // their cores (display)
 uniform float gasLimbK;
 uniform float gasWrap;
 uniform vec3 gasTerminator;
@@ -47,7 +59,7 @@ vec4 gasNoise4(vec3 p)
 
 // FBM of the four noises, each in [0, 1]. fp: one pixel in noise units at
 // the first octave; octaves finer than about a pixel fade to their mean
-// instead of aliasing.
+// instead of aliasing (and are skipped).
 vec4 gasFbm4(vec3 p, int octaves, float fp)
 {
 	vec4 s = vec4(0.0);
@@ -70,6 +82,14 @@ vec4 gasFbm4(vec3 p, int octaves, float fp)
 	return s / total;
 }
 
+// Storm i's offset from its centre at (lat, lon): east, north (rad).
+vec2 gasStormOffset(int i, float lat, float lon)
+{
+	vec4 S = gasStorm[i];
+	float dlon = mod(lon - S.y + GAS_PI, 2.0 * GAS_PI) - GAS_PI;
+	return vec2(dlon * cos(lat), lat - S.x);
+}
+
 // Spins (lat, lon) around the storms, so the bands inside wind into a
 // spiral; returns the strongest storm's colour (display) and cover, and
 // in collar a pale ring around the spinning ones.
@@ -83,8 +103,7 @@ vec4 gasStorms(inout float lat, inout float lon, out float collar)
 		vec4 S = gasStorm[i];
 		if (S.z <= 0.0)
 			continue;
-		float dlon = mod(lon - S.y + GAS_PI, 2.0 * GAS_PI) - GAS_PI;
-		vec2 e = vec2(dlon * cos(lat), lat - S.x);
+		vec2 e = gasStormOffset(i, lat, lon);
 		vec2 q = vec2(e.x, e.y * S.w) / S.z;    // the storm's edge at |q| = 1
 		float r2 = dot(q, q);
 		if (r2 > 9.0)
@@ -102,6 +121,49 @@ vec4 gasStorms(inout float lat, inout float lon, out float collar)
 		float ring = (r - 1.2) / 0.22;
 		collar = max(collar, exp(-ring * ring) * min(abs(gasStormSpin[i]) * 0.2, 0.5));
 	}
+	return cover;
+}
+
+// Polar cyclones: a ring of gasPolarCount around each pole plus one on the
+// pole, in the pole's azimuthal-equidistant plane. Spins (lat, lon) like
+// the storms; returns their core cover and, in collar, a pale ring.
+float gasPolarCyclones(inout float lat, inout float lon, out float collar)
+{
+	collar = 0.0;
+	float ringC = gasPolar.x, size = gasPolar.y;
+	float colat = 0.5 * GAS_PI - abs(lat);
+	if (gasPolarCount < 0 || colat > ringC + 2.5 * size)
+		return 0.0;
+	float hemi = lat >= 0.0 ? 1.0 : -1.0;
+	vec2 P = colat * vec2(cos(lon), sin(lon));
+	float cover = 0.0;
+	for (int k = 0; k <= GAS_MAX_POLAR; k++) {
+		if (k > gasPolarCount)
+			break;
+		// k = 0: the cyclone on the pole (larger); then the ring.
+		// Jittered per cyclone (angle, radius, size), so the ring is not
+		// a perfect polygon.
+		float j = float(k) * 12.9898 + gasPolar.w * 7.0 + hemi * 3.1;
+		float th = gasPolar.w + hemi * 0.7 + 2.0 * GAS_PI * float(k) / float(max(gasPolarCount, 1))
+		         + 0.25 * sin(j);
+		vec2 C = k == 0 ? vec2(0.0) : ringC * (1.0 + 0.12 * sin(j * 1.7)) * vec2(cos(th), sin(th));
+		float sz = k == 0 ? size * 1.4 : size * (0.8 + 0.4 * fract(sin(j) * 43758.5));
+		vec2 d = P - C;
+		float r2 = dot(d, d) / (sz * sz);
+		if (r2 > 6.0)
+			continue;
+		// Cyclones turn with the planet's spin in each hemisphere.
+		float ang = hemi * gasPolar.z * exp(-1.5 * r2);
+		float c = cos(ang), s = sin(ang);
+		P = C + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+		float r = sqrt(r2);
+		cover = max(cover, 1.0 - smoothstep(0.2, 0.85, r));
+		float ring = (r - 1.05) / 0.2;
+		collar = max(collar, exp(-ring * ring) * 0.35);
+	}
+	colat = length(P);
+	lat = hemi * (0.5 * GAS_PI - colat);
+	lon = atan(P.y, P.x);
 	return cover;
 }
 
@@ -134,8 +196,11 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 
 	float lat = asin(clamp(nb.z, -1.0, 1.0));
 	float lon = atan(nb.y, nb.x);
+	float polarCollar;
+	float polar = gasPolarCyclones(lat, lon, polarCollar);
 	float collar;
 	vec4 storm = gasStorms(lat, lon, collar);
+	collar = max(collar, polarCollar);
 	float cl = cos(lat);
 	vec3 ps = vec3(cl * cos(lon), cl * sin(lon), sin(lat));
 
@@ -153,7 +218,8 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 	vec2 w1 = gasFbm4(q, 4, fp).xy - 0.5;
 	float amt = gasTurbulence * (0.25 + turb);
 	vec3 q2 = q * 2.3 + vec3(w1.x, w1.y, w1.x + w1.y) * 4.0 * amt;
-	float w2 = gasFbm4(q2, 5, fp * 2.3).z - 0.5;
+	vec4 n2 = gasFbm4(q2, 5, fp * 2.3);
+	float w2 = n2.z - 0.5;
 	float dlat = (w2 + 0.5 * w1.x) * 1.2 / gasFreq * amt;
 	vec3 col = textureLod(gasProfile, (lat + dlat) / GAS_PI + 0.5, lod).rgb;
 
@@ -170,8 +236,26 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 		shade = max(1.0 + gasRelief * (h2 - h) * 5.0 * sunTl, 0.2);
 	}
 
+	col = mix(col, gasPolarColor, polar * 0.75 * (0.8 + 0.4 * h));
 	col = mix(col, storm.rgb, clamp(storm.a * (1.0 + 1.2 * (h - 0.5)), 0.0, 1.0));
 	col = mix(col, max(col, vec3(0.95, 0.9, 0.82)), collar * (0.8 + 0.6 * (h - 0.5)));
+
+	// Wisps: ridges of a noise stretched far east-west in the warped space,
+	// so they come out as long thin strands that bend with the streamers
+	// (not a cell network). They fade out before they would alias, and up
+	// close once a strand is more than a few pixels wide (broad, they read
+	// as a satin sheen, not cloud).
+	float fpw = fp * 2.3 * 1.6;
+	float strandPx = 0.05 / max(fpw, 1e-6);
+	float wispFade = (1.0 - smoothstep(0.1, 0.4, fpw)) * (1.0 - smoothstep(4.0, 14.0, strandPx));
+	if (gasWisps > 0.0 && wispFade > 0.0) {
+		vec3 qw = vec3(q2.xy * 0.3, q2.z * 1.6) + vec3(5.0, 2.0, 9.0);
+		float nw = gasFbm4(qw, 3, fpw).y;
+		float ridge = 1.0 - abs(2.0 * nw - 1.0);
+		float wisp = smoothstep(0.8, 0.97, ridge) * wispFade;
+		col = mix(col, mix(col * 1.2, vec3(0.97, 0.95, 0.9), 0.45), clamp(wisp * gasWisps * (0.35 + turb), 0.0, 1.0));
+	}
+
 	col *= 1.0 + gasDetail * (h - 0.5) * 0.9;
 
 	// Lighting, linear.

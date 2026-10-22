@@ -10,11 +10,12 @@
    painterly palette, a band layout, turbulence, storms and a haze. The
    band layout is built on the CPU into a 1D latitude profile (RGB band
    colour, A turbulence weight), rebuilt whenever the style changes. The
-   shader warps the profile lookup with noise and spins it around the
-   storms, then lights it through the haze (limb darkening, wrap light at
+   shader spins the profile lookup around the storms and polar cyclones,
+   warps it with noise into streamers with bright wisps, then lights it through the haze (limb darkening, wrap light at
    the terminator, a forward-scattering veil and a glow beyond the limb). */
 
-#define GASGIANT_MAX_STORMS 6
+#define GASGIANT_MAX_STORMS 10
+#define GASGIANT_MAX_POLAR  8
 
 typedef enum GasGiantFamily {
 	GASGIANT_JOVIAN,       /* cream zones, rust and umber belts, a red spot */
@@ -49,16 +50,23 @@ typedef struct GasGiantStyle {
 	float turbulence;      /* swirl strength at band edges */
 	float streak;          /* east-west stretch of the swirls */
 	float detail;          /* cloud texture brightness variation */
+	float wisps;           /* bright cirrus-like strands along the streamers */
 	float relief;          /* sculpted shading of the cloud texture */
 	float hazeTau;         /* veil optical depth (straight down) */
 	float hazeColor[3];
 	float shellFraction;   /* haze shell / radius: the glow beyond the limb */
 	int stormCount;
 	GasGiantStorm storms[GASGIANT_MAX_STORMS];
+	/* Polar cyclones: a ring around each pole plus one on it. */
+	int polarCount;        /* in the ring (0 = only the pole's; -1 = none) */
+	float polarLat;        /* deg, the ring's latitude */
+	float polarSize;       /* rad */
+	float polarSpin;       /* swirl at the centre, rad */
+	float polarColor[3];   /* their cores (display) */
 
 	/* Built from the fields above; keep these last (the rebuild check
 	   hashes everything before profileTex). */
-	GLuint profileTex;
+	GLuint profileTex;     /* RGBA: band colour, turbulence weight */
 	unsigned int profileHash;
 } GasGiantStyle;
 
