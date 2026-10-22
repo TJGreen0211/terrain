@@ -1,0 +1,224 @@
+QUADTREE PLANET LOD
+===================
+Notes on the CPU-instanced quadtree LOD for the central planet, what was
+changed, and how it works. File focus: src/geometry/QuadTree.c.
+Last updated: 2026-10-16.
+
+
+1. WHAT IT IS
+-------------
+The planet is a "quadsphere": a sphere approximated by 6 flat square faces
+(one per cube axis: +X/-X, +Y/-Y, +Z/-Z). Each face is further subdivided by
+a CPU-side quadtree that adds MORE (smaller) quads only where the face is
+close to the camera. Result: near the camera the mesh is fine, and it gets
+coarser toward the far side — classic screen-space-adjacent LOD.
+
+All 6 faces are INDEPENDENT quadtrees (6 separate traverseQuad calls). They
+are not stitched into one shared-mesh sphere: each face owns its own node
+array and its own level-of-detail decisions.
+
+
+2. ARCHITECTURE
+---------------
+Main.c (init, ~575)
+  - One VAO per face:
+      sphereFrontXVAO = initSubQuadX(10, 0)   ... sphereBackZVAO = initSubQuadZ(10, 1)
+  - Each VAO already holds the FULL 10x10 quad grid for that face, baked onto
+    its tangent plane and pushed out to the sphere. E.g. initSubQuadX
+    (src/geometry/Geometry.c:159) builds a 10x10 grid on the x=1 plane
+    (y,z in [-1,1]); the vertex shader then normalizes each vertex onto the
+    unit sphere, so the grid becomes a pyramid cap around +X. "reverseOrder"
+    (the 2nd arg) flips winding for the back faces.
+
+Main.c (render loop, ~719-763)
+  mat4 matR = rotateY(theta/5.0) * rotateX(45.0);   // planet spin, theta++ each frame
+  model     = scale(30.0) * matR;                    // radius 30, plus spin
+  For each of the 6 faces:
+      order[] and negate are set per face (see Section 5)
+      traverseQuad(model, order, <faceVAO>, quadtreeVBO, sizeVBO, quadShader,
+                   lightPosXYZ, lightPos, textureColorBuffer, dxWaveTex,
+                   depthMap, negate);
+  Note: NO translation in `model` — the sphere is centered at the origin.
+
+traverseQuad  (src/geometry/QuadTree.c:71)  — the actual LOD
+  Fills two static arrays for ONE face:
+    static mat4 pos[512];          // per-instance transform for the base grid
+    qTreeNode qq[512];             // node metadata (center used for LOD test)
+  Then calls drawTree once to issue an instanced draw for that face.
+
+drawTree  (src/geometry/QuadTree.c:5)
+  - Binds the face VAO (attributes 0-3: position/normal/uv/tangent come from
+    the baked 10x10 grid).
+  - Binds `VBO` (quadtreeVBO) for attributes 4-7 = the 4x4 per-INSTANCE
+    matrix (vInstanceMatrix in quad.vert), divisor 1, and uploads the built
+    `pos[]` array with glBufferData(..., sizeof(mat4)*512, &pos, ...).
+  - glDrawArraysInstanced(GL_TRIANGLES, 0, 10*10*6, globalCount+1);
+      10*10*6 = the base grid's triangle count; (globalCount+1) = the number
+      of active quads. EVERY instance redraws the full 10x10 base grid,
+      translated/scaled by its pos[i]. A subdivided node scales its 4 children
+      (smaller) instead of keeping the 1 big one, so denser regions accumulate
+      more, smaller grid copies = finer effective resolution.
+  - Culling: glCullFace(GL_FRONT) at start (line 6-8), reset to GL_BACK at
+    end (62-63). (This was flipped to glDisable(GL_CULL_FACE) at some point
+    during debugging and has been restored to the committed GL_FRONT.)
+
+
+3. HOW THE LOD TEST WORKS (traverseQuad internals)
+---------------------------------------------------
+Key locals (QuadTree.c):
+  v3CamToWorld = getCameraPosition(identityMatrix())   — the eye position IN
+                 WORLD SPACE. This is the point detail grows toward.
+  splitLOD     = 16.0
+  terrainMaxLOD= log2(16) = 4 iterations
+  level        = 128.0, then /2 each iteration  ->  128, 64, 32, 16
+
+Loop:
+  for i in 0..terrainMaxLOD:
+     for k in the current "frontier" of nodes [lastNodeCount .. numNodes):
+        if pointDistance(qq[k].center, v3CamToWorld) < level:
+            pos[k] = scale(0.0);        // hide the parent quad (replaced by kids)
+            for j in 0..3:              // create 4 children
+                compute instance matrix pos[globalCount]
+                compute node center   qq[globalCount].center   (see Section 4)
+        (else: keep this node as a leaf — it is drawn at its current size)
+     level /= 2.0
+
+Distance thresholds vs. geometry: the sphere is radius 30 and the eye is
+roughly 15..75 units from a surface point. So only the near cap ever drops
+below the smaller thresholds (32, then 16); everything far stays coarse. The
+deepest (finest) cells are exactly the ones closest to the eye.
+
+Buffers / cap: pos[512] and qq[512] are fixed. traverseQuad guards with
+`if(globalCount + 4 >= 512) break;` before creating children, so the statics
+cannot overflow.
+
+Root node: qq[0].center is the face center pushed onto the rendered sphere
+(model * normalize of the face-normal axis), so the first test is a true
+camera-to-surface distance, not a distance to the planet center.
+
+
+4. THE NODE CENTER AND THE INSTANCE MATRIX (THE FIX)
+----------------------------------------------------
+Two bugs made the LOD distance wrong before:
+
+(a) THE INSTANCE TRANSLATION WAS DEAD. quad.vert multiplies row-vector style
+    (fPosition * vInstanceMatrix) and then takes .xyz. translate() stores the
+    offset in COLUMN 3, which lands in w and is dropped by .xyz — so every
+    instance drew the full face and subdivision was invisible. Fix:
+    instanceMatrix() builds the matrix directly for the row-vector convention
+    (scale on the diagonal, translation in ROW 3).
+
+(b) THE NODE CENTER USED THE WRONG AXES. The old center was
+    model * normalize(values[order]) with values[2]=0, i.e. the 2D face
+    coords placed in the wrong plane with no face-normal component, so the
+    LOD test measured points on a great circle instead of the actual face.
+    Fix: sphereCenter(model, plocal) where plocal puts the 2D center on the
+    two in-plane axes and negate*plane on the face-normal axis (Section 5).
+    Rows are written out explicitly (NO multiplymat4vec4 — see the old bug
+    note below).
+
+The center is now the same point the vertex shader renders for the patch
+center (instance-transform, normalize to unit sphere, then model), so
+"distance to camera" is a true world-space distance and the fine cap tracks
+the camera while the planet spins.
+
+KNOWN LATENT DEFECT (unchanged): multiplymat4vec4 (LinearAlg.c) has an
+in-place clobbering bug; do not use it for new code.
+
+
+5. PER-FACE ORIENTATION (order / negate)
+----------------------------------------
+The baked grids are NOT on the axis their name suggests:
+  initSubQuadX -> plane z=-1 (x,y vary)
+  initSubQuadY -> plane y=+1 (x,z vary)
+  initSubQuadZ -> plane x=+1 (y,z vary)
+order[] says where the 2D coords land: axis i carries values[order[i]].
+faceAxes() derives n (axis of values[2], the face normal), a (axis of
+values[0]) and b (axis of values[1]) from that, plus the plane sign:
+  Face      VAO            order       negate  n  a  b  plane
+  FrontX    sphereFrontXVAO {0,1,2}     +1     2  0  1  -1
+  BackX     sphereBackXVAO  {0,1,2}     -1     2  0  1  -1
+  FrontY    sphereFrontYVAO {0,2,1}     +1     1  0  2  +1
+  BackY     sphereBackYVAO  {0,2,1}     -1     1  0  2  +1
+  FrontZ    sphereFrontZVAO {2,0,1}     +1     0  1  2  +1
+  BackZ     sphereBackZVAO  {2,0,1}     -1     0  1  2  +1
+`negate` flips the face to the opposite side (scale negate on axis n). The
+instance matrix scales a/b by the node half-width and translates by the node
+2D center on a/b; the node center uses the same axes with negate*plane on n.
+
+
+6. MATHEMATICS / FRAMES (for this codebase)
+-------------------------------------------
+  * `mat4` is stored column-major in memory and multiplied by
+    multiplymat4 (LinearAlg.c:388); translate() puts the offset in the 4th
+    COLUMN (LinearAlg.c:345) — the column-vector (OpenGL) convention.
+  * quad.vert however multiplies row-vector style (fPosition * model * view *
+    projection). For the model/view matrices this works out (they are built
+    so the effective transform is correct), but a translate() used as an
+    INSTANCE matrix puts the offset in w, which the shader's .xyz drops.
+    That is why instance matrices are built directly in ROW-3 form by
+    instanceMatrix() in QuadTree.c — do not use translate() there.
+  * getCameraPosition (arcballCamera.c) returns the eye in world space; that
+    value is what the LOD and the shader's `cameraPos` both use, keeping LOD
+    and lighting in one frame.
+  * The quadtree planet model matrix is scale(30)*matR with NO translation —
+    the sphere is centered at the origin, so world-space node centers and the
+    world-space eye are directly comparable.
+
+
+7. BUILD & VERIFY
+-----------------
+  Build:
+    <vcvars64.bat> then nmake (x64)  -> src/cube.exe
+    (project already builds via the temp helper at
+     C:\Users\tjgre\AppData\Local\Temp\kilo\build_terrain.bat)
+  Run:
+    src\cube.exe
+    S / BACKWARD  fly the camera out (default eye starts inside the r-30 sphere)
+    T             toggle wireframe on/off   (added feature: Input.c/getWireframeState)
+  Expected with the fix:
+    - The finest tessellation forms ONE contiguous cap centered on the point
+      closest to the camera, fading smoothly outward; no disconnected face
+      islands.
+    - As the planet spins (theta), the cap stays fixed relative to the camera
+      while the surface rolls under it.
+  Ground-truth check done during the fix (temporary fprintf dump, since
+  removed): every node center had magnitude 30; the nearest node sat at the
+  true nearest surface point (e.g. node ctr=(-0.05,0,-30), dist 15.0 for eye
+  (0,-1,-45)); deep level cells clustered tightly there.
+
+
+8. KEY FILE / LINE MAP
+----------------------
+  src/geometry/QuadTree.c
+    :3    static mat4 pos[512];            (buffer for instance matrices)
+    :5    drawTree(...);                    (instanced draw, cull setup)
+    :37   glBufferData(...*512...)          (must match pos[512])
+    :67   pointDistance(u,v)
+    :75   instanceMatrix(t,s)              (row-vector instance matrix)
+    :88   faceAxes(order,&n,&a,&b,&plane)  (per-face axis mapping)
+    :98   setAxis(v,axis,value)
+    :107  sphereCenter(model,plocal)       (node LOD point, explicit rows)
+    :116  traverseQuad(...)
+    :142  v3CamToWorld = world-space eye
+    :144  splitLOD=16, terrainMaxLOD=4, level=128
+    :149  LOD refinement loop
+    :154  subdivision test: dist < level
+    :155  512-node overflow guard
+    :173  child instance matrix = instanceMatrix(t,s)
+    :180  child center = sphereCenter(model, plocal)
+  src/Main.c
+    :539-544  6 face VAOs (initSubQuad X/Y/Z)
+    :718    model = scale(30)*matR
+    :719-736 per-face order[]/negate + traverseQuad calls
+  src/geometry/Geometry.c
+    :159    initSubQuadX (plane z=-1; Y at :229 plane y=+1, Z at :295 plane x=+1)
+  src/shaders/quad.vert
+    :28-29   transformed = fPosition * vInstanceMatrix; fPosition = normalize(...);
+    :44     fragPos = fPosition * model            (surface world position)
+    :51     fLightSpace = fPosition*model          (no double instance)
+  src/math/LinearAlg.c
+    :388    multiplymat4
+    :402    multiplymat4vec4  (KNOWN BUG: in-place clobber — do not rely on it)
+  src/camera/arcballCamera.c
+    getCameraPosition (eye in world space)

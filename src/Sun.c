@@ -1,6 +1,7 @@
 #include "Common.h"
 #include "CommonGL.h"
 #include "Sun.h"
+#include "engine/core/paths.h"
 
 static GLuint sunTexture;
 static GLuint sunShader;
@@ -8,9 +9,10 @@ static GLuint sunQuadVAO, sunQuadVBO;
 
 void initSun(void)
 {
-	sunTexture = loadTexture("../assets/textures/planets/sun2.jpg", 0);
+	char path[260];
+	sunTexture = loadTexture(Paths_Asset(path, sizeof path, "textures/planets/sun2.jpg"), 0);
 
-	createShader(&sunShader, "shaders/sun.vert", "shaders/sun.frag");
+	createShader(&sunShader, "sun.vert", "sun.frag");
 
 	// Fullscreen-quad corners in NDC, in perimeter order (BL, BR, TR, TL).
 	GLfloat quadVertices[] = {

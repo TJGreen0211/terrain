@@ -8,7 +8,7 @@
 #include "LinearAlg.h"
 #include <windows.h>
 #include <glad/glad.h>
-#include <Camera.h>
+#include "Window.h"
 
 #define BUFFER_OFFSET(offset) ((char*)NULL+(offset))
 

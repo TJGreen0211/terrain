@@ -1,0 +1,5 @@
+Bake skybox
+# ./build/cube.exe --bake-sky <name> [--sky-size <n>] [--sky-params <set>] [--sky-axes]
+./build/cube.exe --bake-sky eve2 --sky-size 1024 --sky-params eve1 --sky-seed 7
+
+To see a baked sky, launch the app with cube.exe --sky eve2, or set NEBULA_SKY_NAME in WorldConfig.h to make it the default.

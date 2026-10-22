@@ -20,6 +20,7 @@
 #include "WorldConfig.h"
 #include "QuadTree.h"
 #include "Profiler.h"
+#include "engine/core/paths.h"
 #include <stb_image_write.h>
 
 void testSetSurfaceRadius(float r);
@@ -39,7 +40,7 @@ static long totalFrames;          /* 0 until resolved (scene then CLI wins) */
 static long cliFrames;
 static char sceneName[128] = "bench";
 static char outPath[512];
-static char shotDir[512] = "../bench/cand";
+static char shotDir[512];         /* --shots-dir, else <bench root>/cand */
 
 static int viewSurface;           /* 0 orbit, 1 surface preset */
 static int pivotSubsolar;
@@ -241,18 +242,18 @@ void Bench_ParseArgs(int argc, char *argv[])
 	if (loadScene(scene)) {
 		strncpy(path, scene, sizeof path - 1);
 	} else {
-		sprintf(path, "../bench/scenes/%s.bench", scene);
+		Paths_Bench(path, sizeof path, "scenes/%s.bench", scene);
 		if (!loadScene(path)) {
-			sprintf(path, "../bench/scenes/%s", scene);
+			Paths_Bench(path, sizeof path, "scenes/%s", scene);
 			if (!loadScene(path)) {
-				fprintf(stderr, "[bench] cannot find scene '%s' (tried as a path and in ../bench/scenes)\n", scene);
+				fprintf(stderr, "[bench] cannot find scene '%s' (tried as a path and in %sscenes)\n", scene, Paths_BenchRoot());
 				exit(2);
 			}
 		}
 	}
 	sceneNameFromPath(path);
 	if (outPath[0] == '\0') {
-		sprintf(outPath, "../bench/out/%s.json", sceneName);
+		Paths_Bench(outPath, sizeof outPath, "out/%s.json", sceneName);
 	}
 	fprintf(stderr, "[bench] scene %s: %ld frames, %s view, %s pivot\n",
 	        sceneName, totalFrames, viewSurface ? "surface" : "orbit",
@@ -338,6 +339,8 @@ void Bench_MaybeCapture(void)
 	glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
 	stbi_flip_vertically_on_write(1);
 	char path[640];
+	if (!shotDir[0])
+		Paths_Bench(shotDir, sizeof shotDir, "cand");
 	sprintf(path, "%s/%s_f%ld.png", shotDir, sceneName, frame);
 	if (stbi_write_png(path, w, h, 4, px, w * 4))
 		fprintf(stderr, "[bench] shot %s\n", path);

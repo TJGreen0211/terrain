@@ -405,9 +405,9 @@ static double ddot(dvec3 a, dvec3 b)
 
 void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[3])
 {
-	createShader(&g_ring.sheetShader, "shaders/ring.vert", "shaders/ring.frag");
-	createShader(&g_ring.rockShader, "shaders/rock.vert", "shaders/rock.frag");
-	createShader(&g_ring.dustShader, "shaders/ringdust.vert", "shaders/ringdust.frag");
+	createShader(&g_ring.sheetShader, "ring.vert", "ring.frag");
+	createShader(&g_ring.rockShader, "rock.vert", "rock.frag");
+	createShader(&g_ring.dustShader, "ringdust.vert", "ringdust.frag");
 	/* The sheet and dust are generated from gl_VertexID. */
 	glGenVertexArrays(1, &g_ring.emptyVAO);
 	for (int i = 0; i < 3; i++) {

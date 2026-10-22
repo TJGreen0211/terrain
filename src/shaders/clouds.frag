@@ -1,7 +1,7 @@
 #version 410
 
 // The cloud layer as one slab at its middle altitude (Clouds.c; step 1 of
-// notes/volumetric-clouds.md), over the full-detail planet.
+// docs/volumetric-clouds.md), over the full-detail planet.
 //
 // - Ray-traced against the sphere at the layer's middle, in planet radii
 //   with the stable form the stand-ins use (miss distance |o x d|, hit point

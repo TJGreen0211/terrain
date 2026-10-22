@@ -671,7 +671,7 @@ static void ensureBakeResources(void)
 {
 	if (bakeProgram) return;
 
-	createShader(&bakeProgram, "shaders/heightbake.vert", "shaders/heightbake.frag");
+	createShader(&bakeProgram, "heightbake.vert", "heightbake.frag");
 
 	static const float quadCoords[8] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
 	glGenVertexArrays(1, &bakeQuadVAO);

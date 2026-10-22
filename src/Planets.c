@@ -19,7 +19,7 @@ static GLuint quadVAO, quadVBO;
 
 void Planets_Init(void)
 {
-	createShader(&shader, "shaders/planet_impostor.vert", "shaders/planet_impostor.frag");
+	createShader(&shader, "planet_impostor.vert", "planet_impostor.frag");
 
 	/* Unit quad corners, perimeter order for a fan. */
 	GLfloat corners[] = { -1.0f, -1.0f,  1.0f, -1.0f,  1.0f, 1.0f,  -1.0f, 1.0f };

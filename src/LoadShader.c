@@ -1,4 +1,5 @@
 #include "LoadShader.h"
+#include "engine/core/paths.h"
 
 char *readShader(char *filename)
 {
@@ -116,10 +117,12 @@ GLuint LoadShader(char *shaderPath, int shaderType)
 	return LoadShaderDefines(shaderPath, shaderType, NULL);
 }
 
-GLuint LoadShaderDefines(char *shaderPath, int shaderType, const char *defines)
+GLuint LoadShaderDefines(char *shaderName, int shaderType, const char *defines)
 {
 	GLuint shader = glCreateShader(shaderType);
 
+	char shaderPath[520];
+	Paths_Shader(shaderPath, sizeof shaderPath, "%s", shaderName);
 	char *shaderStr = insertDefines(expandIncludes(readShader(shaderPath), shaderPath, 0), defines);
 
 	printf("Compiling %d, %s shader\n", shaderType, shaderPath);

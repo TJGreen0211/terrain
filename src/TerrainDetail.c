@@ -80,7 +80,7 @@ void TerrainDetail_Init(void)
 	if (groundTex)
 		return;
 	GLuint prog, vao, fbo;
-	createShader(&prog, "shaders/groundtex.vert", "shaders/groundtex.frag");
+	createShader(&prog, "groundtex.vert", "groundtex.frag");
 	glGenTextures(1, &groundTex);
 	glBindTexture(GL_TEXTURE_2D_ARRAY, groundTex);
 	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA16F, GROUND_TEX_SIZE, GROUND_TEX_SIZE, GROUND_LAYERS,

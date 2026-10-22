@@ -35,7 +35,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $bench = $PSScriptRoot
 $root = Split-Path -Parent $bench
-$exe = Join-Path $root 'src\cube.exe'
+$exe = Join-Path $root 'build\cube.exe'
 $out = Join-Path $bench 'out'
 $manifestPath = Join-Path $bench 'protected.sha256'
 $baselinePath = Join-Path $bench 'baseline.json'

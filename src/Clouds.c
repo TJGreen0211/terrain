@@ -107,7 +107,7 @@ static unsigned long long mix64(unsigned long long z)
 
 void Clouds_Init(void)
 {
-	createShader(&mapProgram, "shaders/cloudmap.vert", "shaders/cloudmap.frag");
+	createShader(&mapProgram, "cloudmap.vert", "cloudmap.frag");
 
 	mapW = CLOUD_MAP_WIDTH;
 	mapH = CLOUD_MAP_WIDTH / 2;
@@ -429,7 +429,7 @@ static GLuint slabProgram(int octaves)
 	if (!slabPrograms[octaves]) {
 		char defines[64];
 		snprintf(defines, sizeof defines, "#define SLAB_OCTAVES %d\n", octaves);
-		createShaderDefines(&slabPrograms[octaves], "shaders/clouds.vert", "shaders/clouds.frag", defines);
+		createShaderDefines(&slabPrograms[octaves], "clouds.vert", "clouds.frag", defines);
 		Rings_AttachReceiver(slabPrograms[octaves]);
 	}
 	return slabPrograms[octaves];

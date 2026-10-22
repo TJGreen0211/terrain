@@ -4,7 +4,7 @@
 #include <glad/glad.h>
 #include "LinearAlg.h"
 
-/* Cloud layers (notes/volumetric-clouds.md). Every planet with air can have
+/* Cloud layers (docs/volumetric-clouds.md). Every planet with air can have
    one; its settings live in PlanetInfo.clouds, and the active planet's in
    g_clouds (saved and loaded with the other planet globals, edited live from
    the debug panel). Step 1 draws the layer as a slab at its middle altitude:

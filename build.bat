@@ -36,5 +36,5 @@ if not "%RC%"=="0" (
   echo Build failed with exit code %RC%. 1>&2
   exit /b %RC%
 )
-echo Build succeeded: %~dp0src\cube.exe
+echo Build succeeded: %~dp0build\cube.exe
 exit /b 0

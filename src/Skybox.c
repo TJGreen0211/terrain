@@ -2,6 +2,7 @@
 #include "CommonGL.h"
 #include "Skybox.h"
 #include "Nebula.h"
+#include "engine/core/paths.h"
 #include <stdio.h>
 
 static GLuint skyboxShader;
@@ -10,7 +11,6 @@ static GLuint skyboxVAO, skyboxVBO;
 // Six faces in the order loadCubemap expects: faces[i] goes to
 // CUBE_MAP_POSITIVE_X+i, so right, left, top, bottom, back, front are
 // +X, -X, +Y, -Y, +Z, -Z (the nebula bake writes them in this order).
-// The app chdir's to src, so assets live in ../assets.
 static const char *faceNames[6] = { "right", "left", "top", "bottom", "back", "front" };
 
 // The nebula sky set g_nebulaSkyName (Nebula.c), with its settings, when
@@ -22,7 +22,7 @@ static GLuint loadNebulaSky(void)
 	char paths[6][256];
 	char *faces[6];
 	for (int i = 0; i < 6; i++) {
-		snprintf(paths[i], sizeof paths[i], "../assets/textures/nebula_%s/%s.png", g_nebulaSkyName, faceNames[i]);
+		Paths_Asset(paths[i], sizeof paths[i], "textures/nebula_%s/%s.png", g_nebulaSkyName, faceNames[i]);
 		FILE *f = fopen(paths[i], "rb");
 		if (!f) {
 			fprintf(stderr, "[skybox] no nebula sky '%s' (%s); using skybox3\n", g_nebulaSkyName, paths[i]);
@@ -44,14 +44,10 @@ GLuint loadSkyboxCube(void)
 	GLuint nebula = loadNebulaSky();
 	if (nebula)
 		return nebula;
-	char *cubemapArray[] = {
-		"../assets/textures/skybox3/right.png",
-		"../assets/textures/skybox3/left.png",
-		"../assets/textures/skybox3/top.png",
-		"../assets/textures/skybox3/bottom.png",
-		"../assets/textures/skybox3/back.png",
-		"../assets/textures/skybox3/front.png"
-	};
+	char paths[6][256];
+	char *cubemapArray[6];
+	for (int i = 0; i < 6; i++)
+		cubemapArray[i] = Paths_Asset(paths[i], sizeof paths[i], "textures/skybox3/%s.png", faceNames[i]);
 	return loadCubemap(cubemapArray);
 }
 
@@ -108,7 +104,7 @@ void initSkybox(void)
 		-1.0f, -1.0f, -1.0f
 	};
 
-	createShader(&skyboxShader, "shaders/skybox.vert", "shaders/skybox.frag");
+	createShader(&skyboxShader, "skybox.vert", "skybox.frag");
 
 	glGenVertexArrays(1, &skyboxVAO);
 	glBindVertexArray(skyboxVAO);

@@ -2,8 +2,8 @@
 
 GLuint initFramebufferShader() {
 	GLuint shader;
-	GLuint vertShader = LoadShader("shaders/framebuffer.vert", GL_VERTEX_SHADER);
-	GLuint fragShader = LoadShader("shaders/framebuffer.frag", GL_FRAGMENT_SHADER);
+	GLuint vertShader = LoadShader("framebuffer.vert", GL_VERTEX_SHADER);
+	GLuint fragShader = LoadShader("framebuffer.frag", GL_FRAGMENT_SHADER);
 	shader = glCreateProgram();
 	glAttachShader(shader, vertShader);
 	glAttachShader(shader, fragShader);

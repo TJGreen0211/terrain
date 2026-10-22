@@ -31,7 +31,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $bench = $PSScriptRoot
 $root = Split-Path -Parent $bench
-$exe = Join-Path $root 'src\cube.exe'
+$exe = Join-Path $root 'build\cube.exe'
 $refDir = Join-Path $bench 'reference'
 $candDir = Join-Path $bench 'cand'
 

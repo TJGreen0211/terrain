@@ -1,6 +1,8 @@
 CC = cl.exe
 CFLAGS = /nologo /W3 /O2 /openmp /D_USE_MATH_DEFINES
-PROG = cube.exe
+OUTDIR = ..\build
+OBJDIR = $(OUTDIR)\obj
+PROG = $(OUTDIR)\cube.exe
 
 SRCS = Main.c \
 	Sun.c \
@@ -35,7 +37,8 @@ SRCS = Main.c \
 	common/CommonGL.c \
 	common/Textures.c \
 	Buffers.c \
-	camera/Input.c
+	camera/Input.c \
+	engine/core/paths.c
 
 INCLUDE_PATHS = -I "..\dependencies\include" -I "." -I math -I geometry -I common -I camera
 LIBS = ..\dependencies\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib
@@ -43,7 +46,9 @@ LIBS = ..\dependencies\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.l
 all: $(PROG)
 
 $(PROG): $(SRCS)
-	$(CC) /MD $(CFLAGS) $(INCLUDE_PATHS) $(SRCS) /Fe$(PROG) /link $(LIBS)
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) /MD $(CFLAGS) $(INCLUDE_PATHS) $(SRCS) /Fo$(OBJDIR)\ /Fe$(PROG) /link $(LIBS)
 
 clean:
-	del /q *.obj $(PROG) Main.exe 2>nul
+	if exist $(OBJDIR) rmdir /s /q $(OBJDIR)
+	if exist $(PROG) del /q $(PROG)

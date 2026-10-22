@@ -218,7 +218,7 @@
 #define ATMOSPHERE_SHELL_HEIGHT_M   (0.0424 * EARTH_RADIUS_M)          /* 270 km */
 #define ATMOSPHERE_SCALE_HEIGHT_M   (0.25 * ATMOSPHERE_SHELL_HEIGHT_M) /* 67.5 km */
 
-/* ---- Clouds (Clouds.c, clouds.frag, notes/volumetric-clouds.md) ---------
+/* ---- Clouds (Clouds.c, clouds.frag, docs/volumetric-clouds.md) ---------
    Earth's cloud layer; every other planet's is generated (SolarSystem.c)
    from the ranges further down. The debug panel's Clouds section edits the
    active planet's live. Step 1 shades the layer as one slab at its middle
@@ -233,7 +233,7 @@
    landRelief = 0.025 radii (~160 km, TerrainGen.c), so a real 5 km layer
    would sit under every continent. Earth's layer floats at half the land
    relief, so high ground and ranges stand above it. */
-/* Clouds start switched off (work in progress, notes/volumetric-clouds.md);
+/* Clouds start switched off (work in progress, docs/volumetric-clouds.md);
    the debug panel's Clouds section turns them on. */
 #define CLOUDS_ENABLED_DEFAULT      0
 #define CLOUD_EARTH_ALTITUDE_M      (0.0125 * EARTH_RADIUS_M)   /* 80 km */

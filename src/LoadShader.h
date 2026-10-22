@@ -12,8 +12,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-GLuint LoadShader(char *shaderPath, int shaderType);
+/* shaderName is relative to the shader root (engine/core/paths.h). */
+GLuint LoadShader(char *shaderName, int shaderType);
 /* Same, with `defines` (e.g. "#define FOO\n") inserted after #version. */
-GLuint LoadShaderDefines(char *shaderPath, int shaderType, const char *defines);
+GLuint LoadShaderDefines(char *shaderName, int shaderType, const char *defines);
 
 #endif

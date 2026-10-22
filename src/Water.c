@@ -254,9 +254,9 @@ static GLuint createLayerFBO(const GLuint *tex, int count, int layer) {
 
 static void initWavesGPU(waves *water) {
 	int dim = water->dimension;
-	createShader(&s_specProg, "shaders/wavefft.vert", "shaders/wavespectrum.frag");
-	createShader(&s_fftProg, "shaders/wavefft.vert", "shaders/wavefft.frag");
-	createShader(&s_packProg, "shaders/wavefft.vert", "shaders/wavepack.frag");
+	createShader(&s_specProg, "wavefft.vert", "wavespectrum.frag");
+	createShader(&s_fftProg, "wavefft.vert", "wavefft.frag");
+	createShader(&s_packProg, "wavefft.vert", "wavepack.frag");
 	glGenVertexArrays(1, &s_emptyVAO);
 
 	/* h0(k) and conj(h0(-k)) per cascade, fixed for the run (initH0). */

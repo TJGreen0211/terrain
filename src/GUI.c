@@ -14,8 +14,8 @@ static int uiReady = 0;
 
 void attachGUIShaders()
 {
-	createShader(&UIShader, "shaders/UI.vert",
-		"shaders/UI.frag");
+	createShader(&UIShader, "UI.vert",
+		"UI.frag");
 	uiLRect = glGetUniformLocation(UIShader, "uRect");
 	uiLColor = glGetUniformLocation(UIShader, "uColor");
 	uiLHasTex = glGetUniformLocation(UIShader, "uHasTex");

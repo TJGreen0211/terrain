@@ -3,6 +3,7 @@
 #include "Nebula.h"
 #include "Bodies.h"
 #include "WorldConfig.h"
+#include "engine/core/paths.h"
 #include <stb_image_write.h>
 #include <direct.h>
 #include <math.h>
@@ -459,11 +460,11 @@ static void buildGrid(void)
 
 void Nebula_Init(void)
 {
-	createShader(&skyProgram, "shaders/nebula.vert", "shaders/nebula_sky.frag");
-	createShader(&volProgram, "shaders/nebula.vert", "shaders/nebula_vol.frag");
-	createShader(&gridProgram, "shaders/nebula.vert", "shaders/nebula_grid.frag");
-	createShader(&noiseProgram, "shaders/nebula.vert", "shaders/nebula_noise.frag");
-	createShader(&postProgram, "shaders/nebula.vert", "shaders/nebula_post.frag");
+	createShader(&skyProgram, "nebula.vert", "nebula_sky.frag");
+	createShader(&volProgram, "nebula.vert", "nebula_vol.frag");
+	createShader(&gridProgram, "nebula.vert", "nebula_grid.frag");
+	createShader(&noiseProgram, "nebula.vert", "nebula_noise.frag");
+	createShader(&postProgram, "nebula.vert", "nebula_post.frag");
 	glGenVertexArrays(1, &emptyVAO);
 	glGenFramebuffers(1, &fbo);
 	buildNoise(g_nebula.seed);
@@ -659,7 +660,7 @@ static void bakeSky(GLuint cube, int size, int axisDebug, int pump)
 
 static void skyDir(char *out, size_t n, const char *name)
 {
-	snprintf(out, n, "../assets/textures/nebula_%s", name);
+	Paths_Asset(out, n, "textures/nebula_%s", name);
 }
 
 /* ---- Settings file -------------------------------------------------------- */
@@ -761,7 +762,8 @@ static int writeSky(GLuint cube, int size, const char *name)
 	static const char *faceNames[6] = { "right", "left", "top", "bottom", "back", "front" };
 	char dir[256], path[320];
 	skyDir(dir, sizeof dir, name);
-	_mkdir("../assets/textures");
+	char texDir[256];
+	_mkdir(Paths_Asset(texDir, sizeof texDir, "textures"));
 	_mkdir(dir);
 
 	float *px = malloc((size_t)size * size * 4 * sizeof(float));

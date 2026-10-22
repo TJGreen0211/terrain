@@ -19,8 +19,8 @@ void LoadingScreen_Init(GLFWwindow *window)
 {
 	loadWindow = window;
 
-	createShader(&loadingShader, "shaders/loading.vert",
-		"shaders/loading.frag");
+	createShader(&loadingShader, "loading.vert",
+		"loading.frag");
 
 	GLfloat quadVertices[] = {
 		-1.0f, -1.0f, 0.0f,
