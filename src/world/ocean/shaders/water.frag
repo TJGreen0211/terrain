@@ -20,7 +20,7 @@ uniform samplerCube skybox;
 #define SHADOW_TAPS 4
 #include "world/shadows/shadow.glsl"
 uniform float waveNormalStrength;
-// Each cascade's patches per body radius (Main.c: true size), on the cube
+// Each cascade's patches per body radius (TerrainDraw.c: true size), on the cube
 // faces of wavecube.glsl.
 #include "wavecube.glsl"
 uniform float waveTilings[WAVE_CASCADES];
@@ -91,7 +91,7 @@ float diffuse(vec3 n, vec3 l, float p) {
 // ~1 cm to ~100 m, far below what the FFT patch resolves at planet scale,
 // so the share of them smaller than a pixel joins S: nearly all of it from
 // orbit, fading only once pixels shrink to metres.
-// Body radius in metres (setBodyUniforms; WorldConfig.h).
+// Body radius in metres (TerrainDraw_SetBodyUniforms; WorldConfig.h).
 uniform float planetRadiusM;
 const float WIND_WAVE_MIN_M = 0.01;
 const float WIND_WAVE_MAX_M = 100.0;
@@ -603,7 +603,7 @@ void main()
 	}
 
 	// Opacity: the seafloor shows through what the water column, the surface
-	// reflection and foam let pass. Premultiplied (Main.c blends ONE,
+	// reflection and foam let pass. Premultiplied (WaterDraw.c blends ONE,
 	// ONE_MINUS_SRC_ALPHA): where the column turns clear the surface's own
 	// reflection and glint are added over the floor instead of fading out
 	// with the water body, which left a dark ring around every shallow.

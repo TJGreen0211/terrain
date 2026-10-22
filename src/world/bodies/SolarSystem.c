@@ -1,6 +1,7 @@
 #include "world/bodies/SolarSystem.h"
 #include "world/rings/Rings.h"
 #include "world/bodies/Planets.h"
+#include "world/terrain/TerrainDraw.h"
 #include "world/WorldConfig.h"
 #include <math.h>
 #include <string.h>

@@ -150,7 +150,7 @@ void main (void)
 	// the outer shell, so using its world position parallaxes the sun
 	// direction by up to the shell thickness against the surface shading that
 	// quad.frag computes at the surface. Same light position both passes
-	// use (rotateLight() in Main.c) so the terminators agree.
+	// use (the sun, FrameContext.lightPos) so the terminators agree.
 	vec3 l = (lightPos.w != 0.0)
 		? normalize(lightPos.xyz - shellCenter - (eye + dir * (e.x + e.y) * 0.5))
 		: normalize(lightPos.xyz);

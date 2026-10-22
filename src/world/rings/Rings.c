@@ -16,7 +16,7 @@
    shadow on the ring and of the ring's shadow on everything else. */
 #define RING_SUN_ANGLE ((float)SUN_ANGULAR_RADIUS_RAD)
 #define RING_PROFILE_SIZE 16384
-/* Texture unit for ringProfile in every program; setBodyUniforms uses 0-8. */
+/* Texture unit for ringProfile in every program; TerrainDraw_SetBodyUniforms uses 0-8. */
 #define RING_PROFILE_UNIT 9
 
 /* Close-up field. The sheet fades out over RING_FADE_* (distance from the

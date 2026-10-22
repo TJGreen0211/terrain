@@ -1,7 +1,7 @@
 #version 410
 #extension GL_ARB_conservative_depth : enable
 
-// Two programs are built from this source (Main.c), for a depth prepass:
+// Two programs are built from this source (TerrainDraw.c), for a depth prepass:
 // DEPTH_PREPASS writes only depth (the surface, with seafloor pushed behind
 // the water, seafloorDepth below) and returns before any shading; the
 // colour pass then runs the full shader with depth test >= and no depth
@@ -37,7 +37,7 @@ out vec4 FragColor;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
-// Sun shadows: cascades + the global map (shadow.glsl, Shadows.c, Main.c).
+// Sun shadows: cascades + the global map (shadow.glsl, Shadows.c).
 #define SHADOW_TAPS 9
 #include "world/shadows/shadow.glsl"
 // Camera-relative rendering: fragPos, lightPosition and bodyCenter (the
@@ -68,7 +68,7 @@ uniform float oceanRelief;
 // along the view axis.
 uniform float depthNear;
 // Clearance (body radii) the pushed seafloor keeps under sea level: the
-// water shell's largest wave excursion (Main.c waveExcursion), so troughs
+// water shell's largest wave excursion (WaterDraw.c Water_Excursion), so troughs
 // never dip below it. It used to be a fixed 0.0005 radii, 3.2 km at Earth's
 // size: coastal pixels pushed that far back fell behind skirt walls and
 // neighbouring land patches, which then showed through the clear shallows

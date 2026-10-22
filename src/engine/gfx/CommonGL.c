@@ -1,17 +1,5 @@
 #include "engine/gfx/CommonGL.h"
 
-GLuint initFramebufferShader() {
-	GLuint shader;
-	GLuint vertShader = LoadShader("engine/gfx/framebuffer.vert", GL_VERTEX_SHADER);
-	GLuint fragShader = LoadShader("engine/gfx/framebuffer.frag", GL_FRAGMENT_SHADER);
-	shader = glCreateProgram();
-	glAttachShader(shader, vertShader);
-	glAttachShader(shader, fragShader);
-	glLinkProgram(shader);
-
-	return shader;
-}
-
 GLuint initFramebuffer(GLuint *textureID, float sizeX, float sizeY) {
 	GLuint fbo;
 	glGenFramebuffers(1, &fbo);

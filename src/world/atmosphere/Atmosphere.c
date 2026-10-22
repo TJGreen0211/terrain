@@ -1,7 +1,9 @@
 #include "engine/gfx/Buffers.h"
+#include "engine/gfx/Common.h"
 #include "world/atmosphere/Atmosphere.h"
 #include "world/WorldConfig.h"
 
+static GLuint domeProgram;
 static GLuint atmosphereVAO, atmosphereVBO;
 static int atmosphereVertexCount;
 /* The dome mesh's scale over the shell radius: its flat triangles sit inside
@@ -81,8 +83,13 @@ static void setScatteringUniforms(GLuint shader, float fInner, const atmosphereP
 	glUniform1f(glGetUniformLocation(shader, "G_M"), atmo->G_M);
 }
 
-void initAtmosphere(GLuint shader, sphere mesh)
+GLuint Atmosphere_Program(void) { return domeProgram; }
+
+void initAtmosphere(sphere mesh)
 {
+	createShader(&domeProgram, "world/atmosphere/atmosphere.vert",
+		"world/atmosphere/atmosphere.frag");
+	GLuint shader = domeProgram;
 	atmosphereVertexCount = mesh.vertexNumber;
 
 	double minPlane = 1.0;
@@ -114,9 +121,10 @@ void initAtmosphere(GLuint shader, sphere mesh)
 	glBindVertexArray(0);
 }
 
-void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
+void drawAtmosphereDome(mat4 proj, mat4 view, mat4 modelmat,
                         float fInner, const atmosphereParams *atmo, vec4 lightPosition)
 {
+	GLuint shader = domeProgram;
 	float fOuter = fInner + atmo->shellHeight;
 	if (fOuter <= fInner) {
 		// no real shell; guard against a degenerate dome

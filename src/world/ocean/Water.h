@@ -28,7 +28,7 @@ typedef struct waves {
    60 fps = 4 updates/s), since frames in between are not interpolated. */
 #define WAVE_UPDATE_INTERVAL 1
 
-/* Live wave multipliers (Main.c), uploaded every frame: [0] oceanOffset
+/* Live wave multipliers (defaults set by Main.c), uploaded every frame: [0] oceanOffset
    (shell radius, keep 1.0 = sea level), [1] waveAmp, [2] normalStrength,
    [3] wave scale, [4] choppiness. Edited from the debug panel. */
 extern float g_waveParams[5];
@@ -37,6 +37,9 @@ extern float g_waveParams[5];
    1.0 (initializeWaves). water.vert rescales the geometric displacement
    from it to OCEAN_SWELL_RMS_M (WorldConfig.h). */
 #define OCEAN_FFT_RMS 0.0025f
+/* Shore calm, in rms of each cascade's drawn height: its waves fade out
+   from this water depth to the coastline (seastate.glsl). */
+#define WAVE_SHORE_RMS 4.0
 
 /* time: the scene clock in seconds (the app's App_Time). */
 void generateWaves(waves *water, double time);

@@ -29,7 +29,7 @@ uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 // Mip by vertex distance, as wide as the widest patch the walk can have
-// there (Main.c lodCellKFor): continuous across patch levels.
+// there (TerrainDraw.c lodCellKFor): continuous across patch levels.
 uniform float lodCellK;
 
 // The depth prepass and the colour pass are separate programs built from

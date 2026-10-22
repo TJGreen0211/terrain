@@ -274,6 +274,33 @@ A phase is green only when all four checks pass:
 - `drawWater` and the wave test grid go to `ocean/`.
 - The depth pass and light view matrix go to `shadows/`.
 - Introduce `FrameContext`.
+- Done 2026-10-22, pixel-identical at every step. `Main.c` went from 1,680
+  to 746 lines. Where things went:
+  - **Dead code deleted first:** the tess path, the tess planet shader, the
+    instancing path, the framebuffer shader, the `wtest` FFT test grid, the
+    ring mesh, `draw()`, the `drawWater` stub and the hot-reload helpers,
+    with their shaders.
+  - **`engine/gfx/Frame.h`:** `FrameContext` (cam, proj, view, viewProj,
+    near plane, viewport height, light, time), built once per frame.
+  - **`shadows/`:** owns the global map, its light view (`Shadows_FitGlobal`),
+    receiver binding (`Shadows_BindMaps`), the depth program and mesh casters.
+  - **`terrain/TerrainDraw.c`:** surface programs, relief/LOD helpers,
+    `TerrainDraw_SetBodyUniforms` (the recipe shared with the water),
+    planet casters, planet draw, `planetHeightTex`, `Earth_GroundRadius`.
+  - **`ocean/WaterDraw.c`:** water program, `Water_GeomScale` /
+    `Water_Excursion`, the water relief bounds and draw. `g_waveParams` is now
+    defined in `Water.c`.
+  - **`bodies/BodyDraw.c`:** the lit program, the sun marker and the Moon.
+  - **`atmosphere/`:** owns its dome program (`Atmosphere_Program`).
+  - Left in `Main.c` for phase 7: the scene target,
+    reversed-Z switching, the projection, the mesh helpers (`initSphere`,
+    `initQuadCube`, `initObjectBuffer`), the camera sliders, and the frame
+    loop's order and per-frame decisions (shadow box size, which bodies get
+    full detail).
+  - Found along the way: the sun marker draws into the window framebuffer
+    before the scene target is bound, and the final blit overwrites it, so
+    it never shows. It still sets uniforms on the shared lit program and
+    was kept as-is; it's a candidate for removal later.
 
 **Phase 7 — break up `main()`.**
 - Split it into `App_Create`, `App_Update`, `Render_Frame` and `App_Destroy`, with

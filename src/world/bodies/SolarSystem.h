@@ -48,8 +48,6 @@ typedef struct PlanetInfo {
 
 extern PlanetInfo g_planetInfo[BODY_COUNT];
 extern unsigned int g_systemSeed;
-/* Main.c: the active planet's height field. */
-extern GLuint planetHeightTex;
 
 /* After Earth's start-up bake: records Earth (the current globals) as its
    planet and generates the rest of the system from g_systemSeed. */

@@ -18,12 +18,12 @@
 #include "world/bodies/SolarSystem.h"
 #include "world/WorldConfig.h"
 #include "world/terrain/QuadTree.h"
+#include "world/terrain/TerrainDraw.h"
 #include "engine/debug/Profiler.h"
 #include "engine/core/paths.h"
 #include <stb_image_write.h>
 
 void testSetSurfaceRadius(float r);
-double Earth_GroundRadius(dvec3 worldDir, double capAngle);   /* Main.c */
 
 #define MAX_KEYS 128
 #define MAX_SHOTS 16

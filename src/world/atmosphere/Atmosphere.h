@@ -21,10 +21,11 @@ typedef struct atmosphereParams {
 extern atmosphereParams g_atmosphere;
 atmosphereParams atmosphereDefaults(void); // OpenGLSolar Earth values
 
-// Build the atmosphere dome's VAO/VBO (positions followed by normals) from the
-// app's tetrahedron `planet` mesh -- the same mesh the quadtree planet is drawn
-// from. The shader is the one created by initAtmosphereShader() in Main.c.
-void initAtmosphere(GLuint shader, sphere mesh);
+// Build the atmosphere dome's program (atmosphere.vert/frag) and its VAO/VBO
+// (positions followed by normals) from the app's tetrahedron `planet` mesh.
+void initAtmosphere(sphere mesh);
+// The dome program, for hookups that need it (ring-shadow receivers).
+GLuint Atmosphere_Program(void);
 
 // Additive sky-dome pass (Rayleigh limb tint + white Mie term), exactly the
 // OpenGLSolar atmosphere: scattering math in atmosphere.frag, camera position
@@ -41,7 +42,7 @@ void initAtmosphere(GLuint shader, sphere mesh);
 // the scene's depth (Atmosphere_SetSceneDepth), so terrain standing above sea
 // level is not fogged by air behind it. It is added times (1 - the target's
 // alpha): the cloud cover Clouds_Draw leaves there (0 without clouds).
-void drawAtmosphereDome(GLuint shader, mat4 proj, mat4 view, mat4 modelmat,
+void drawAtmosphereDome(mat4 proj, mat4 view, mat4 modelmat,
                         float fInner, const atmosphereParams *atmo, vec4 lightPosition);
 
 // The main pass's depth: a multisampled reversed-Z infinite depth texture

@@ -1,4 +1,5 @@
 #include "engine/platform/Window.h"
+#include "engine/gfx/Common.h"
 #include "world/shadows/Shadows.h"
 #include "world/WorldConfig.h"
 #include <math.h>
@@ -8,10 +9,46 @@ ShadowCascades g_cascades;
 int g_shadowDebug = 0;
 
 static GLuint cascadeTex, cascadeFBO;
+static GLuint globalTex, globalFBO;
+static mat4 globalLightSpace;
+static float globalTexel = 1.0f;
+static GLuint depthProgram;
+
+static void initGlobalMap(void)
+{
+	glGenFramebuffers(1, &globalFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, globalFBO);
+	/* 32-bit float depth, sampled through sampler2DShadow: LINEAR filtering
+	   with a compare mode makes every texture() a bilinear 2x2 PCF. Outside
+	   the map the border depth is the far plane, i.e. lit. */
+	glGenTextures(1, &globalTex);
+	glBindTexture(GL_TEXTURE_2D, globalTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	float border[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, globalTex, 0);
+	GLuint status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	  if(status != GL_FRAMEBUFFER_COMPLETE)
+		  printf("GL_FRAMEBUFFER_COMPLETE failed, CANNOT use FBO\n");
+
+	glDrawBuffer(GL_NONE);
+	glReadBuffer(GL_NONE);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
 
 void Shadows_InitGL(void)
 {
-	/* Same format and sampling as the global map (Main.c initDepthbuffer):
+	initGlobalMap();
+	createShader(&depthProgram, "world/shadows/depth.vert", "world/shadows/depth.frag");
+
+	/* Same format and sampling as the global map (initGlobalMap):
 	   float depth, LINEAR + compare mode = hardware 2x2 PCF per tap, border
 	   at the far plane (lit). */
 	glGenTextures(1, &cascadeTex);
@@ -48,8 +85,69 @@ static dvec3 cross3(dvec3 a, dvec3 b)
 }
 static dvec3 norm3(dvec3 a) { return mul3(a, 1.0 / sqrt(dot3(a, a))); }
 
+/* Light view for the global map, built for CAMERA-RELATIVE positions:
+   a right-handed look-at from eyeWorld toward targetWorld. The basis comes
+   from the world-space direction (camera independent) and the translation
+   is dotted against the camera-relative eye in double, so the matrix stays
+   exact however far the camera is from the world origin. */
+static mat4 lightView(dvec3 eyeWorld, dvec3 targetWorld, dvec3 cam)
+{
+	double f[3] = { targetWorld.x - eyeWorld.x, targetWorld.y - eyeWorld.y, targetWorld.z - eyeWorld.z };
+	double fl = sqrt(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]);
+	f[0] /= fl; f[1] /= fl; f[2] /= fl;
+	/* Any up vector not parallel to the light direction works. */
+	double up[3] = { 0.0, 1.0, 0.0 };
+	if (fabs(f[1]) > 0.99) { up[0] = 1.0; up[1] = 0.0; }
+	double r[3] = { f[1]*up[2] - f[2]*up[1], f[2]*up[0] - f[0]*up[2], f[0]*up[1] - f[1]*up[0] };
+	double rl = sqrt(r[0]*r[0] + r[1]*r[1] + r[2]*r[2]);
+	r[0] /= rl; r[1] /= rl; r[2] /= rl;
+	double u[3] = { r[1]*f[2] - r[2]*f[1], r[2]*f[0] - r[0]*f[2], r[0]*f[1] - r[1]*f[0] };
+	dvec3 e = dsubvec3(eyeWorld, cam);
+
+	mat4 v = scale(1.0);   /* identity */
+	for (int k = 0; k < 3; k++) {
+		v.m[0][k] = (float)r[k];
+		v.m[1][k] = (float)u[k];
+		v.m[2][k] = (float)-f[k];
+	}
+	v.m[0][3] = (float)-(r[0]*e.x + r[1]*e.y + r[2]*e.z);
+	v.m[1][3] = (float)-(u[0]*e.x + u[1]*e.y + u[2]*e.z);
+	v.m[2][3] = (float)(f[0]*e.x + f[1]*e.y + f[2]*e.z);
+	return v;
+}
+
+void Shadows_FitGlobal(dvec3 eyeWorld, dvec3 targetWorld, dvec3 cam, double boundR, double reach)
+{
+	mat4 lightProjection = ortho((float)-boundR, (float)boundR, (float)-boundR, (float)boundR, 0.0f, (float)(2.0 * reach));
+	globalLightSpace = multiplymat4(lightProjection, lightView(eyeWorld, targetWorld, cam));
+	globalTexel = (float)(2.0 * boundR / SHADOW_MAP_SIZE);
+}
+
+mat4 Shadows_GlobalLightSpace(void) { return globalLightSpace; }
+float Shadows_GlobalTexel(void) { return globalTexel; }
+GLuint Shadows_DepthProgram(void) { return depthProgram; }
+
+void Shadows_BeginGlobal(void)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, globalFBO);
+	glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+	glClear(GL_DEPTH_BUFFER_BIT);
+}
+
+void Shadows_DrawMeshCaster(GLuint vao, int vertices, mat4 model, mat4 lightSpace)
+{
+	glUseProgram(depthProgram);
+	glUniform1i(glGetUniformLocation(depthProgram, "instanced"), 0);
+	glUniform1f(glGetUniformLocation(depthProgram, "displace"), 0.0f);
+	glUniformMatrix4fv(glGetUniformLocation(depthProgram, "model"), 1, GL_FALSE, &model.m[0][0]);
+	glUniformMatrix4fv(glGetUniformLocation(depthProgram, "lightSpace"), 1, GL_FALSE, &lightSpace.m[0][0]);
+	glBindVertexArray(vao);
+	glDrawArrays(GL_TRIANGLES, 0, vertices);
+	glBindVertexArray(0);
+}
+
 /* Light basis for a sun direction: f = the way the light travels, r and u
-   across it (Main.c getLightViewMatrix's convention). */
+   across it (lightView's convention). */
 static void lightBasis(dvec3 sunDir, dvec3 *r, dvec3 *u, dvec3 *f)
 {
 	*f = mul3(sunDir, -1.0);
@@ -151,6 +249,19 @@ void Shadows_BeginCascade(int i)
 void Shadows_EndCascades(void)
 {
 	glDisable(GL_DEPTH_CLAMP);
+}
+
+void Shadows_BindMaps(GLuint shader, int unit)
+{
+	glActiveTexture(GL_TEXTURE0 + unit);
+	glBindTexture(GL_TEXTURE_2D, globalTex);
+	glUniform1i(glGetUniformLocation(shader, "depthMap"), unit);
+	glUniformMatrix4fv(glGetUniformLocation(shader, "lightSpace"), 1, GL_FALSE, &globalLightSpace.m[0][0]);
+	glUniform1f(glGetUniformLocation(shader, "shadowTexel"), globalTexel);
+	glActiveTexture(GL_TEXTURE0);
+	/* Cascades (shadow.glsl; programs without them ignore the uniforms).
+	   Unit 13: 0-12 are taken (atmosphere depth uses 12). */
+	Shadows_BindReceiver(shader, 13);
 }
 
 void Shadows_BindReceiver(GLuint shader, int unit)

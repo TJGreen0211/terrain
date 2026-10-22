@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <math.h>
 
+float g_waveParams[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // oceanOffset, waveAmp, normalStrength, wave scale, choppiness
+
 static void initWavesGPU(waves *water);
 static void generateWavesGPU(waves *water, double time);
 
