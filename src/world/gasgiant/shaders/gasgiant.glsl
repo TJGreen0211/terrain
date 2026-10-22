@@ -11,6 +11,11 @@
 // masses a sculpted look. Octaves finer than a pixel fade out, so close
 // views gain detail and far ones stay smooth.
 //
+// High clouds: a sparse layer of bright streaks and plumes in a few
+// latitude bands, above the deck. They sit above most of the haze, darken
+// less toward the limb, and cast soft shadows on the deck, offset away
+// from the Sun by their height.
+//
 // Light: Minnaert limb darkening, wrap light past the terminator tinted
 // warm, a forward-scattering haze veil, and a glow beyond the limb.
 // Colours are lit in linear (displayToLinear) and tone mapped back, so
@@ -21,6 +26,7 @@
 const float GAS_PI = 3.14159265;
 #define GAS_MAX_STORMS 10   // GASGIANT_MAX_STORMS
 #define GAS_MAX_POLAR  8    // GASGIANT_MAX_POLAR
+#define GAS_MAX_HIGH   4    // GASGIANT_MAX_HIGH
 
 uniform int gasOn;
 uniform sampler1D gasProfile;   // RGB band colour (display), A turbulence weight
@@ -41,6 +47,11 @@ uniform float gasStormSpin[GAS_MAX_STORMS];  // swirl at the centre, rad
 uniform int gasPolarCount;      // cyclones in each polar ring, plus one on the pole; -1 = none
 uniform vec4 gasPolar;          // ring colatitude, size (rad), spin (rad), phase
 uniform vec3 gasPolarColor;     // their cores (display)
+uniform float gasHigh;          // high cloud amount
+uniform float gasHighHeight;    // their altitude, radii
+uniform vec3 gasHighColor;      // display
+uniform int gasHighCount;
+uniform vec3 gasHighBand[GAS_MAX_HIGH];   // lat, half-width (rad), strength
 uniform float gasLimbK;
 uniform float gasWrap;
 uniform vec3 gasTerminator;
@@ -167,6 +178,38 @@ float gasPolarCyclones(inout float lat, inout float lon, out float collar)
 	return cover;
 }
 
+// High cloud cover at p (unit, body-fixed, storm-spun). st: the deck's
+// east-west stretch; fp: one pixel in deck noise units. Long streaks,
+// stretched further east-west than the deck, gathered into the latitude
+// bands; far away they fade to their mean cover instead of vanishing.
+float gasHighCover(vec3 p, float st, float fp)
+{
+	float lat = asin(clamp(p.z, -1.0, 1.0));
+	float band = 0.0;
+	for (int i = 0; i < GAS_MAX_HIGH; i++) {
+		if (i >= gasHighCount)
+			break;
+		float t = (lat - gasHighBand[i].x) / gasHighBand[i].y;
+		band = max(band, gasHighBand[i].z * exp(-t * t));
+	}
+	band = min(band * gasHigh, 1.0);
+	if (band < 0.01)
+		return 0.0;
+	const float freq = 2.5, stretch = 1.5;
+	vec3 qh = vec3(p.xy / (st * stretch), p.z) * gasFreq * freq + gasSeedOffset + vec3(17.0, 5.0, 23.0);
+	float fph = fp * freq;
+	// A gentle north-south wobble, so the streaks bend; no isotropic warp
+	// (that reads as marbling).
+	vec2 w = gasFbm4(qh * 0.5, 2, fph * 0.5).zw - 0.5;
+	qh.z += w.x * 0.8;
+	qh.xy += w.y * 1.5;
+	float n = gasFbm4(qh, 4, fph).x;
+	float lo = 0.62 - 0.1 * band;
+	float near = smoothstep(lo, lo + 0.15, n);
+	float far = smoothstep(0.08, 0.5, fph);
+	return band * mix(near, 0.15, far);
+}
+
 // Henyey-Greenstein, scaled to 1 at 90 degrees (cosT = dot(view ray, Sun)).
 float gasPhase(float cosT)
 {
@@ -258,13 +301,25 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 
 	col *= 1.0 + gasDetail * (h - 0.5) * 0.9;
 
+	// High clouds here, and the cover sunward by their height (the
+	// shadow they cast on the deck).
+	float hi = 0.0, hiShadow = 0.0;
+	if (gasHigh > 0.0 && gasHighCount > 0) {
+		hi = gasHighCover(ps, st, fp);
+		float mu0b = dot(sunB, nb);
+		if (sunTl > 1e-4 && mu0b > -0.1) {
+			float off = min(gasHighHeight * sunTl / max(mu0b, 0.15), 0.08);
+			hiShadow = gasHighCover(normalize(ps + sunT / sunTl * off), st, fp);
+		}
+	}
+
 	// Lighting, linear.
 	vec3 alb = displayToLinear(clamp(col, 0.0, 1.0));
 	vec3 haze = displayToLinear(gasHazeColor);
 	float wrapL = clamp((mu0 + gasWrap) / (1.0 + gasWrap), 0.0, 1.0);
 	float limb = pow(max(wrapL, 1e-4), gasLimbK - 1.0) * pow(max(mu, 0.02), gasLimbK - 1.0);
 	vec3 sun = gasSunlight(mu0, gasWrap) * limb * sunVis;
-	vec3 surface = alb * (sun * shade + gasAmbient * haze);
+	vec3 surface = alb * (sun * shade * (1.0 - 0.6 * hiShadow) + gasAmbient * haze);
 
 	// Haze veil: thicker toward the limb, lit with a wider wrap and a
 	// forward-scattering rim when the Sun is behind the planet.
@@ -273,6 +328,18 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 	float phase = mix(1.0, gasPhase(dot(d, sunV)), clamp(0.25 * gasRim, 0.0, 1.0));
 	vec3 inScatter = haze * (hazeSun * phase + gasAmbient);
 	vec3 lin = mix(surface, inScatter, veil);
+
+	// High clouds: above most of the haze, so a thinner veil and a
+	// milder limb darkening; dimmer where more cloud lies sunward (their
+	// shaded side).
+	if (hi > 0.0) {
+		float kH = mix(1.0, gasLimbK, 0.5);
+		float limbH = pow(max(wrapL, 1e-4), kH - 1.0) * pow(max(mu, 0.02), kH - 1.0);
+		float selfSh = 1.0 - 0.35 * clamp(hiShadow - hi, 0.0, 1.0);
+		vec3 hiAlb = displayToLinear(gasHighColor) * (0.82 + 0.36 * h);
+		vec3 hiLit = hiAlb * (gasSunlight(mu0, gasWrap) * limbH * sunVis * selfSh + gasAmbient * haze);
+		lin = mix(lin, mix(hiLit, inScatter, veil * 0.4), clamp(hi, 0.0, 1.0));
+	}
 	return toneMap(lin * gasExposure);
 }
 

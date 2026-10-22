@@ -11,11 +11,15 @@
    band layout is built on the CPU into a 1D latitude profile (RGB band
    colour, A turbulence weight), rebuilt whenever the style changes. The
    shader spins the profile lookup around the storms and polar cyclones,
-   warps it with noise into streamers with bright wisps, then lights it through the haze (limb darkening, wrap light at
-   the terminator, a forward-scattering veil and a glow beyond the limb). */
+   warps it with noise into streamers with bright wisps, then lights it
+   through the haze (limb darkening, wrap light at the terminator, a
+   forward-scattering veil and a glow beyond the limb). A sparse layer of
+   high clouds sits above, in a few latitude bands, and casts soft shadows
+   on the deck. */
 
 #define GASGIANT_MAX_STORMS 10
 #define GASGIANT_MAX_POLAR  8
+#define GASGIANT_MAX_HIGH   4
 
 typedef enum GasGiantFamily {
 	GASGIANT_JOVIAN,       /* cream zones, rust and umber belts, a red spot */
@@ -63,6 +67,12 @@ typedef struct GasGiantStyle {
 	float polarSize;       /* rad */
 	float polarSpin;       /* swirl at the centre, rad */
 	float polarColor[3];   /* their cores (display) */
+	/* High clouds: bright streaks and plumes above the deck. */
+	float high;            /* amount (0 = none) */
+	float highHeight;      /* altitude, radii: sets the shadow offset */
+	float highColor[3];    /* display */
+	int highCount;         /* latitude bands they gather in */
+	float highBand[GASGIANT_MAX_HIGH][3];   /* lat (deg), half-width (deg), strength */
 
 	/* Built from the fields above; keep these last (the rebuild check
 	   hashes everything before profileTex). */

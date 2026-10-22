@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -122,6 +123,13 @@ static void addStorm(GasGiantStyle *s, double latDeg, double lon, double size, d
 static double spinFor(Rng *r, double latDeg, double lo, double hi)
 {
 	return (latDeg >= 0.0 ? -1.0 : 1.0) * range(r, lo, hi);
+}
+
+static void highBand(GasGiantStyle *s, int i, double latDeg, double widthDeg, double strength)
+{
+	s->highBand[i][0] = (float)latDeg;
+	s->highBand[i][1] = (float)widthDeg;
+	s->highBand[i][2] = (float)strength;
 }
 
 static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int family)
@@ -324,6 +332,46 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 	for (int k = 0; k < 3; k++)
 		c[k] = s->pole[k] * 0.85f;
 	mix3(c, cool, 0.3, s->polarColor);
+
+	/* High clouds: their own stream. Jovian giants get rows of plumes
+	   either side of the equator; ice giants Neptune-like bright streaks
+	   at mid latitudes; Saturnian ones a faint band under their haze. */
+	Rng hr = rngFor(seed, 6);
+	switch (family) {
+	case GASGIANT_JOVIAN: {
+		double eq = range(&hr, 5.0, 9.0);
+		s->high = frange(&hr, 0.4, 0.6);
+		s->highHeight = frange(&hr, 0.003, 0.005);
+		s->highCount = 3;
+		highBand(s, 0, eq, 3.0, 1.0);
+		highBand(s, 1, -eq, 3.0, 0.8);
+		highBand(s, 2, sgn(&hr) * range(&hr, 28.0, 45.0), 5.0, 0.5);
+		break;
+	}
+	case GASGIANT_SATURNIAN:
+		s->high = frange(&hr, 0.2, 0.35);
+		s->highHeight = frange(&hr, 0.003, 0.005);
+		s->highCount = 1;
+		highBand(s, 0, sgn(&hr) * range(&hr, 20.0, 45.0), 6.0, 1.0);
+		break;
+	case GASGIANT_ICE:
+		s->high = frange(&hr, 0.6, 0.9);
+		s->highHeight = frange(&hr, 0.006, 0.01);
+		s->highCount = 2 + (int)(rnd(&hr) * 2.0);
+		highBand(s, 0, range(&hr, 20.0, 35.0), range(&hr, 5.0, 9.0), 1.0);
+		highBand(s, 1, -range(&hr, 20.0, 45.0), range(&hr, 5.0, 9.0), 0.9);
+		highBand(s, 2, -range(&hr, 55.0, 70.0), 4.0, 0.6);
+		break;
+	default:
+		s->high = frange(&hr, 0.3, 0.6);
+		s->highHeight = frange(&hr, 0.003, 0.008);
+		s->highCount = 1 + (int)(rnd(&hr) * 3.0);
+		for (int i = 0; i < GASGIANT_MAX_HIGH - 1; i++)
+			highBand(s, i, sgn(&hr) * range(&hr, 5.0, 50.0), range(&hr, 3.0, 8.0), range(&hr, 0.5, 1.0));
+		break;
+	}
+	/* Near white, a touch of the zone colour. */
+	mix3(s->zone, (float[3]){ 1.0f, 0.99f, 0.96f }, 0.8, s->highColor);
 }
 
 void GasGiant_Generate(GasGiantStyle *s, unsigned int seed, double aAU)
@@ -609,6 +657,18 @@ void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s)
 	glUniform4f(glGetUniformLocation(shader, "gasPolar"), (float)((90.0 - s->polarLat) * M_PI / 180.0),
 	            s->polarSize, s->polarSpin, (float)(s->seed % 360u) * (float)(M_PI / 180.0));
 	uniform3(shader, "gasPolarColor", s->polarColor);
+	float high[GASGIANT_MAX_HIGH][3];
+	int nh = s->highCount < 0 ? 0 : s->highCount > GASGIANT_MAX_HIGH ? GASGIANT_MAX_HIGH : s->highCount;
+	for (int i = 0; i < GASGIANT_MAX_HIGH; i++) {
+		high[i][0] = s->highBand[i][0] * (float)(M_PI / 180.0);
+		high[i][1] = fmaxf(s->highBand[i][1], 0.1f) * (float)(M_PI / 180.0);
+		high[i][2] = s->highBand[i][2];
+	}
+	glUniform1f(glGetUniformLocation(shader, "gasHigh"), s->high);
+	glUniform1f(glGetUniformLocation(shader, "gasHighHeight"), s->highHeight);
+	uniform3(shader, "gasHighColor", s->highColor);
+	glUniform1i(glGetUniformLocation(shader, "gasHighCount"), nh);
+	glUniform3fv(glGetUniformLocation(shader, "gasHighBand"), GASGIANT_MAX_HIGH, &high[0][0]);
 	glUniform1f(glGetUniformLocation(shader, "gasRelief"), s->relief);
 	glUniform1f(glGetUniformLocation(shader, "gasHazeTau"), s->hazeTau);
 	uniform3(shader, "gasHazeColor", s->hazeColor);
@@ -729,6 +789,21 @@ void GasGiant_DebugPanel(struct nk_context *ctx)
 		DebugGUI_Slider(ctx, "Size (rad)", &s->polarSize, 0.01f, 0.12f, 0.001f, "%.3f");
 		DebugGUI_Slider(ctx, "Spin", &s->polarSpin, -5.0f, 5.0f, 0.05f, "%.2f");
 		colorRow(ctx, "Core colour", s->polarColor);
+
+		DebugGUI_Group(ctx, "High clouds");
+		DebugGUI_Slider(ctx, "Amount", &s->high, 0.0f, 1.5f, 0.01f, "%.2f");
+		DebugGUI_Slider(ctx, "Height (radii)", &s->highHeight, 0.0f, 0.03f, 0.0005f, "%.4f");
+		colorRow(ctx, "Colour", s->highColor);
+		DebugGUI_SliderInt(ctx, "Bands", &s->highCount, 0, GASGIANT_MAX_HIGH);
+		for (int i = 0; i < s->highCount && i < GASGIANT_MAX_HIGH; i++) {
+			char name[32];
+			snprintf(name, sizeof name, "Band %d lat", i + 1);
+			DebugGUI_Slider(ctx, name, &s->highBand[i][0], -85.0f, 85.0f, 0.5f, "%.1f");
+			snprintf(name, sizeof name, "Band %d width", i + 1);
+			DebugGUI_Slider(ctx, name, &s->highBand[i][1], 0.5f, 30.0f, 0.1f, "%.1f");
+			snprintf(name, sizeof name, "Band %d strength", i + 1);
+			DebugGUI_Slider(ctx, name, &s->highBand[i][2], 0.0f, 1.5f, 0.01f, "%.2f");
+		}
 
 		DebugGUI_Group(ctx, "Haze");
 		DebugGUI_Slider(ctx, "Haze tau", &s->hazeTau, 0.0f, 1.5f, 0.01f, "%.2f");
