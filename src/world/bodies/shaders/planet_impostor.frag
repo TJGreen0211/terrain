@@ -2,7 +2,9 @@
 
 // A body drawn as a stand-in (planets.c): an exact ray-traced sphere with
 // an atmosphere glow and a ring sheet, or a soft dot when it is below
-// ~1.5 px.
+// ~1.5 px. The rings are the full passes' (rings.c): the body's baked
+// profile, shaded by the same slab model (ringshade.glsl), shadowing the
+// sphere through the profile's optical depth.
 //
 // Ray-sphere in body radii relative to the body: o = camera, d = unit ray.
 // At thousands of radii the textbook quadratic (b^2 - (|o|^2 - 1)) cancels
@@ -24,9 +26,11 @@ uniform float seed;
 uniform float atmoThick;    // shell height / radius; 0 = no atmosphere
 uniform vec3 atmoColor;     // Rayleigh tint (C_R): the sky's hue
 uniform int ringOn;
+uniform int ringSheet;      // 0: the full ring passes draw this body's sheet
 uniform vec2 ringRadii;     // inner, outer, body radii
 uniform vec3 ringNormalView;
-uniform vec3 ringColor;
+uniform sampler1D ringProfile;   // Rings_BindStandIn
+uniform float ringSunAngle;
 uniform float pixelR;       // one pixel at the body, in body radii
 uniform int dotMode;
 uniform float dotFlux;      // dot: total light (summed over pixels)
@@ -45,6 +49,9 @@ uniform float cloudEdge;
 uniform vec3 cloudColor;
 
 out vec4 FragColor;
+
+#include "engine/gfx/tonemap.glsl"
+#include "world/rings/ringshade.glsl"
 
 // Cloud cover over body-fixed direction nb seen at cosine mu: alpha and
 // reflectance, as clouds.frag shades a slab from above (map coverage with
@@ -96,29 +103,29 @@ float fbm(vec3 p)
 	return s;
 }
 
-// Ring optical density at radius r (body radii): seeded bands, soft edges.
-float ringDensity(float r)
+// Radius r (body radii) -> profile coordinate.
+float ringR01(float r)
 {
-	float t = (r - ringRadii.x) / (ringRadii.y - ringRadii.x);
-	if (t <= 0.0 || t >= 1.0)
-		return 0.0;
-	float bands = 0.55 + 0.25 * sin(t * 41.0 + seed) + 0.2 * sin(t * 97.0 + seed * 2.3);
-	float gap = smoothstep(0.02, 0.05, abs(t - fract(seed * 0.37) * 0.6 - 0.2));
-	float edge = smoothstep(0.0, 0.06, t) * smoothstep(1.0, 0.9, t);
-	return clamp(bands, 0.0, 1.0) * gap * edge;
+	return (r - ringRadii.x) / (ringRadii.y - ringRadii.x);
 }
 
-// Lit ring colour at plane point p (body radii, view axes) and its alpha.
-vec4 ringSample(vec3 p)
+// Sunlight through the ring onto sphere point n (as ringshadow.glsl): the
+// optical depth where the sun ray crosses the plane, blurred over the sun's
+// footprint there or the pixel, whichever is wider.
+float ringShadowOnSphere(vec3 n)
 {
-	float dens = ringDensity(length(p));
-	if (dens <= 0.0)
-		return vec4(0.0);
-	float lit = 0.35 + 0.65 * abs(dot(sunView, ringNormalView));
-	// The planet's shadow on the ring.
-	if (dot(p, sunView) < 0.0 && length(cross(p, sunView)) < 1.0)
-		lit *= 0.12;
-	return vec4(ringColor * lit, dens * 0.8);
+	float dn = dot(sunView, ringNormalView);
+	if (abs(dn) < 1e-4)
+		return 1.0;
+	float tq = -dot(n, ringNormalView) / dn;
+	if (tq <= 0.0)
+		return 1.0;
+	float q01 = ringR01(length(n + tq * sunView));
+	if (q01 <= 0.0 || q01 >= 1.0)
+		return 1.0;
+	float texelW = (ringRadii.y - ringRadii.x) / float(textureSize(ringProfile, 0));
+	float tau = textureLod(ringProfile, q01, log2(max(max(tq * ringSunAngle, pixelR) / texelW, 1.0))).a;
+	return exp(-tau / abs(dn));
 }
 
 void main()
@@ -138,6 +145,14 @@ void main()
 	vec2 ndc = gl_FragCoord.xy / viewportSize * 2.0 - 1.0;
 	vec3 d = normalize(vec3(ndc.x / projection[0][0], ndc.y / projection[1][1], -1.0));
 	vec3 o = camBody;
+
+	// Ring-plane hit, ahead of any branch so the profile's mip (its
+	// derivatives) is defined in every pixel.
+	float ringDn = dot(d, ringNormalView);
+	float tR = -dot(o, ringNormalView) / (abs(ringDn) > 1e-6 ? ringDn : 1e-6);
+	vec3 pR = o + tR * d;
+	float r01 = ringR01(length(pR));
+	float r01dx = dFdx(r01), r01dy = dFdy(r01);
 
 	vec3 c = cross(o, d);
 	float h2 = dot(c, c);
@@ -167,14 +182,8 @@ void main()
 		float ndl = dot(n, sunView);
 		float light = max(ndl, 0.0);
 		// Ring shadow on the planet.
-		if (ringOn == 1) {
-			float dn = dot(sunView, ringNormalView);
-			if (abs(dn) > 1e-4) {
-				float tq = -dot(n, ringNormalView) / dn;
-				if (tq > 0.0)
-					light *= 1.0 - 0.75 * ringDensity(length(n + tq * sunView));
-			}
-		}
+		if (ringOn == 1)
+			light *= ringShadowOnSphere(n);
 		vec3 lit = albedo * (light + 0.02);
 		if (cloudsOn > 0.5) {
 			vec2 cl = standInCloud(viewToBody * n, max(dot(n, -d), 0.0));
@@ -200,22 +209,21 @@ void main()
 		if (depthT < 0.0)
 			depthT = front;
 	}
-	// Ring sheet, in front of the planet or around it.
-	if (ringOn == 1) {
-		float dn = dot(d, ringNormalView);
-		if (abs(dn) > 1e-6) {
-			float tR = -dot(o, ringNormalView) / dn;
-			if (tR > 0.0 && (cover <= 0.0 || tR < tS)) {
-				vec4 rs = ringSample(o + tR * d);
-				if (rs.a > 0.0) {
-					// "Over", premultiplied, back to straight alpha.
-					vec3 pre = rs.rgb * rs.a + col.rgb * col.a * (1.0 - rs.a);
-					col.a = rs.a + col.a * (1.0 - rs.a);
-					col.rgb = pre / max(col.a, 1e-4);
-					if (rs.a > 0.1)
-						depthT = tR;
-				}
-			}
+	// Ring sheet, in front of the planet or around it: ring.frag's
+	// shading, tone mapped as it is.
+	if (ringOn == 1 && ringSheet == 1 && abs(ringDn) > 1e-6 && tR > 0.0 &&
+	    (cover <= 0.0 || tR < tS) && r01 > 0.0 && r01 < 1.0) {
+		vec4 prof = textureGrad(ringProfile, r01, r01dx, r01dy);
+		if (prof.a > 1e-4) {
+			vec4 ring = ringShade(prof, -d, sunView, ringNormalView,
+			                      ringPlanetShadow(pR, sunView, 1.0, ringSunAngle));
+			vec3 rc = toneMap(ring.rgb);
+			// "Over", premultiplied, back to straight alpha.
+			vec3 pre = rc * ring.a + col.rgb * col.a * (1.0 - ring.a);
+			col.a = ring.a + col.a * (1.0 - ring.a);
+			col.rgb = pre / max(col.a, 1e-4);
+			if (ring.a > 0.1)
+				depthT = tR;
 		}
 	}
 

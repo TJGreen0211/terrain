@@ -20,7 +20,13 @@
    The profile is a 1D RGBA32F texture (+ mips, so fine ringlets filter
    instead of aliasing): RGB single-scattering albedo, A normal optical depth.
    Receiver shaders (planet, water, moon/ship, atmosphere) sample it for the
-   ring's shadow. */
+   ring's shadow. One is baked per ring seed and cached, so every ringed
+   body's stand-in (planets.c) shades the same profile with the same slab
+   model (ringshade.glsl) as the full passes do.
+
+   The full passes (sheet, rocks, dust) run for one ringed body per frame,
+   picked by SolarSystem_RingBody: the full-detail planet, a gas giant or a
+   stand-in planet alike. */
 
 /* Ring extent in planet radii (sheet, rocks and planets.c's stand-ins). */
 #define RING_INNER 1.30f
@@ -29,12 +35,9 @@
 /* rockVAO/rockVerts: the three rock meshes (initObjectBuffer layout:
    position at 0, normal at 1). */
 void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[3]);
-/* Re-bakes the radial profile from a new seed (H key re-roll). */
-void Rings_Regenerate(unsigned int seed);
-
-/* The active planet's rings (solar_system.c): enabled, profile seed (re-baked
-   only when it changes) and ring-plane normal (world). Disabled rings draw
-   nothing and receivers see no ring shadow. */
+/* The rings the full passes draw this frame: enabled, profile seed (baked
+   on first use, then cached) and ring-plane normal (world). Disabled rings
+   draw nothing and receivers see no ring shadow. */
 void Rings_SetPlanet(int enabled, unsigned int seed, dvec3 normal);
 /* Earth's fixed ring plane (the original stylised tilt). */
 dvec3 Rings_DefaultNormal(void);
@@ -44,12 +47,19 @@ dvec3 Rings_DefaultNormal(void);
    is a draw-time error) and disables the ring until the first frame. */
 void Rings_AttachReceiver(GLuint shader);
 
-/* Per frame, before any ring draw or receiver bind. Positions are world
-   (double); lightPosition is camera-relative, like every shading pass. */
-void Rings_SetFrame(dvec3 planetWorld, dvec3 camWorld, float planetRadius, vec4 lightPosition);
+/* Per frame, after Rings_SetPlanet and before any ring draw or receiver
+   bind. Positions are world (double); lightPosition is camera-relative,
+   like every shading pass. receivers: the ringed planet is the one the
+   receiver programs draw (otherwise they see no ring shadow). */
+void Rings_SetFrame(dvec3 planetWorld, dvec3 camWorld, float planetRadius, vec4 lightPosition, int receivers);
 /* Ring shadow / attenuation uniforms for a receiver program (quad, water,
    light, atmosphere). Leaves glActiveTexture at unit 0. */
 void Rings_BindReceiver(GLuint shader);
+
+/* A stand-in's rings (planet_impostor.frag, program in use): seed's
+   profile on the ring unit, ringProfile / ringSunAngle. Leaves
+   glActiveTexture at unit 0. */
+void Rings_BindStandIn(GLuint shader, unsigned int seed);
 
 /* Opaque rocks: draw with the other opaque geometry. */
 void Rings_DrawRocks(mat4 proj, mat4 view);

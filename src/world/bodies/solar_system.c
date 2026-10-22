@@ -46,6 +46,9 @@ static TerrainBakeSettings baseBake;
    Below planets.c's full-detail size so the switch usually happens before
    it is needed. */
 #define ACTIVATE_PX         2.0
+/* Rings at least this big on screen (outer radius, px) get the full ring
+   passes (SolarSystem_RingBody); the stand-in draws smaller ones. */
+#define RING_FULL_PX        3.0
 
 /* ---- Random numbers: one stream per body, from the system seed ---- */
 
@@ -314,7 +317,6 @@ void SolarSystem_Generate(unsigned int seed)
 			p->hasRings = rnd(&r) < ROCKY_RING_CHANCE;
 		}
 		p->ringSeed = (unsigned int)(splitmix(&r.s) & 0x7fffffff);
-		hsv(range(&r, 0.05, 0.12), range(&r, 0.1, 0.35), range(&r, 0.6, 0.9), p->ringColor);
 	}
 
 	/* Dwarfs: Ceres in the gap after the 4th planet, the rest beyond the
@@ -339,7 +341,6 @@ void SolarSystem_Generate(unsigned int seed)
 		generateClouds(seed, id, p);
 		p->hasRings = rnd(&r) < DWARF_RING_CHANCE;
 		p->ringSeed = (unsigned int)(splitmix(&r.s) & 0x7fffffff);
-		hsv(range(&r, 0.05, 0.12), range(&r, 0.1, 0.35), range(&r, 0.6, 0.9), p->ringColor);
 	}
 
 	/* Stand-in colours for rocky planets: their dry-biome average. */
@@ -380,7 +381,6 @@ void SolarSystem_Init(void)
 	e->ringSeed = TerrainGen_BakeSettings()->seed;   /* Earth's rings follow its terrain seed */
 	e->atmo = *Atmosphere_Params();              /* for its stand-in until it is first saved */
 	e->clouds = *Clouds_Params();
-	e->ringColor[0] = 0.80f; e->ringColor[1] = 0.74f; e->ringColor[2] = 0.66f;
 	e->baked = 1;
 	activeBody = BODY_EARTH;
 
@@ -414,10 +414,6 @@ static void loadActive(int body)
 	*TerrainGen_BakeSettings() = p->bake;
 	TerrainDraw_SetHeightTex(p->heightTex);
 	activeBody = body;
-	/* Earth keeps its fixed stylised ring plane; others ring their equator. */
-	const Body *b = Bodies_Get(body);
-	dvec3 pole = { b->rotation.m[0][2], b->rotation.m[1][2], b->rotation.m[2][2] };
-	Rings_SetPlanet(p->hasRings, p->ringSeed, body == BODY_EARTH ? Rings_DefaultNormal() : pole);
 }
 
 /* A finished bake of body's terrain (p->heightTex, p->gen set). Dry worlds
@@ -544,6 +540,36 @@ int SolarSystem_PickActive(dvec3 cam)
 		}
 	}
 	return best;
+}
+
+int SolarSystem_RingBody(dvec3 cam, int fullBody)
+{
+	if (fullBody >= 0 && g_planetInfo[fullBody].hasRings)
+		return fullBody;
+	int best = -1;
+	double bestPx = RING_FULL_PX;
+	for (int id = 0; id < BODY_COUNT; id++) {
+		if (!g_planetInfo[id].hasRings)
+			continue;
+		const Body *b = Bodies_Get(id);
+		double d = dlengthvec3(dsubvec3(b->position, cam));
+		/* Ring radius on screen (small-angle; within the rings it wins). */
+		double px = d <= b->radius * RING_OUTER ? 1e9 : Planets_ScreenRadiusPx(b, cam) * RING_OUTER;
+		if (px >= bestPx) {
+			best = id;
+			bestPx = px;
+		}
+	}
+	return best;
+}
+
+dvec3 SolarSystem_RingNormal(int id)
+{
+	if (id == BODY_EARTH)
+		return Rings_DefaultNormal();
+	const Body *b = Bodies_Get(id);
+	dvec3 pole = { b->rotation.m[0][2], b->rotation.m[1][2], b->rotation.m[2][2] };
+	return pole;
 }
 
 const char *SolarSystem_TypeName(PlanetType t)

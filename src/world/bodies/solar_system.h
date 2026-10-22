@@ -34,8 +34,7 @@ typedef struct PlanetInfo {
 	int hasAtmosphere;
 	int hasWater;            /* generated; only Earth's is drawn (OTHER_PLANET_WATER) */
 	int hasRings;
-	unsigned int ringSeed;
-	float ringColor[3];      /* stand-in ring tint */
+	unsigned int ringSeed;   /* ring profile (rings.c), baked on first sight */
 	TerrainBakeSettings bake;
 	PlanetStyle style;
 	atmosphereParams atmo;   /* shellHeight 0 = no atmosphere */
@@ -83,6 +82,16 @@ void SolarSystem_Update(dvec3 cam, int focusBody, int blocking);
 /* The planet baking in the background (-1 = none) and its rough progress
    (0..1, may be NULL). */
 int SolarSystem_BakingBody(float *progress);
+
+/* The ringed body whose rings get the full passes this frame (rings.c:
+   sheet, rocks, dust; -1 = none): fullBody (the planet drawn in full, -1 =
+   none) when it is ringed, else the ringed body whose rings are largest on
+   screen once they are a few pixels across. */
+int SolarSystem_RingBody(dvec3 cam, int fullBody);
+
+/* Ring-plane normal (world): Earth keeps its fixed stylised plane, every
+   other body rings its equator. */
+dvec3 SolarSystem_RingNormal(int id);
 
 /* Re-bakes the active planet with the current TerrainGen_BakeSettings() (H key / debug
    panel); Earth's rings follow its seed as before. */

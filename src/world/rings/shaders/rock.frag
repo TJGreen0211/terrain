@@ -17,18 +17,7 @@ uniform float planetRadius;
 uniform float ringSunAngle;
 uniform float halfThickness;
 
-const float PI = 3.14159265359;
-
-// Planet shadow (same as ring.frag): p relative to the planet centre.
-float planetShadow(vec3 p, vec3 l)
-{
-	float b = -dot(p, l);
-	if (b <= 0.0)
-		return 1.0;
-	float d = length(p + l * b);
-	float w = planetRadius * 0.01 + b * ringSunAngle;
-	return smoothstep(planetRadius - w, planetRadius + w, d);
-}
+#include "ringshade.glsl"
 
 // Sunlight reaching a rock inside the slab has crossed the part of the
 // ring between it and the sun-facing surface, so rocks on the shadowed face
@@ -52,14 +41,14 @@ void main()
 	vec3 H = normalize(L + V);
 
 	vec3 sunRadiance = vec3(1.0, 0.97, 0.90) * 1.15;   // matches quad.frag
-	float planetSun = planetShadow(fragPos - ringCenter, L);
+	float planetSun = ringPlanetShadow(fragPos - ringCenter, L, planetRadius, ringSunAngle);
 	float sun = planetSun * slabTransmittance(L);
 	float NdotL = max(dot(N, L), 0.0);
 	float spec = pow(max(dot(N, H), 0.0), 40.0) * 0.08 * NdotL;   // icy sheen
 	// Ringshine: sunlight scattered by the surrounding ring lights the
 	// rocks from every side (roughly the sheet's radiance over half the sky).
 	vec3 ringshine = fAlbedo * sunRadiance * 0.06 * planetSun * min(fTau, 1.0);
-	vec3 lit = fAlbedo * 0.02 + ringshine + (fAlbedo / PI * NdotL + spec) * sunRadiance * sun;
+	vec3 lit = fAlbedo * 0.02 + ringshine + (fAlbedo / RING_PI * NdotL + spec) * sunRadiance * sun;
 
 	// The scene's tone map (tonemap.glsl).
 	FragColor = vec4(toneMap(lit), 1.0);

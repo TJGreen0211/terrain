@@ -157,9 +157,16 @@ void Render_Frame(App *app)
 
 	BodyDraw_SunMarker(app->quadCubeVAO, app->quadCubeVerts, app->sunNoiseTex, sun, &frame);
 
-	/* Ring frame for this camera + light; ring-shadow receivers that are
-	   not bound by their own draw calls bind here. */
-	Rings_SetFrame(translation, cam, fScale, lightPosition);
+	/* Rings with the full passes this frame (the full-detail planet's, or
+	   the ringed body nearest on screen: a gas giant's too) and their frame
+	   for this camera + light; the receivers take their shadow only when
+	   that is the planet they draw. Ring-shadow receivers that are not
+	   bound by their own draw calls bind here. */
+	int ringId = SolarSystem_RingBody(cam, planetFull ? activeId : -1);
+	const Body *ringB = ringId >= 0 ? Bodies_Get(ringId) : planetB;
+	Rings_SetPlanet(ringId >= 0, ringId >= 0 ? SolarSystem_Info(ringId)->ringSeed : 0,
+	                SolarSystem_RingNormal(ringId >= 0 ? ringId : activeId));
+	Rings_SetFrame(ringB->position, cam, (float)ringB->radius, lightPosition, ringId == activeId);
 	Rings_BindReceiver(BodyDraw_Program());
 	Rings_BindReceiver(Atmosphere_Program());
 
@@ -268,7 +275,7 @@ void Render_Frame(App *app)
 	//Distant bodies: every planet not drawn in full this frame (gas
 	//giants always; terrain planets and the Moon while small or
 	//inactive).
-	Planets_Draw(sunProj, sunView, cam, planetFull ? activeId : -1, moonFull);
+	Planets_Draw(sunProj, sunView, cam, planetFull ? activeId : -1, moonFull, ringId);
 
 	//Quadtree planet: LOD sphere built from six instanced face grids,
 	//centred camera-relative (the walk runs with the camera at the origin).
@@ -307,7 +314,8 @@ void Render_Frame(App *app)
 	//Rings: opaque close-up rocks, then the analytic sheet and the dust
 	//(premultiplied, depth-tested, no depth write). Before the
 	//atmosphere dome, which takes the sheet's coverage out of its glow.
-	if (planetFull) {
+	//Whichever body they ring, stand-in or not.
+	if (ringId >= 0) {
 		Prof_Begin(PROF_RINGS);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   /* the cloud cover (above) */
 		Rings_DrawRocks(sunProj, sunView);

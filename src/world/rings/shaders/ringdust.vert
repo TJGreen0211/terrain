@@ -30,8 +30,6 @@ uniform float time;
 
 out vec4 fColor;   // tone-mapped colour, coverage
 
-const float PI = 3.14159265359;
-
 uint pcg(uint v)
 {
 	uint s = v * 747796405u + 2891336453u;
@@ -45,21 +43,7 @@ float u01(inout uint h)
 	return float(h) * (1.0 / 4294967296.0);
 }
 
-float hg(float g, float c)
-{
-	float gg = g * g;
-	return (1.0 - gg) / (4.0 * PI * pow(1.0 + gg - 2.0 * g * c, 1.5));
-}
-
-float planetShadow(vec3 p, vec3 l)
-{
-	float b = -dot(p, l);
-	if (b <= 0.0)
-		return 1.0;
-	float d = length(p + l * b);
-	float w = planetRadius * 0.01 + b * ringSunAngle;
-	return smoothstep(planetRadius - w, planetRadius + w, d);
-}
+#include "ringshade.glsl"
 
 void main()
 {
@@ -102,9 +86,9 @@ void main()
 	vec3 L = normalize(lightPosition - p);
 	float ln = dot(L, ringNormal);
 	float depth = clamp((halfThickness - height * sign(ln)) / (2.0 * halfThickness), 0.0, 1.0);
-	float planetSun = planetShadow(p - ringCenter, L);
+	float planetSun = ringPlanetShadow(p - ringCenter, L, planetRadius, ringSunAngle);
 	float sun = planetSun * exp(-tau * depth * 0.25 / max(abs(ln), 0.05));
-	float phase = 4.0 * PI * mix(hg(0.0, dot(-L, V)), hg(0.7, dot(-L, V)), 0.6);
+	float phase = 4.0 * RING_PI * mix(ringHG(0.0, dot(-L, V)), ringHG(0.7, dot(-L, V)), 0.6);
 	vec3 sunRadiance = vec3(1.0, 0.97, 0.90) * 1.15;
 	// + ringshine, as in rock.frag.
 	vec3 lit = prof.rgb * (0.02 + sunRadiance * (0.25 * phase * sun + 0.06 * planetSun * min(tau, 1.0)));

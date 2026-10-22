@@ -20,6 +20,8 @@ static GLuint quadVAO, quadVBO;
 void Planets_Init(void)
 {
 	Shader_Create(&shader, "world/bodies/planet_impostor.vert", "world/bodies/planet_impostor.frag");
+	/* ringProfile on the ring unit (it would alias a cloud map's otherwise). */
+	Rings_AttachReceiver(shader);
 
 	/* Unit quad corners, perimeter order for a fan. */
 	GLfloat corners[] = { -1.0f, -1.0f,  1.0f, -1.0f,  1.0f, 1.0f,  -1.0f, 1.0f };
@@ -83,7 +85,7 @@ static double lambertPhase(double a)
 }
 
 /* One body; dots: 0 = disc pass (skips dots), 1 = dot pass (skips discs). */
-static void drawBody(int id, mat4 view, dvec3 cam, int dots)
+static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 {
 	const Body *b = Bodies_Get(id);
 	const PlanetInfo *pi = SolarSystem_Info(id);
@@ -114,7 +116,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots)
 
 	dvec3 toSun = unit(dsubvec3(Bodies_Get(BODY_SUN)->position, b->position));
 	dvec3 pole = { b->rotation.m[0][2], b->rotation.m[1][2], b->rotation.m[2][2] };
-	dvec3 ringN = id == BODY_EARTH ? Rings_DefaultNormal() : pole;
+	dvec3 ringN = SolarSystem_RingNormal(id);
 
 	glUniform3f(glGetUniformLocation(shader, "centerView"), (float)cv.x, (float)cv.y, (float)cv.z);
 	glUniform1f(glGetUniformLocation(shader, "halfSize"), (float)half);
@@ -144,8 +146,11 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots)
 	glUniform1f(glGetUniformLocation(shader, "atmoThick"), (float)atmoThick);
 	glUniform3f(glGetUniformLocation(shader, "atmoColor"), pi->atmo.C_R.x, pi->atmo.C_R.y, pi->atmo.C_R.z);
 	glUniform1i(glGetUniformLocation(shader, "ringOn"), rings);
-	glUniform2f(glGetUniformLocation(shader, "ringRadii"), RING_INNER, RING_OUTER);
-	glUniform3f(glGetUniformLocation(shader, "ringColor"), pi->ringColor[0], pi->ringColor[1], pi->ringColor[2]);
+	if (rings && !isDot) {
+		glUniform1i(glGetUniformLocation(shader, "ringSheet"), id != ringBody);
+		glUniform2f(glGetUniformLocation(shader, "ringRadii"), RING_INNER, RING_OUTER);
+		Rings_BindStandIn(shader, pi->ringSeed);
+	}
 	glUniform1i(glGetUniformLocation(shader, "dotMode"), isDot);
 	Clouds_BindStandIn(shader, id);
 	/* Pixel size in body radii at the body (edge anti-aliasing). */
@@ -168,7 +173,7 @@ static int drawnInFull(int id, int fullBody, int moonFull)
 	return id == fullBody || (id == BODY_MOON && moonFull);
 }
 
-void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull)
+void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, int ringBody)
 {
 	glUseProgram(shader);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &proj.m[0][0]);
@@ -188,14 +193,14 @@ void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull)
 	glDepthMask(GL_TRUE);
 	for (int i = 0; i < BODY_COUNT; i++)
 		if (Bodies_Get(i)->kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
-			drawBody(i, view, cam, 0);
+			drawBody(i, view, cam, 0, ringBody);
 
 	/* Dots: additive light, depth-tested only. */
 	glBlendFunc(GL_ONE, GL_ONE);
 	glDepthMask(GL_FALSE);
 	for (int i = 0; i < BODY_COUNT; i++)
 		if (Bodies_Get(i)->kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
-			drawBody(i, view, cam, 1);
+			drawBody(i, view, cam, 1, ringBody);
 
 	glDepthMask(GL_TRUE);
 	glDisable(GL_BLEND);

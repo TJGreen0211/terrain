@@ -16,6 +16,10 @@
    shadow on the ring and of the ring's shadow on everything else. */
 #define RING_SUN_ANGLE ((float)SUN_ANGULAR_RADIUS_RAD)
 #define RING_PROFILE_SIZE 16384
+/* Baked profiles kept at once (each ~0.5 MB with mips), one per ring seed:
+   the full passes' planet and every ringed stand-in in view. Least
+   recently used goes first. */
+#define RING_PROFILE_CACHE 16
 /* Texture unit for ringProfile in every program; TerrainDraw_SetBodyUniforms uses 0-8. */
 #define RING_PROFILE_UNIT 9
 
@@ -38,14 +42,21 @@
 #define DUST_HALF_THICKNESS ((float)RING_DUST_HALF_THICKNESS_M)
 
 static struct {
-	GLuint profileTex;
+	unsigned int seed;
+	GLuint tex;
+	unsigned int lastUse;   /* 0 = empty slot */
+} g_profiles[RING_PROFILE_CACHE];
+static unsigned int g_profileClock;
+
+static struct {
+	GLuint profileTex;      /* the full passes' planet's (g_profiles) */
 	GLuint sheetShader, rockShader, dustShader;
 	GLuint emptyVAO;
 	GLuint rockVAO[3];
 	int rockVerts[3];
-	unsigned int seed;
-	int enabled;            /* the active planet has rings (Rings_SetPlanet) */
-	unsigned int profileSeed;   /* seed of the baked profile */
+	unsigned int seed;      /* rock / dust spawn hash */
+	int enabled;            /* the full passes' planet has rings (Rings_SetPlanet) */
+	int receivers;          /* ...and it is the planet the receivers draw (Rings_SetFrame) */
 
 	/* Ring frame (world, constant): normal + in-plane basis. */
 	dvec3 n, u, v;
@@ -206,7 +217,7 @@ static int addBand(RingBand *b, int n, float lo, float hi, float tau)
 
    Colour runs from dark dust (thin) to bright ice (dense), with a seeded
    tint. */
-static void bakeProfile(unsigned int seed)
+static void bakeProfile(unsigned int seed, GLuint tex)
 {
 	unsigned int st = seed * 2654435761u + 0x51ED27u;
 
@@ -379,7 +390,7 @@ static void bakeProfile(unsigned int seed)
 	texels[3] = 0.0f;
 	texels[(RING_PROFILE_SIZE - 1) * 4 + 3] = 0.0f;
 
-	glBindTexture(GL_TEXTURE_1D, g_ring.profileTex);
+	glBindTexture(GL_TEXTURE_1D, tex);
 	glTexImage1D(GL_TEXTURE_1D, 0, GL_RGBA32F, RING_PROFILE_SIZE, 0, GL_RGBA, GL_FLOAT, texels);
 	glGenerateMipmap(GL_TEXTURE_1D);
 	glBindTexture(GL_TEXTURE_1D, 0);
@@ -404,6 +415,33 @@ static double ddot(dvec3 a, dvec3 b)
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+/* The baked profile for seed, baking it into the least recently used slot
+   on a miss (a few ms). */
+static GLuint profileFor(unsigned int seed)
+{
+	int slot = 0;
+	for (int i = 0; i < RING_PROFILE_CACHE; i++) {
+		if (g_profiles[i].lastUse && g_profiles[i].seed == seed) {
+			g_profiles[i].lastUse = ++g_profileClock;
+			return g_profiles[i].tex;
+		}
+		if (g_profiles[i].lastUse < g_profiles[slot].lastUse)
+			slot = i;
+	}
+	if (!g_profiles[slot].tex) {
+		glGenTextures(1, &g_profiles[slot].tex);
+		glBindTexture(GL_TEXTURE_1D, g_profiles[slot].tex);
+		glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glBindTexture(GL_TEXTURE_1D, 0);
+	}
+	bakeProfile(seed, g_profiles[slot].tex);
+	g_profiles[slot].seed = seed;
+	g_profiles[slot].lastUse = ++g_profileClock;
+	return g_profiles[slot].tex;
+}
+
 void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[3])
 {
 	Shader_Create(&g_ring.sheetShader, "world/rings/ring.vert", "world/rings/ring.frag");
@@ -418,26 +456,11 @@ void Rings_Init(unsigned int seed, const GLuint rockVAO[3], const int rockVerts[
 
 	Rings_SetPlanet(1, seed, Rings_DefaultNormal());
 
-	glGenTextures(1, &g_ring.profileTex);
-	glBindTexture(GL_TEXTURE_1D, g_ring.profileTex);
-	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glBindTexture(GL_TEXTURE_1D, 0);
-	Rings_Regenerate(seed);
-	g_ring.profileSeed = seed;
-
 	GLuint own[3] = { g_ring.sheetShader, g_ring.rockShader, g_ring.dustShader };
 	for (int i = 0; i < 3; i++) {
 		glUseProgram(own[i]);
 		glUniform1i(glGetUniformLocation(own[i], "ringProfile"), RING_PROFILE_UNIT);
 	}
-}
-
-void Rings_Regenerate(unsigned int seed)
-{
-	g_ring.seed = pcgHash(seed);
-	bakeProfile(seed);
 }
 
 dvec3 Rings_DefaultNormal(void)
@@ -455,9 +478,9 @@ void Rings_SetPlanet(int enabled, unsigned int seed, dvec3 normal)
 	if (fabs(g_ring.n.z) > 0.99) { ref.x = 1.0; ref.z = 0.0; }
 	g_ring.u = dnormalize(dcross(g_ring.n, ref));
 	g_ring.v = dcross(g_ring.n, g_ring.u);
-	if (enabled && g_ring.profileTex && seed != g_ring.profileSeed) {
-		Rings_Regenerate(seed);
-		g_ring.profileSeed = seed;
+	if (enabled) {
+		g_ring.profileTex = profileFor(seed);
+		g_ring.seed = pcgHash(seed);
 	}
 }
 
@@ -468,8 +491,9 @@ void Rings_AttachReceiver(GLuint shader)
 	glUniform1f(glGetUniformLocation(shader, "hasRing"), 0.0f);
 }
 
-void Rings_SetFrame(dvec3 planetWorld, dvec3 camWorld, float planetRadius, vec4 lightPosition)
+void Rings_SetFrame(dvec3 planetWorld, dvec3 camWorld, float planetRadius, vec4 lightPosition, int receivers)
 {
+	g_ring.receivers = receivers;
 	dvec3 rel = dsubvec3(camWorld, planetWorld);
 	g_ring.camLocalX = ddot(rel, g_ring.u);
 	g_ring.camLocalY = ddot(rel, g_ring.v);
@@ -513,9 +537,18 @@ static void setRingShape(GLuint shader)
 void Rings_BindReceiver(GLuint shader)
 {
 	glUseProgram(shader);
-	glUniform1f(glGetUniformLocation(shader, "hasRing"), g_ring.enabled ? 1.0f : 0.0f);
+	glUniform1f(glGetUniformLocation(shader, "hasRing"), g_ring.enabled && g_ring.receivers ? 1.0f : 0.0f);
 	setRingShape(shader);
 	bindProfile();
+}
+
+void Rings_BindStandIn(GLuint shader, unsigned int seed)
+{
+	glUniform1i(glGetUniformLocation(shader, "ringProfile"), RING_PROFILE_UNIT);
+	glUniform1f(glGetUniformLocation(shader, "ringSunAngle"), RING_SUN_ANGLE);
+	glActiveTexture(GL_TEXTURE0 + RING_PROFILE_UNIT);
+	glBindTexture(GL_TEXTURE_1D, profileFor(seed));
+	glActiveTexture(GL_TEXTURE0);
 }
 
 /* Program setup for the ring's own passes (sheet, rocks, dust). */
