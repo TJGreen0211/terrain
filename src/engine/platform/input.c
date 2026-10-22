@@ -3,7 +3,7 @@
 
 /* Held state per movement key, so any combination (W+D, W+A, ...) moves at
    once and releasing one key leaves the others held. */
-static int keyW, keyA, keyS, keyD;
+static int keyW, keyA, keyS, keyD, keyQ, keyE, keySpace, keyShift;
 static int wireframe = 0;
 static int rotationPaused = 0;
 static int regenRequested = 0;
@@ -48,13 +48,20 @@ void Input_KeyCallback(GLFWwindow* window, int key, int scancode, int action, in
     if (key == GLFW_KEY_S) keyS = down;
     if (key == GLFW_KEY_A) keyA = down;
     if (key == GLFW_KEY_D) keyD = down;
+    if (key == GLFW_KEY_Q) keyQ = down;
+    if (key == GLFW_KEY_E) keyE = down;
+    if (key == GLFW_KEY_SPACE) keySpace = down;
+    if (key == GLFW_KEY_LEFT_SHIFT) keyShift = down;
 }
 
-/* W/S forward/back, A/D left/right; opposite keys cancel. */
+/* W/S forward/back, A/D left/right, Space/LShift up/down, Q/E roll
+   counter-clockwise/clockwise; opposite keys cancel. */
 void Input_ApplyMovement(float deltaTime) {
     float forward = (float)(keyW - keyS);
     float right = (float)(keyD - keyA);
-    Camera_ProcessKeyboard(forward, right, deltaTime);
+    float up = (float)(keySpace - keyShift);
+    float roll = (float)(keyE - keyQ);
+    Camera_ProcessKeyboard(forward, right, up, roll, deltaTime);
 }
 
 void Input_CharCallback(GLFWwindow* window, unsigned int codepoint) {

@@ -3,6 +3,8 @@
 #include <math.h>
 
 static const float toRadians = (float)(M_PI / 180.0f);
+/* Q/E roll rate, degrees per second (an angle, not a world scale). */
+#define CAMERA_ROLL_RATE_DEG 90.0f
 
 /* Orbit radius (m): how far the camera sits behind the pivot it orbits.
    Spawns at 0 (the camera sits on the pivot; dragging turns it in place) and
@@ -384,19 +386,33 @@ void Camera_UpdateVectors()
     Up = up;
 }
 
-/* Pans the pivot (and the camera with it) along the view: forward/right are
-   the summed key axes in [-1, 1]. The combined direction is normalized so a
-   diagonal (W+D) is no faster than a single key. */
-void Camera_ProcessKeyboard(float forward, float right, GLfloat deltaTime)
+/* Rolls the orbit orientation about the view axis: a rotation about camera
+   z, applied on the camera side (q = q_roll * q). Positive roll turns the
+   camera clockwise (its up tilts toward its right). A drag in flight gets
+   the same roll on its latched start, so releasing keeps it. */
+static void rollView(float roll, GLfloat deltaTime)
+{
+    float a = roll * CAMERA_ROLL_RATE_DEG * toRadians * deltaTime;
+    quaternion qr = { cosf(a * 0.5f), 0.0f, 0.0f, sinf(a * 0.5f) };
+    orientation = normalizeOrIdentity(quatMultiply(qr, orientation));
+    if (dragging)
+        dragStartOrientation = normalizeOrIdentity(quatMultiply(qr, dragStartOrientation));
+}
+
+/* Pans the pivot (and the camera with it) along the view: forward/right/up
+   are the summed key axes in [-1, 1]. The combined direction is normalized so
+   a diagonal (W+D) is no faster than a single key. */
+void Camera_ProcessKeyboard(float forward, float right, float up, float roll, GLfloat deltaTime)
 {
     if (surfaceViewActive()) return;   // WASD is orbit-pan; ignore in surface mode
-    if (forward == 0.0f && right == 0.0f) return;
+    if (roll != 0.0f) rollView(roll, deltaTime);
+    if (forward == 0.0f && right == 0.0f && up == 0.0f) return;
     Camera_UpdateVectors();
 
     vec3 dir;
-    dir.x = Front.x * forward + Right.x * right;
-    dir.y = Front.y * forward + Right.y * right;
-    dir.z = Front.z * forward + Right.z * right;
+    dir.x = Front.x * forward + Right.x * right + Up.x * up;
+    dir.y = Front.y * forward + Right.y * right + Up.y * up;
+    dir.z = Front.z * forward + Right.z * right + Up.z * up;
     dir = normalizevec3(dir);
 
     double velocity = (double)MovementSpeed * deltaTime;

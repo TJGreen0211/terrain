@@ -44,8 +44,10 @@ mat4 Camera_ViewRotation();
 void Camera_UpdateVectors();
 void Camera_ToggleSurface(void);   // G: lock to a surface/tangent view
 int Camera_IsSurface(void);
-/* forward/right: summed WASD axes in [-1, 1] (W/D positive). */
-void Camera_ProcessKeyboard(float forward, float right, GLfloat deltaTime);
+/* forward/right/up: summed WASD + Space/LShift axes in [-1, 1] (W/D/Space
+   positive), panning along the view. roll: Q/E axis in [-1, 1] (E positive,
+   clockwise), turning about the view direction. */
+void Camera_ProcessKeyboard(float forward, float right, float up, float roll, GLfloat deltaTime);
 /* Arcball drag, driven by the real button press/release events. Cursor
    position and window size are both in GLFW screen coordinates. */
 void Camera_ArcballBegin(double xpos, double ypos, int width, int height);
