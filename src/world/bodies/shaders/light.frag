@@ -9,6 +9,8 @@ in vec3 fH;
 
 out vec4 FragColor;
 
+#include "engine/gfx/tonemap.glsl"
+
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
 uniform sampler2D texture1;
@@ -78,10 +80,11 @@ void main()
 	}
 
 	vec3 lighting = (ambient * (diffuse+specular));
-	float gamma = 2.2;
 	float vis = sunVisibility(fragPos, normalize(fN), normalize(fL));
 	vis *= ringTransmittance(fragPos - ringCenter, normalize(lightPosition - fragPos), length(lightPosition - fragPos));
-	FragColor = vec4(pow(ambient+vis*(diffuse+specular), vec3(1.0/gamma)), color.a);
+	// Linear, tone-mapped at the resolve.
+	vec3 lit = ambient + vis * (diffuse + specular);
+	FragColor = vec4(toneMap(lit), clamp(color.a, 0.0, 1.0));
 	//vec3 lighting = (ambient+(1.0-shadow) * (diffuse+specular));
 	//FragColor = vec4(vec3(shadow), 1.0);
 }

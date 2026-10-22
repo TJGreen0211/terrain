@@ -10,6 +10,8 @@
 // - Contrast: an S-curve on the display value (blacks stay black, the lit
 //   gas stays bright).
 
+// Bakes display values whatever the runtime tone map settings (tonemap.glsl).
+#define TONEMAP_DISPLAY
 #include "engine/gfx/tonemap.glsl"
 
 out vec4 FragColor;

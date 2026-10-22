@@ -16,4 +16,7 @@ GLuint Skybox_LoadCube(void);
 // rotation matches the world; draw it right after the clear, before the scene.
 void Skybox_Draw(GLuint cubemap, mat4 projection, mat4 viewRotation);
 
+// Gain on the cube's display values, converted to linear (docs/hdr.md).
+float *Skybox_HdrGain(void);
+
 #endif

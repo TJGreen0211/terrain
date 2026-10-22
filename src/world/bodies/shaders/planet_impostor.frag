@@ -49,6 +49,13 @@ uniform vec3 cloudColor;
 out vec4 FragColor;
 
 #include "engine/gfx/tonemap.glsl"
+uniform float hdrGain;   // Planets_HdrGain
+
+// A display-authored colour as linear radiance (tonemap.glsl), scaled.
+vec3 fromDisplay(vec3 d)
+{
+	return sceneFromDisplay(d) * hdrGain;
+}
 #include "world/rings/ringshade.glsl"
 #include "world/gasgiant/gasgiant.glsl"
 
@@ -135,7 +142,7 @@ void main()
 		vec2 dp = gl_FragCoord.xy - centerPx;
 		float s2 = dotSigma * dotSigma;
 		float g = exp(-dot(dp, dp) / (2.0 * s2)) / (6.2831853 * s2);
-		FragColor = vec4(color * dotFlux * g, 1.0);
+		FragColor = vec4(fromDisplay(color * dotFlux * g), 1.0);
 		gl_FragDepth = depthOf(centerView);
 		return;
 	}
@@ -191,6 +198,7 @@ void main()
 				float day = clamp(ndl + 0.3, 0.0, 1.0);
 				lit += atmoColor * pow(1.0 - mu, 3.0) * 0.8 * day;
 			}
+			lit = fromDisplay(lit);
 		}
 		col = vec4(lit, cover);
 		depthT = tS;
@@ -206,7 +214,7 @@ void main()
 		} else {
 			float day = clamp(dot(limbDir, sunView) + 0.4, 0.0, 1.0);
 			float glow = exp(-4.0 * x) * (1.0 - x) * day;
-			col.rgb = mix(atmoColor * 0.9, col.rgb, col.a);
+			col.rgb = mix(fromDisplay(atmoColor * 0.9), col.rgb, col.a);
 			col.a = max(col.a, glow);
 		}
 		if (depthT < 0.0)
@@ -232,7 +240,7 @@ void main()
 
 	if (col.a < 0.003)
 		discard;
-	FragColor = col;
+	FragColor = vec4(max(col.rgb, 0.0), clamp(col.a, 0.0, 1.0));
 	// Depth of the nearest surface hit (or the closest approach for glow);
 	// the camera is the origin, so the hit is just along the ray.
 	gl_FragDepth = depthOf(radius * max(depthT, 0.0) * d);

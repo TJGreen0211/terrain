@@ -12,7 +12,9 @@
 #include "engine/gfx/shader.h"
 #include "engine/gfx/framebuffer.h"
 #include "engine/gfx/mesh.h"
+#include "engine/gfx/scene_target.h"
 #include "engine/gfx/texture.h"
+#include "engine/gfx/tone_map.h"
 #include "engine/platform/input.h"
 #include "engine/platform/window.h"
 #include "world/WorldConfig.h"
@@ -108,11 +110,25 @@ static void cameraPanel(struct nk_context *ctx)
 		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
 }
 
+/* Tone map tab: the engine's settings, then the gains of the passes still
+   authored as display values (docs/hdr.md), so the look is tuned in one
+   place. */
+static void toneMapPanel(struct nk_context *ctx)
+{
+	ToneMap_DebugPanel(ctx);
+	DebugGUI_Group(ctx, "Gains (display-authored passes)");
+	DebugGUI_Slider(ctx, "Sky", Skybox_HdrGain(), 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Atmosphere", Atmosphere_HdrGain(), 0.0f, 4.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Sun", Sun_HdrGain(), 0.0f, 50.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Stand-ins", Planets_HdrGain(), 0.0f, 4.0f, 0.01f, "%.2f");
+}
+
 /* The debug panel's tabs, in order (below its built-in Performance tab). */
 static void addDebugPanels(void)
 {
 	DebugGUI_AddPanel("Solar system", SolarSystem_DebugPanel, NULL);
 	DebugGUI_AddPanel("Camera", cameraPanel, NULL);
+	DebugGUI_AddPanel("Tone map", toneMapPanel, NULL);
 	DebugGUI_AddPanel("Terrain", Terrain_DebugPanel, Terrain_DebugPanelStartup);
 	DebugGUI_AddPanel("Shadows", Shadows_DebugPanel, NULL);
 	DebugGUI_AddPanel("Atmosphere", Atmosphere_DebugPanel, NULL);
@@ -187,6 +203,16 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	LoadingScreen_Init(window);
 	LoadingScreen_Render(0.0f);
 
+	/* Before anything draws: init-time bakes read the tone map block. */
+	ToneMap_Init();
+	/* --curve <n> (ToneMapCurve), --tonemap-debug <n> (ToneMapDebug),
+	   e.g. for bench shots. */
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--curve") == 0 && i + 1 < argc)
+			ToneMap_Params()->curve = atoi(argv[++i]) % TONEMAP_CURVE_COUNT;
+		else if (strcmp(argv[i], "--tonemap-debug") == 0 && i + 1 < argc)
+			ToneMap_Params()->debugView = atoi(argv[++i]) % TONEMAP_DEBUG_COUNT;
+	}
 	Water_Init(&app->ocean, 256, App_Time());
 	LoadingScreen_Step();
 
@@ -204,6 +230,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	   the instance matrix at 4-7). */
 	QuadTree_InitGL();
 	Prof_Init();
+	SceneTarget_Init(RENDER_MSAA_SAMPLES);
 	if (Bench_Active())
 		Prof_EnableRawRecording();
 	LoadingScreen_Step();

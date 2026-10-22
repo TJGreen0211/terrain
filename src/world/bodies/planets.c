@@ -17,6 +17,9 @@
 
 static GLuint shader;
 static GLuint quadVAO, quadVBO;
+static float hdrGain = 1.0f;
+
+float *Planets_HdrGain(void) { return &hdrGain; }
 
 void Planets_Init(void)
 {
@@ -183,6 +186,7 @@ void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, i
 	int viewport[4];
 	glGetIntegerv(GL_VIEWPORT, viewport);
 	glUniform2f(glGetUniformLocation(shader, "viewportSize"), (float)viewport[2], (float)viewport[3]);
+	glUniform1f(glGetUniformLocation(shader, "hdrGain"), hdrGain);
 
 	glBindVertexArray(quadVAO);
 	glDisable(GL_CULL_FACE);

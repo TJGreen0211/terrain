@@ -43,6 +43,11 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane)
 }
 
 static atmosphereParams g_atmosphere = ATMOSPHERE_DEFAULTS;
+/* Scale on the dome's in-scatter (also the air clouds.frag adds in front
+   of a cloud), converted from display values. Not per planet. docs/hdr.md. */
+static float hdrGain = 1.0f;
+
+float *Atmosphere_HdrGain(void) { return &hdrGain; }
 
 atmosphereParams * Atmosphere_Params(void)
 {
@@ -80,6 +85,7 @@ static double zenithOptic(const atmosphereParams *atmo)
 static void setScatteringUniforms(GLuint shader, float fInner, const atmosphereParams *atmo)
 {
 	glUniform1f(glGetUniformLocation(shader, "atmoTauZenith"), (float)zenithOptic(atmo));
+	glUniform1f(glGetUniformLocation(shader, "atmoHdrGain"), hdrGain);
 	glUniform1f(glGetUniformLocation(shader, "fInnerRadius"), fInner);
 	glUniform1f(glGetUniformLocation(shader, "fOuterRadius"), fInner + atmo->shellHeight);
 	glUniform1f(glGetUniformLocation(shader, "fScaleHeight"), atmo->scaleHeight);

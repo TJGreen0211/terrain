@@ -16,7 +16,8 @@ typedef enum ProfSection {
 	PROF_RINGS,
 	PROF_ATMOSPHERE,
 	PROF_NEBULA,      /* in-system nebula (nebula.c) */
-	PROF_OVERLAY,    /* resolve blit + UI */
+	PROF_RESOLVE,    /* scene target MSAA resolve into the window */
+	PROF_OVERLAY,    /* UI */
 	PROF_COUNT
 } ProfSection;
 

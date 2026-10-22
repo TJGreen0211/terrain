@@ -33,4 +33,9 @@ int Planets_FullDetail(const Body *b, dvec3 cam);
    -1 = none), so its stand-in only takes the ring's shadow. */
 void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, int ringBody);
 
+/* Gain on the rocky stand-ins, limb glow and dots, still authored as
+   display values and converted to linear (docs/hdr.md). Gas giants are
+   lit in linear. */
+float *Planets_HdrGain(void);
+
 #endif

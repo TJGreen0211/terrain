@@ -6,6 +6,9 @@
 static GLuint sunTexture;
 static GLuint sunShader;
 static GLuint sunQuadVAO, sunQuadVBO;
+static float hdrGain = 1.0f;
+
+float *Sun_HdrGain(void) { return &hdrGain; }
 
 void Sun_Init(void)
 {
@@ -54,6 +57,7 @@ static void setupSunUniforms(mat4 proj, mat4 view, vec3 center, float radius, GL
 	glUniform1i(glGetUniformLocation(sunShader, "tex"), 0);
 
 	glUniform1f(glGetUniformLocation(sunShader, "uDisc"), uDisc);
+	glUniform1f(glGetUniformLocation(sunShader, "hdrGain"), hdrGain);
 }
 
 // Draw as a fan: the perimeter-ordered corners (BL,BR,TR,TL) tile into two

@@ -12,8 +12,8 @@
 // - Light: a plane-parallel cloud's diffuse reflectance (tops) or
 //   transmission (base, seen from below), the sun reddened, set and
 //   ring-shadowed like the ground's, skylight as on the ground, then the
-//   extinction toward the camera and the scene's tone map. Blended over the
-//   scene in display space like the water.
+//   extinction toward the camera. Blended over the scene in linear
+//   radiance like the water.
 // - The air in front: the cloud adds the dome's in-scatter between the
 //   camera and itself, and leaves its alpha in the target's alpha channel;
 //   the dome then adds its whole column times (1 - alpha) (Clouds_Draw,
@@ -41,6 +41,7 @@ uniform vec3 cloudColor;
 #include "world/atmosphere/atmosurface.glsl"
 #include "world/rings/ringshadow.glsl"
 #include "engine/gfx/tonemap.glsl"
+uniform float atmoHdrGain;   // Atmosphere_HdrGain
 
 // The dome's march for the air in front of the cloud.
 uniform float E;     // solar brightness (atmosphere.c)
@@ -184,18 +185,20 @@ void main()
 	vec3 eye = o * planetRadius;
 	if (hasAtmosphere > 0.5)
 		col = applyAtmosphere(col, eye, pm);
-	vec3 display = toneMap(col);
+	vec3 radiance = toneMap(col);
 	if (hasAtmosphere > 0.5) {
 		// The dome's in-scatter from the camera (or where it enters the
-		// air) to the cloud, in display units as the dome adds it.
+		// air) to the cloud, converted and scaled as the dome converts it.
 		vec2 e = rayIntersection(eye, d, fOuterRadius);
 		e.x = max(e.x, 0.0);
 		e.y = min(e.y, t * planetRadius);
-		if (e.y > e.x)
-			display += inScatter(eye, d, e, sunDir, 1.0 / fScaleHeight, 1.0 / (fOuterRadius - fInnerRadius));
+		if (e.y > e.x) {
+			vec3 air = inScatter(eye, d, e, sunDir, 1.0 / fScaleHeight, 1.0 / (fOuterRadius - fInnerRadius));
+			radiance += sceneFromDisplay(air) * atmoHdrGain;
+		}
 	}
 
-	FragColor = vec4(display, alpha);
+	FragColor = vec4(max(radiance, 0.0), clamp(alpha, 0.0, 1.0));
 	// Depth-tested against the scene (terrain standing above the layer).
 	gl_FragDepth = depthOf(dView * (t * planetRadius));
 }

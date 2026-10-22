@@ -6,6 +6,8 @@
 #include "engine/debug/ui.h"
 #include "engine/debug/profiler.h"
 #include "engine/gfx/frame.h"
+#include "engine/gfx/scene_target.h"
+#include "engine/gfx/tone_map.h"
 #include "engine/platform/input.h"
 #include "engine/platform/window.h"
 #include "world/WorldConfig.h"
@@ -50,42 +52,19 @@ static mat4 camRelTranslate(dvec3 world, dvec3 cam) {
 
 /* ---- Main-pass depth: reversed-Z into a float depth buffer ----
    The window's default depth buffer is 24-bit fixed point, which reversed-Z
-   cannot help, so the scene renders into its own multisampled target (RGBA8
-   + DEPTH32F) that is resolved into the window at the end of the frame.
-   The depth is a multisample texture so the atmosphere dome can read it
-   (Atmosphere_SetSceneDepth) to end its rays at the visible surface.
+   cannot help, so the scene renders into its own multisampled target
+   (engine/gfx/scene_target: RGBA16F + DEPTH32F, sample count
+   RENDER_MSAA_SAMPLES) that is resolved into the window at the end of the
+   frame. The depth is a multisample texture so the atmosphere dome can read
+   it (Atmosphere_SetSceneDepth) to end its rays at the visible surface.
    Clip control is per pass: the main pass uses GL_ZERO_TO_ONE with
    GL_GREATER and a depth clear of 0; everything else (shadow map, bakes,
    GPU wave passes, UI) keeps the standard convention. */
-#define SCENE_SAMPLES RENDER_MSAA_SAMPLES   /* WorldConfig.h */
-static GLuint g_sceneFBO, g_sceneColorRB, g_sceneDepthTex;
-static int g_sceneW, g_sceneH;
-
 static void ensureSceneTarget(int w, int h) {
-	if (g_sceneFBO && w == g_sceneW && h == g_sceneH)
+	if (!SceneTarget_Ensure(w, h))
 		return;
-	if (!g_sceneFBO) {
-		glGenFramebuffers(1, &g_sceneFBO);
-		glGenRenderbuffers(1, &g_sceneColorRB);
-		glGenTextures(1, &g_sceneDepthTex);
-	}
-	g_sceneW = w;
-	g_sceneH = h;
-	glBindRenderbuffer(GL_RENDERBUFFER, g_sceneColorRB);
-	glRenderbufferStorageMultisample(GL_RENDERBUFFER, SCENE_SAMPLES, GL_RGBA8, w, h);
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
-	/* Fixed sample locations: required to mix with the colour renderbuffer. */
-	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, g_sceneDepthTex);
-	glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, SCENE_SAMPLES, GL_DEPTH_COMPONENT32F, w, h, GL_TRUE);
-	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
-	glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, g_sceneColorRB);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, g_sceneDepthTex, 0);
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		fprintf(stderr, "[main] scene framebuffer incomplete\n");
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	Atmosphere_SetSceneDepth(g_sceneDepthTex, SCENE_SAMPLES, CAMERA_NEAR);
-	Nebula_SetSceneDepth(g_sceneDepthTex, SCENE_SAMPLES, CAMERA_NEAR);
+	Atmosphere_SetSceneDepth(SceneTarget_DepthTexture(), SceneTarget_Samples(), CAMERA_NEAR);
+	Nebula_SetSceneDepth(SceneTarget_DepthTexture(), SceneTarget_Samples(), CAMERA_NEAR);
 }
 
 /* Switches clip control, depth test and depth clear value between the main
@@ -118,6 +97,8 @@ void Render_Frame(App *app)
 	const Body *sun = Bodies_Get(BODY_SUN);
 	const Body *moon = Bodies_Get(BODY_MOON);
 	mat4 model;
+
+	ToneMap_Update();
 
 	/* Full passes for the active planet and the Moon only while they are
 	   more than a few pixels across; Planets_Draw stands in otherwise.
@@ -248,7 +229,7 @@ void Render_Frame(App *app)
 
 	int sceneW = (int)Window_Width(), sceneH = (int)Window_Height();
 	ensureSceneTarget(sceneW, sceneH);
-	glBindFramebuffer(GL_FRAMEBUFFER, g_sceneFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, SceneTarget_Framebuffer());
 	glViewport(0, 0, sceneW, sceneH);
 	setReversedDepth(1);
 
@@ -355,12 +336,13 @@ void Render_Frame(App *app)
 
 	/* Resolve the scene into the window; the UI draws there directly,
 	   with the standard depth convention restored. */
-	Prof_Begin(PROF_OVERLAY);
+	Prof_Begin(PROF_RESOLVE);
 	setReversedDepth(0);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_sceneFBO);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glBlitFramebuffer(0, 0, sceneW, sceneH, 0, 0, sceneW, sceneH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	SceneTarget_Resolve(sceneW, sceneH);
+	Prof_End(PROF_RESOLVE);
+
+	Prof_Begin(PROF_OVERLAY);
 
 	//Camera speed sliders: UI overlay, drawn over everything. Laid out
 	//every frame so they track window resizes.

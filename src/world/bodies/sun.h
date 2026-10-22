@@ -21,4 +21,8 @@ void Sun_DrawDisc(mat4 proj, mat4 view, vec3 center, float radius);
 // and must be drawn LAST, after all scene geometry.
 void Sun_DrawGlow(mat4 proj, mat4 view, vec3 center, float radius);
 
+// Gain on the disc and glow, still authored as display values and
+// converted to linear (docs/hdr.md).
+float *Sun_HdrGain(void);
+
 #endif

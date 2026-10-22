@@ -1,5 +1,6 @@
 #include "engine/gfx/shader.h"
 #include "engine/core/paths.h"
+#include "engine/gfx/tone_map.h"
 
 char *readShader(char *filename)
 {
@@ -197,6 +198,10 @@ void Shader_CreateDefines(GLuint *shader, char *vert, char *frag, const char *de
         glGetProgramInfoLog(*shader, sizeof(log), 0, log);
         fprintf(stderr, "Program link failed (%s + %s):\n %s\n", vert, frag, log);
     }
+    /* Shared uniform blocks: GLSL 4.10 has no layout(binding = ...). */
+    GLuint block = glGetUniformBlockIndex(*shader, "ToneMapBlock");
+    if (block != GL_INVALID_INDEX)
+        glUniformBlockBinding(*shader, block, TONEMAP_BINDING);
 }
 
 /*

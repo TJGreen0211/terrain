@@ -7,6 +7,9 @@
 
 static GLuint skyboxShader;
 static GLuint skyboxVAO, skyboxVBO;
+static float hdrGain = 1.0f;
+
+float *Skybox_HdrGain(void) { return &hdrGain; }
 
 // Six faces in the order Texture_LoadCubemap expects: faces[i] goes to
 // CUBE_MAP_POSITIVE_X+i, so right, left, top, bottom, back, front are
@@ -135,6 +138,7 @@ void Skybox_Draw(GLuint cubemap, mat4 projection, mat4 viewRotation)
 
 	glUniformMatrix4fv(glGetUniformLocation(skyboxShader, "projection"), 1, GL_FALSE, &projection.m[0][0]);
 	glUniformMatrix4fv(glGetUniformLocation(skyboxShader, "ModelView"), 1, GL_FALSE, &viewRotation.m[0][0]);
+	glUniform1f(glGetUniformLocation(skyboxShader, "hdrGain"), hdrGain);
 
 	glBindVertexArray(skyboxVAO);
 	glActiveTexture(GL_TEXTURE0);

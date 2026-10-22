@@ -56,6 +56,10 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
 // shellHeight <= 0 switches extinction off.
 void Atmosphere_SetExtinction(GLuint shader, float fInner, const atmosphereParams *atmo);
 
+/* Gain on the in-scatter the dome (and the cloud slab) add, which is still
+   authored as a display value and converted to linear (docs/hdr.md). */
+float *Atmosphere_HdrGain(void);
+
 struct nk_context;
 /* The Atmosphere tab of the debug panel (atmosphere.c). */
 void Atmosphere_DebugPanel(struct nk_context *ctx);

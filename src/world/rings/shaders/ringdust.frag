@@ -4,6 +4,8 @@ in vec4 fColor;
 
 out vec4 FragColor;
 
+#include "engine/gfx/tonemap.glsl"
+
 // Soft round sprite, premultiplied alpha.
 void main()
 {
@@ -11,5 +13,7 @@ void main()
 	float a = fColor.a * (1.0 - smoothstep(0.25, 1.0, dot(c, c)));
 	if (a < 1.0 / 255.0)
 		discard;
-	FragColor = vec4(fColor.rgb * a, a);
+	// fColor is display-encoded (ringdust.vert).
+	a = clamp(a, 0.0, 1.0);
+	FragColor = vec4(sceneFromDisplay(fColor.rgb) * a, a);
 }

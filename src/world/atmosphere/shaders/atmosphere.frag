@@ -10,6 +10,8 @@ uniform float fInnerRadius;
 uniform float fOuterRadius;
 uniform float fScaleHeight;   // metres per e-fold of density (atmosphere.c)
 #include "atmodensity.glsl"
+#include "engine/gfx/tonemap.glsl"
+uniform float atmoHdrGain;   // Atmosphere_HdrGain
 
 // Rings (rings.c). Everything here is planet-local, and the ring is centred
 // on the planet, so positions need no ringCenter offset.
@@ -165,5 +167,8 @@ void main (void)
 		I *= 1.0 - a;
 	}
 
+	// I is authored as a display value added on top of the scene: as
+	// linear radiance (exact over black), scaled.
+	I = sceneFromDisplay(I) * atmoHdrGain;
 	FragColor = vec4(I, 1.0);
 }

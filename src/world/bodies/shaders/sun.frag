@@ -6,6 +6,9 @@ in float sunHalf;
 in float sunDepth;
 out vec4 FragColor;
 
+#include "engine/gfx/tonemap.glsl"
+uniform float hdrGain;   // Sun_HdrGain
+
 uniform float systemTime;
 uniform float aspect;
 uniform sampler2D tex;
@@ -121,7 +124,7 @@ void main()
 		 		 + starSphere
 		 		 + corona * orange
 		 		 + starGlow * orangeRed;
-		FragColor	= vec4( clamp( core, 0.0, 1.0 ), 1.0 );
+		FragColor	= vec4( sceneFromDisplay( clamp( core, 0.0, 1.0 ) ) * hdrGain, 1.0 );
 		gl_FragDepth = sunDepth;
 	}
 	else
@@ -132,6 +135,9 @@ void main()
 		FragColor.rgb	= vec3( f * ( 0.75 + brightness * 0.3 ) * orange )
 		 			 + corona * orange
 		 			 + starGlow * orangeRed;
+		// [0,1]: the scene target is float now, and the f term goes
+		// negative far out, which would darken what the halo is added to.
+		FragColor.rgb	= sceneFromDisplay( clamp( FragColor.rgb, 0.0, 1.0 ) ) * hdrGain;
 		FragColor.a		= 1.0;
 		// Test-only depth so the halo is still hidden by geometry in front;
 		// the depth mask is off on the CPU side, so nothing is written.

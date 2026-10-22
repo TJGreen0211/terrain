@@ -16,6 +16,8 @@
 #endif
 #define NEBULA_FAR
 #include "nebula.glsl"
+// Bakes display values whatever the runtime tone map settings (tonemap.glsl).
+#define TONEMAP_DISPLAY
 #include "engine/gfx/tonemap.glsl"
 
 out vec4 FragColor;
