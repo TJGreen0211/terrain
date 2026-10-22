@@ -33,3 +33,6 @@ __pycache__/
 # --- Benchmark harness transients (commit baseline.json, reference/, scenes/, protected.sha256) ---
 bench/out/
 bench/cand/
+
+# --- Local agent pointer (AGENTS.md is the shared file) ---
+CLAUDE.md
