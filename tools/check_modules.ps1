@@ -38,7 +38,7 @@ $src = Join-Path $root 'src'
 $TierRank = @{ engine = 0; world = 1; app = 2 }
 
 # Pre-refactor file -> target module (src-relative, forward slashes).
-# 'dead' = scheduled for deletion in phase 1; 'third_party' = not our code.
+# 'dead' = scheduled for deletion; 'third_party' = not our code.
 $LegacyMap = @{
     'common/Common.c'          = 'engine/core'
     'common/Common.h'          = 'engine/core'
@@ -108,11 +108,6 @@ $LegacyMap = @{
     'Bench.h'                  = 'app'
     'DebugGUI.c'               = 'app'
     'DebugGUI.h'               = 'app'
-    'Physics.c'                = 'dead'
-    'Physics.h'                = 'dead'
-    'camera/Camera.c'          = 'dead'
-    'camera/Camera.h'          = 'dead'
-    'glad.c'                   = 'third_party'
 }
 $GlHeaders = @('windows.h', 'glad/glad.h', 'GLFW/glfw3.h')
 $GlHome = 'engine/core/gl.h'

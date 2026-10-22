@@ -352,8 +352,9 @@ Open issues, for when this resumes:
   stand-in to full detail is not yet compared side by side.
 - **Bench references**: clouds are off by default, so the bench is
   unaffected for now; turning them on by default will need new references.
-- **Header dependencies**: the Makefile rebuilds on `.c` changes only, so
-  editing `WorldConfig.h` alone leaves a stale `cube.exe`.
+- **Header dependencies**: fixed 2026-10-22 (refactor phase 2). The
+  Makefile now tracks headers, so editing `WorldConfig.h` rebuilds
+  everything that includes it.
 
 ## References
 

@@ -1,53 +1,49 @@
+# Build: one .obj per source under ..\build\obj\<folder>, linked once.
+#
+# Each source folder lists its objects (and its compile rule) in a module.mk;
+# adding a folder is one module.mk plus one !include line below.
+#
+# Header dependencies: cl writes one /sourceDependencies JSON per object, and
+# tools\gen_deps.ps1 turns the last build's JSON into $(OBJDIR)\deps.mk before
+# every build, so editing a header rebuilds exactly the objects that include
+# it. Changing CFLAGS or INCLUDE_PATHS is not tracked: run `nmake clean`.
+
 CC = cl.exe
-CFLAGS = /nologo /W3 /O2 /openmp /D_USE_MATH_DEFINES
+CFLAGS = /nologo /W3 /O2 /openmp /D_USE_MATH_DEFINES /MD
 OUTDIR = ..\build
 OBJDIR = $(OUTDIR)\obj
 PROG = $(OUTDIR)\cube.exe
 
-SRCS = Main.c \
-	Sun.c \
-	Skybox.c \
-	Atmosphere.c \
-	Clouds.c \
-	Nebula.c \
-	Rings.c \
-	Bodies.c \
-	Profiler.c \
-	Bench.c \
-	LoadingScreen.c \
-	GUI.c \
-	DebugGUI.c \
-	TerrainGen.c \
-	TerrainDetail.c \
-	Shadows.c \
-	Planets.c \
-	SolarSystem.c \
-	glad.c \
-	LoadShader.c \
-	math/LinearAlg.c \
-	camera/arcballCamera.c \
-	Window.c \
-	geometry/Sphere.c \
-	geometry/Geometry.c \
-	Obj.c \
-	geometry/QuadCube.c \
-	geometry/QuadTree.c \
-	Water.c \
-	common/Common.c \
-	common/CommonGL.c \
-	common/Textures.c \
-	Buffers.c \
-	camera/Input.c \
-	engine/core/paths.c
+INCLUDE_PATHS = -I "..\third_party\include" -I "." -I math -I geometry -I common -I camera
+LIBS = ..\third_party\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib
 
-INCLUDE_PATHS = -I "..\dependencies\include" -I "." -I math -I geometry -I common -I camera
-LIBS = ..\dependencies\lib\glfw3.lib opengl32.lib user32.lib gdi32.lib shell32.lib
+# Used by the batch rules in each module.mk. /MP compiles a folder's
+# out-of-date files in parallel.
+COMPILE = $(CC) $(CFLAGS) $(INCLUDE_PATHS) /MP /c
 
+OBJS =
+
+!include module.mk
+!include math\module.mk
+!include camera\module.mk
+!include common\module.mk
+!include geometry\module.mk
+!include engine\core\module.mk
+!include ..\third_party\module.mk
+
+# First target = the default goal, so it must come before deps.mk's targets.
 all: $(PROG)
 
-$(PROG): $(SRCS)
-	@if not exist $(OBJDIR) mkdir $(OBJDIR)
-	$(CC) /MD $(CFLAGS) $(INCLUDE_PATHS) $(SRCS) /Fo$(OBJDIR)\ /Fe$(PROG) /link $(LIBS)
+!if [powershell -NoProfile -ExecutionPolicy Bypass -File ..\tools\gen_deps.ps1 -ObjDir $(OBJDIR) -Out $(OBJDIR)\deps.mk]
+!endif
+!if exist($(OBJDIR)\deps.mk)
+!include $(OBJDIR)\deps.mk
+!endif
+
+$(PROG): $(OBJS)
+	link /nologo /OUT:$(PROG) @<<
+$(OBJS) $(LIBS)
+<<
 
 clean:
 	if exist $(OBJDIR) rmdir /s /q $(OBJDIR)
