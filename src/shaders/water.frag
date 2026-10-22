@@ -9,25 +9,35 @@ out vec4 FragColor;
 uniform mat4 model;
 uniform vec3 lightPosition;
 uniform vec3 cameraPos;
-// FFT ocean (Water.c): slopes and displacement derivatives per patch length.
-uniform sampler2D waveSlope;     // dh/dx, dh/dz, (dh/dx)^2, (dh/dz)^2
-uniform sampler2D waveJacobian;  // dDx/dx, dDz/dz, dDx/dz
+// FFT ocean (Water.c): slopes and displacement derivatives per patch
+// length, one layer per cascade, largest first.
+uniform sampler2DArray waveSlope;     // dh/dx, dh/dz, (dh/dx)^2, (dh/dz)^2
+uniform sampler2DArray waveJacobian;  // dDx/dx, dDz/dz, dDx/dz
 uniform float waveAmp;
 uniform float waveChoppy;
-uniform sampler2D detailNormal;
 uniform samplerCube skybox;
 // Sun shadows: cascades + the global map (shadow.glsl), 4-tap filter.
 #define SHADOW_TAPS 4
 #include "shadow.glsl"
 uniform float waveNormalStrength;
-uniform float waveTiling;
+// Each cascade's patches per body radius (Main.c: true size), on the cube
+// faces of wavecube.glsl.
+#include "wavecube.glsl"
+uniform float waveTilings[WAVE_CASCADES];
+// Each cascade's drawn size over true size: its heights scale with its
+// patches, so its slopes do not change (water.vert).
+uniform float waveCascadeScales[WAVE_CASCADES];
+// Field units (body radii per unit waveAmp) to the true swell, as
+// water.vert's geometry: slopes come out in m/m.
+uniform float waveGeomScale;
 uniform float time;
 // Baked planet height field (heightbake.frag), the same texture quad.frag
 // shades from, so the land/ocean mask lines up with the coastline the planet
 // shader draws. lodK folds the pixel/texel angular-size ratio into the lod;
 // it must be the same formula quad.frag uses or the discard edge drifts off
 // the drawn coastline.
-uniform sampler2D heightMap;
+uniform samplerCube heightMap;
+#include "planetmap.glsl"
 uniform float lodK;
 // Sea level + ocean depth from the baked, eroded height field (TerrainGen.c).
 // The identical seaLevel quad.frag ramps with, so the discard edge lands on
@@ -38,9 +48,9 @@ uniform float oceanDepth;
 // Seafloor shelf depth (planet radii), same profile as quad.vert, so the
 // water column thickness behind each pixel matches the drawn seafloor.
 uniform float oceanRelief;
-// Light absorbed per planet radius of water path: clear shallows, opaque abyss.
-// quad.frag uses the same value to skip seafloor this water hides.
-const float WATER_ABSORB = 500.0;
+// Column absorption, shared with quad.frag (which skips the seafloor this
+// water hides and tints what it lets through).
+#include "watercolumn.glsl"
 // 1 when the camera is outside the water shell; gates the back-face early-out.
 uniform float outsideShell;
 
@@ -76,7 +86,6 @@ float diffuse(vec3 n, vec3 l, float p) {
 // the glint sparkles off them; where a pixel averages them away they move
 // into S and the same formula gives the broad, smooth sun glint seen from
 // space, with no tiling and no shimmer. Anisotropic Beckmann + Smith.
-uniform float detailVar;          // mean squared slope of one detail layer
 // Wind-wave roughness (Cox & Munk 1954, clean sea): slope variance upwind
 // and crosswind of the local wind (oceanMap below). Real wind waves span
 // ~1 cm to ~100 m, far below what the FFT patch resolves at planet scale,
@@ -89,58 +98,59 @@ const float WIND_WAVE_MAX_M = 100.0;
 // Same sun radiance as quad.frag, so glint and land share one sun.
 const vec3 SUN_RADIANCE = vec3(1.0, 0.97, 0.90) * 1.15;
 // Artistic gain on the sun glint only. The scene's sun is no brighter than
-// the land lighting, so the physical glint (~F * p / 4) peaks near 0.05 and
-// reads as muted; this restores the bright glint of the old Seascape lobe
-// (~1.0 at its peak) while the BRDF keeps its shape and width.
-const float GLINT_INTENSITY = 15.0;
+// the land lighting, so the physical glint (~F * p / 4) reads as muted
+// seen from above. Only there: toward grazing, Fresnel and the BRDF's
+// 1 / cos(view) already make the reflection blinding, and the gain washed
+// the sea out into a white sheet. GLINT_GAIN_VIEW: cosine of the view
+// angle to the surface over which it ramps from 1 to the full gain.
+const float GLINT_INTENSITY = 4.0;
+const vec2 GLINT_GAIN_VIEW = vec2(0.15, 0.6);
 
 // ---- Living-planet sea state (TerrainGen.c bakeOcean) ----
 // R wind speed / windMax, GB wind direction (east, north) * 0.5 + 0.5,
 // A fetch (0 in the lee of land, 1 over a long run of open ocean). The
 // same prevailing winds carry the land's rain, so stormy seas, calm
 // doldrums and wet windward coasts line up.
-uniform sampler2D oceanMap;
+uniform samplerCube oceanMap;
 uniform float windMax;
 // Whitecap area fraction (Monahan & O'Muircheartaigh 1980): 3.84e-6 U^3.41,
 // ~0.3% at 7 m/s, ~4% in a 15 m/s gale. The gain lifts it a little so the
 // stormy belts read from orbit.
 const float WHITECAP_GAIN = 1.5;
-// Breaking waves: crest lines along the depth contours (waves break where
-// the depth falls to about their height), rolling shoreward. SURF_DEPTH is
-// the surf zone's width in height units, SURF_FREQ crests per height unit,
-// SURF_SPEED crests per time unit (time = seconds / 100).
-const float SURF_DEPTH = 0.02;
-const float SURF_FREQ = 200.0;
-const float SURF_SPEED = 8.0;
+// Displacement Jacobian range over which the shading slope hands over from
+// the plain height field (folded crest, J <= x) to the choppy one (J >= y).
+const vec2 FOLD_J = vec2(0.0, 0.3);
+// Shore foam, in metres from the coastline (depth / seabed slope, from the
+// baked maps). It used to be sized in height-map depth units, so its width
+// on the ground followed the seabed slope: on a gentle shelf the "thin" wet
+// line was a wide glowing ribbon, and the surf bands packed below a pixel
+// apart and aliased into hatching.
+// Swash: the wet foam line where the water meets the beach.
+const float WASH_WIDTH_M = 25.0;
+// Breaking waves: crest lines along the shore within SURF_ZONE_M of it,
+// SURF_SPACING_M apart, rolling shoreward at SURF_SPEED_MPS. These are
+// true-size values; the surf belongs to the swell, so it is drawn at the
+// swell's Wave scale (Froude: lengths x s, speed x sqrt(s)). At true size
+// the bands were below a pixel from any altitude the coast is seen from.
+const float SURF_ZONE_M = 400.0;
+const float SURF_SPACING_M = 60.0;
+const float SURF_SPEED_MPS = 6.0;
+// Mean of the crest band profile (below), what bands below a pixel average to.
+const float SURF_BAND_MEAN = 0.22;
 
 // ---- Sea ice ----
 // Same temperature as quad.frag's land (latitude, planet offset, noise),
 // at sea level. The sea freezes a little colder than land snow settles
-// (salt, ocean heat): must match SEA_ICE_OFFSET in water.vert.
+// (salt, ocean heat): SEA_ICE_OFFSET (seastate.glsl).
 uniform float tempOffset;
 uniform float snowTemp;
 uniform vec3 snowColor;           // linear, as quad.frag's snow
-const float SEA_ICE_OFFSET = -0.04;
 const vec3 ICE_BARE = vec3(0.30, 0.42, 0.52);   // linear albedo, young blue ice
 const vec3 ICE_AMBIENT = vec3(0.10, 0.12, 0.16); // quad.frag's ambientSky
 
-float hash13(vec3 p)
-{
-	p = fract(p * 0.1031);
-	p += dot(p, p.zyx + 31.32);
-	return fract((p.x + p.y) * p.z);
-}
-
-float vnoise3(vec3 p)
-{
-	vec3 i = floor(p);
-	vec3 f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(mix(hash13(i), hash13(i + vec3(1, 0, 0)), f.x),
-	               mix(hash13(i + vec3(0, 1, 0)), hash13(i + vec3(1, 1, 0)), f.x), f.y),
-	           mix(mix(hash13(i + vec3(0, 0, 1)), hash13(i + vec3(1, 0, 1)), f.x),
-	               mix(hash13(i + vec3(0, 1, 1)), hash13(i + vec3(1, 1, 1)), f.x), f.y), f.z);
-}
+// Per-cascade wave strength over the planet, and the value noise (same as
+// water.vert).
+#include "seastate.glsl"
 
 float erfcApprox(float x)
 {
@@ -258,10 +268,6 @@ void main()
 	// (pure unit-sphere geometry), so the water shell discards where the
 	// planet shows land, letting continents stand through the ocean.
 	vec3 dObj = normalize(fSurfDir);
-	// Screen-space derivatives must be taken while the whole 2x2 quad is
-	// still alive, i.e. before the discards below.
-	vec3 dDirX = dFdx(dObj);
-	vec3 dDirY = dFdy(dObj);
 
 	// Cheap early-out: the shell is drawn double-sided (patch skirts need
 	// culling off), so its back-facing far-hemisphere fragments would run
@@ -274,12 +280,10 @@ void main()
 		discard;
 
 	float zc = clamp(dObj.z, -1.0, 1.0);
-	vec2 huv = vec2((atan(dObj.y, dObj.x)/PI + 1.0)*0.5,
-	                (asin(zc)/PI + 0.5));
 	float cosLat = max(sqrt(max(1.0 - zc*zc, 1e-4)), 0.02);
 	float graz = max(abs(dot(normalize(localPos), normalize(Vv))), 0.15);
-	float lod = log2(max(length(Vv)*lodK, 1e-4)) - log2(graz) + log2(1.0/cosLat);
-	float h = textureLod(heightMap, huv, clamp(lod, 0.0, 11.0)).r;
+	float lod = log2(max(length(Vv)*lodK, 1e-4)) - log2(graz) + planetMapLodBias(dObj);
+	float h = planetMapFine(heightMap, dObj, clamp(lod, 0.0, planetMapMaxLod(heightMap)));
 	float e = clamp(h, 0.0, 1.0);
 	if (e > seaLevel)
 		discard;
@@ -288,76 +292,131 @@ void main()
 	// percentile depth of the eroded field so the tint spans its real range.
 	float depth = seaLevel - e;
 	float depthT = clamp(depth / max(oceanDepth, 1e-4), 0.0, 1.0);
-	// Beer-Lambert transmittance down to the seafloor and back along the
-	// view ray: 1 at the coastline, so the water edge fades into the shore.
-	float column = oceanRelief * depthT * depthT;
-	float transmit = exp(-WATER_ABSORB * column / graz);
+	// Transmittance down to the seafloor and back along the view ray
+	// (watercolumn.glsl): 1 at the coastline, so the water edge fades into
+	// the shore.
+	float transmit = waterTransmit(depthT, oceanRelief, graz);
 
-	vec2 duv = huv;
-	vec2 uv = duv * waveTiling;
+	// Geographic east/north frame: the axes the wind (oceanMap) and the
+	// BRDF's slope variances S are expressed in.
+	vec3 T = normalize(vec3(-dObj.y, dObj.x, 1e-4));
+	vec3 B = normalize(cross(dObj, T));
 
-	// Long/lat UV gradients for the mipmapped wave/detail maps, chained
-	// analytically from the direction's derivatives (taken before any
-	// discard): no 1 -> 0 jump at the atan seam to pick the smallest mip.
-	float rxy2 = max(dObj.x*dObj.x + dObj.y*dObj.y, 1e-6);
-	vec2 dx = vec2((dObj.x*dDirX.y - dObj.y*dDirX.x) / (2.0*PI*rxy2),
-	               dDirX.z / (PI*sqrt(rxy2)));
-	vec2 dy = vec2((dObj.x*dDirY.y - dObj.y*dDirY.x) / (2.0*PI*rxy2),
-	               dDirY.z / (PI*sqrt(rxy2)));
+	// Sea state (seastate.glsl, as water.vert): each cascade's strength from
+	// the shore, the baked wind and fetch, swell trains, gusts and the ice.
+	// Only the resolved waves (gain) carry the swell and gust noise. The
+	// roughness the mips and the BRDF average them into takes the noise-free
+	// gains (gainS): from orbit the noise there turned the glint into
+	// splotchy white patches.
+	//
+	// Pixel footprint (body radii) from distance and view angle alone, the
+	// height-map lod's formula above (dist * lodK in map texels, / graz for
+	// the stretch toward grazing). Not screen derivatives of fSurfDir: that
+	// is the undisplaced point, while the triangles are drawn displaced
+	// (swell + choppy shift), so its derivatives are constant per triangle,
+	// jump at every edge and blow up where the chop squeezes one. Through
+	// the mips and the roughness they lit the triangle edges up inside the
+	// glint. The wave mips were isotropic anyway (no anisotropic filtering).
+	float pixelAngle = length(Vv) * lodK * planetMapTexel(heightMap) / graz;
+	float seaLod = log2(max(pixelAngle / planetMapTexel(oceanMap), 1e-6)) + planetMapLodBias(dObj);
+	vec4 seaState = textureLod(oceanMap, dObj, clamp(seaLod, 0.0, planetMapMaxLod(oceanMap)));
+	float U = seaState.r * windMax;
+	float fetchF = seaState.a;
+	float gust = seaGust(dObj, pixelAngle);
+	float iceCalm = seaIceCalm(dObj);
+	vec3 gain = waveCascadeGains(depthT, U, fetchF, iceCalm, gust, seaSwell(dObj));
+	vec3 gainS = waveCascadeGains(depthT, U, fetchF, iceCalm, 1.0, 1.0);
 
-	// World size (unit-sphere radii) of one wave patch along east/north on
-	// the long/lat map; turns the per-patch derivatives into world slopes.
-	vec2 patchLen = vec2(2.0*PI*cosLat, PI) / waveTiling;
-	vec4 slTex = textureGrad(waveSlope, uv, dx*waveTiling, dy*waveTiling);
-	vec2 sl = slTex.rg * waveAmp / patchLen;
-	vec3 jt = textureGrad(waveJacobian, uv, dx*waveTiling, dy*waveTiling).rgb * (waveAmp * waveChoppy);
-	float jxx = jt.r / patchLen.x;
-	float jzz = jt.g / patchLen.y;
-	float jxz = jt.b / patchLen.y;   // dDx/dz
-	float jzx = jt.b / patchLen.x;   // dDz/dx (same spectrum, east scale)
-	// Jacobian of the choppy displacement: < 1 where crests pinch, < 0 folds.
-	float J = (1.0 + jxx) * (1.0 + jzz) - jxz * jzx;
+	// Wave slopes, summed over the cube faces covering this point
+	// (wavecube.glsl; one face except in the narrow edge bands) and the
+	// cascades. Their mips (from the pixel footprint) filter the waves out
+	// with distance and the BRDF below picks up what they lose.
+	float waveRes = float(textureSize(waveSlope, 0).x);
+	vec3 fw = waveFaceWeights(dObj);
+	float fNorm = waveFaceNorm(fw);
+	// Finest cascade's rms slope (its top mip), to normalize the surf
+	// breakup noise taken from it.
+	vec4 fineMs = textureLod(waveSlope, vec3(0.5, 0.5, float(WAVE_CASCADES - 1)), 16.0);
+	float fineRms = sqrt(max(fineMs.b + fineMs.a, 1e-12));
+	vec3 slope = vec3(0.0);   // body-local surface gradient
+	vec2 S = vec2(0.0);       // slope variance the pixel averages away (east, north)
+	float J = 0.0;            // displacement Jacobian - 1
+	float breakupN = 0.0;     // finest cascade's slope, for the surf crests
+	for (int k = 0; k < 3; k++) {
+		if (fw[k] <= 0.0)
+			continue;
+		vec3 E0, E1;
+		vec2 q = waveFace(k, dObj, E0, E1);
+		// Sum the cascades' slopes, displacement derivatives and slope
+		// variances on the face axes first. Each cascade's map is rotated
+		// (wavecube.glsl), so what it returns along its own axes is turned
+		// back: slopes by R's transpose, the displacement Jacobian (a
+		// tensor) by R^T M R, the variances onto the face axes.
+		vec2 sl = vec2(0.0);
+		mat2 jm = mat2(0.0);
+		vec2 Sq = vec2(0.0);
+		for (int c = 0; c < WAVE_CASCADES; c++) {
+			float t = waveTilings[c];
+			mat2 R = waveCascadeRot(k, c);
+			vec3 uv = vec3(R * (q * t) + waveCascadeOffset(k, c), float(c));
+			// Footprint in this cascade's texels (face coordinates are
+			// body radii near the face centre).
+			float wlod = log2(max(pixelAngle * t * waveRes, 1e-6));
+			// FFT field to true slope per unit face coordinate: amplitude,
+			// field units to metres of swell, patches per radius, sea state.
+			float base = waveAmp * waveGeomScale * waveCascadeScales[c] * t;
+			float K = base * gain[c];
+			float Ks = base * gainS[c];
+			vec4 slTex = textureLod(waveSlope, uv, wlod);
+			sl += (slTex.rg * K) * R;
+			vec3 jt = textureLod(waveJacobian, uv, wlod).rgb * (K * waveChoppy);
+			jm += transpose(R) * mat2(jt.r, jt.b, jt.b, jt.g) * R;
+			// Mean square minus the square of the mean, both from the same
+			// mip fetch: what this cascade's mip averaged away.
+			vec2 vr = max(slTex.ba - slTex.rg * slTex.rg, 0.0) * (Ks * Ks);
+			vec2 r2 = vec2(R[0][0] * R[0][0], R[0][1] * R[0][1]);   // cos^2, sin^2
+			Sq += vec2(r2.x * vr.x + r2.y * vr.y, r2.y * vr.x + r2.x * vr.y);
+			if (c == WAVE_CASCADES - 1)
+				breakupN += fw[k] * (slTex.r + slTex.g) / fineRms;
+		}
+		float jxx = jm[0][0], jzz = jm[1][1], jxz = jm[0][1];
+		// Jacobian of the choppy displacement: < 1 where crests pinch, < 0 folds.
+		float Jk = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
+		// Slope of the displaced surface = cross of its tangents
+		// (1+jxx, jzx, sl.x) x (jxz, 1+jzz, sl.y), rescaled to unit up.
+		// Dividing by J steepens the pinched crests, without bound as they
+		// fold (J -> 0, then < 0): a clamp there left near-vertical normals
+		// facing away from the light, dark dots along the crests. Over the
+		// fold the plain height-field slope sl takes over instead (the
+		// crest is foam there anyway: capsResolved below).
+		vec2 sheared = -vec2(jxz*sl.y - sl.x*(1.0 + jzz),
+		                     sl.x*jxz - (1.0 + jxx)*sl.y) / max(Jk, FOLD_J.y);
+		vec2 fftSlope = mix(sl, sheared, smoothstep(FOLD_J.x, FOLD_J.y, Jk));
+		slope += fw[k] * waveFaceGrad(fftSlope * waveNormalStrength, E0, E1);
 
-	// Normal of the displaced surface = cross of its tangents
-	// (1+jxx, jzx, sl.x) x (jxz, 1+jzz, sl.y) in (east, north, up),
-	// rescaled to unit up so it reads as a slope.
-	vec2 fftSlope = -vec2(jzx*sl.y - sl.x*(1.0 + jzz),
-	                      sl.x*jxz - (1.0 + jxx)*sl.y) / max(J, 0.05);
+		// Variance per face axis, turned onto east/north.
+		Sq *= waveNormalStrength * waveNormalStrength;
+		vec3 G0 = waveFaceGrad(vec2(1.0, 0.0), E0, E1);
+		vec3 G1 = waveFaceGrad(vec2(0.0, 1.0), E0, E1);
+		vec2 g0 = vec2(dot(G0, T), dot(G0, B));
+		vec2 g1 = vec2(dot(G1, T), dot(G1, B));
+		S += fw[k] * (Sq.x * g0 * g0 + Sq.y * g1 * g1);
+		J += fw[k] * (Jk - 1.0);
+	}
+	slope *= fNorm;
+	J = 1.0 + J * fNorm;
+	breakupN *= fNorm;
 
-	// FFT swell slope + two scrolling tiled detail-normal layers for
-	// high-frequency sparkle (the two-scale method).
-	vec2 d1 = (textureGrad(detailNormal, duv*(waveTiling*2.0) + vec2(0.30, 0.17)*time,
-	                       dx*(waveTiling*2.0), dy*(waveTiling*2.0)).rg - 0.5) * 2.0;
-	vec2 d2 = (textureGrad(detailNormal, duv*(waveTiling*5.0) - vec2(0.19, 0.31)*time,
-	                       dx*(waveTiling*5.0), dy*(waveTiling*5.0)).rg - 0.5) * 2.0;
-	vec2 slope = waveNormalStrength * fftSlope + d1 * 0.35 + d2 * 0.2;
-
-	// Slope variance the pixel averages away (the BRDF roughness), in the
-	// same east/north world units as the slopes. FFT: mean square minus the
-	// square of the mean, both from the same mip fetch as sl.
-	float ws = waveAmp * waveNormalStrength;
-	vec2 sm = sl * waveNormalStrength;
-	vec2 S = max(slTex.ba * (ws * ws) / (patchLen * patchLen) - sm * sm, 0.0);
-	// Detail layers (isotropic): their mips flatten the sampled normal, so
-	// the share they lose returns as variance. Their finest features span a
-	// couple of texels, so most of it is gone within ~4 mip levels.
-	float lod1 = log2(max(max(length(dx), length(dy)) * waveTiling * 2.0 * 128.0, 1e-6));
-	float lod2 = lod1 + log2(2.5);   // second layer is tiled 5/2 as densely
-	S += detailVar * (0.35 * 0.35 * smoothstep(0.0, 4.0, lod1)
-	                + 0.20 * 0.20 * smoothstep(0.0, 4.0, lod2));
 	// Unresolved wind waves: slope variance is spread evenly over log
 	// wavelength (k^-4 height spectrum), so the share below the pixel
 	// footprint is its log position in the wind-wave band.
-	float pixelAngle = max(length(dDirX), length(dDirY));
 	float footM = pixelAngle * planetRadiusM;
 	float unresolved = clamp(log2(footM / WIND_WAVE_MIN_M) / log2(WIND_WAVE_MAX_M / WIND_WAVE_MIN_M), 0.0, 1.0);
-	// Local wind: short wind waves develop within a few km, so fetch only
-	// trims the roughness a little (it matters far more for the swell and
-	// whitecaps). Cox-Munk upwind / crosswind variances, rotated from the
-	// wind's axes onto east/north.
-	vec4 seaState = textureGrad(oceanMap, huv, dx, dy);
-	float U = seaState.r * windMax;
-	float fetchF = seaState.a;
+	// Local wind (the baked field, without the gust noise, as gainS): short
+	// wind waves develop within a few km, so fetch only trims the roughness
+	// a little (it matters far more for the swell and whitecaps). Cox-Munk
+	// upwind / crosswind variances, rotated from the wind's axes onto
+	// east/north.
 	vec2 wdir = seaState.gb * 2.0 - 1.0;
 	wdir = dot(wdir, wdir) > 1e-4 ? normalize(wdir) : vec2(1.0, 0.0);
 	float Ur = U * mix(0.7, 1.0, fetchF);
@@ -366,10 +425,7 @@ void main()
 	S += unresolved * vec2(coxMunk.x * w2.x + coxMunk.y * w2.y,
 	                       coxMunk.x * w2.y + coxMunk.y * w2.x) + 1e-4;
 
-	// Tangent basis of the equirectangular (long/lat) wave map on the sphere.
-	vec3 T = normalize(vec3(-dObj.y, dObj.x, 1e-4));
-	vec3 B = normalize(cross(dObj, T));
-	vec3 Nobj = normalize(dObj - (slope.x * T + slope.y * B));
+	vec3 Nobj = normalize(dObj - slope);
 	// model is uniform scale * rotation, so inverse(mat3(model)) * n is
 	// n * mat3(model) up to a scale the normalize removes.
 	vec3 N = normalize(Nobj * mat3(model));
@@ -474,11 +530,14 @@ void main()
 
 	// Sun glint from the filtered-ocean BRDF: sparkle where the waves are
 	// resolved, a smooth glint where they are averaged into roughness.
-	// Tinted by the sun's transmittance; the scalar keeps driving the
-	// opacity below.
-	float spec = oceanSunBRDF(L, V, N, Tx, Ty, S) * GLINT_INTENSITY;
-	float glint = spec * sun * max(sunT.r, max(sunT.g, sunT.b));
+	// Tinted by the sun's transmittance.
+	float glintGain = mix(1.0, GLINT_INTENSITY, smoothstep(GLINT_GAIN_VIEW.x, GLINT_GAIN_VIEW.y, dot(upGeo, V)));
+	float spec = oceanSunBRDF(L, V, N, Tx, Ty, S) * glintGain;
 	color += spec * SUN_RADIANCE * sunCol;
+	// The light the surface itself sends back (sky mirror + glint). It
+	// stays when the column below turns clear, so it is blended on top of
+	// the seafloor rather than faded out with the water body (below).
+	vec3 surface = reflected * fresnel + spec * SUN_RADIANCE * sunCol;
 
 	// Sea ice: the land's sea-level temperature (quad.frag) with the same
 	// noise scale; inside the margin the pack breaks into floes. The floe
@@ -503,22 +562,49 @@ void main()
 	// (radians of the unit sphere per pixel): visible from low altitude,
 	// gone from orbit, where real surf is far below a pixel.
 	float surfVis = 1.0 - smoothstep(2e-5, 1.5e-4, pixelAngle);
-	// Breaking waves roll in along the depth contours; strongest on
-	// windward coasts facing a long fetch, small on lee shores. The detail
-	// layers break the crest lines up along the coast.
+	// Distance to the coastline (m): the depth over the seabed slope, the
+	// slope by differences of the very height samples the depth (and the
+	// land discard) come from, half a texel of their mip apart. Within a
+	// texel the filtered field is near linear, so this is the true distance
+	// to the drawn waterline; the baked slope map disagrees with it inside
+	// texels and left the swash line as a row of dots at texel centres.
+	float hLod = clamp(lod, 0.0, planetMapMaxLod(heightMap));
+	float hEps = 0.5 * planetMapTexel(heightMap) * exp2(hLod);
+	float hE = planetMapFine(heightMap, normalize(dObj + T * hEps), hLod);
+	float hN = planetMapFine(heightMap, normalize(dObj + B * hEps), hLod);
+	float seabed = length(vec2(hE - h, hN - h)) / hEps;
+	float coastM = depth / max(seabed, 1e-6) * planetRadiusM;
+	// Breaking waves roll in parallel to the shore; strongest on windward
+	// coasts facing a long fetch, small on lee shores. The finest cascade
+	// breaks the crest lines up along the coast. Bands closer than ~2 px
+	// fade to their mean instead of aliasing.
 	float surfStrength = smoothstep(0.1, 0.6, fetchF) * smoothstep(2.0, 8.0, U);
-	float surfZone = 1.0 - smoothstep(0.5 * SURF_DEPTH, SURF_DEPTH, depth);
-	float surfW = fract(depth * SURF_FREQ + time * SURF_SPEED);
+	float surfScale = waveCascadeScales[0];
+	float surfZoneM = SURF_ZONE_M * surfScale;
+	float surfSpacingM = SURF_SPACING_M * surfScale;
+	float surfSpeed = SURF_SPEED_MPS * sqrt(surfScale);
+	float surfZone = 1.0 - smoothstep(0.5 * surfZoneM, surfZoneM, coastM);
+	// Only where the swell can break: water no deeper than about where it
+	// calms (seastate.glsl). depth / slope extrapolates a "coast" beside
+	// any underwater rise, which lit shoals with triangular surf patches
+	// (the bilinear height field's tents) far out from the real shore.
+	surfZone *= 1.0 - smoothstep(1.0, 2.0, seaDepthM(depthT) / max(waveShoreDepths[0], 1e-3));
+	float surfW = fract(coastM / surfSpacingM + fract(time * 100.0 * surfSpeed / surfSpacingM));
 	float crestBand = smoothstep(0.0, 0.06, surfW) * (1.0 - smoothstep(0.06, 0.45, surfW));
-	float breakup = smoothstep(-0.4, 0.4, d1.x + d2.y);
+	crestBand = mix(SURF_BAND_MEAN, crestBand, 1.0 - smoothstep(0.25, 0.5, footM / surfSpacingM));
+	float breakup = smoothstep(-0.4, 0.4, breakupN);
 	float surf = crestBand * surfZone * mix(0.15, 1.0, surfStrength) * mix(0.4, 1.0, breakup);
-	// Swash: the thin wet foam line where the water meets the beach.
-	float wash = 1.0 - smoothstep(0.0, 0.004, depth);
+	// Swash line. Narrower than a pixel, it covers the pixel at its share
+	// of it rather than widening to a full pixel of foam.
+	float washW = max(WASH_WIDTH_M, footM);
+	float wash = (1.0 - smoothstep(0.0, washW, coastM)) * (WASH_WIDTH_M / washW);
 	float shore = clamp(wash * 0.8 + surf, 0.0, 1.0) * surfVis;
 	// Whitecaps: where the waves are resolved, where the choppy
 	// displacement pinches (low Jacobian) in a strong, developed sea; where
 	// they are not (most views at planet scale), the Monahan area fraction.
-	float capsResolved = (1.0 - smoothstep(0.3, 0.8, J)) * smoothstep(4.0, 10.0, U) * fetchF;
+	// The resolved caps follow the gusts; the orbital coverage stays on the
+	// smooth wind field, like the glint roughness.
+	float capsResolved = (1.0 - smoothstep(0.3, 0.8, J)) * smoothstep(4.0, 10.0, U * gust) * fetchF;
 	float capsCoverage = min(3.84e-6 * pow(U, 3.41) * fetchF * WHITECAP_GAIN, 1.0);
 	float whitecaps = mix(capsResolved, capsCoverage, unresolved) * (0.25 + 0.75 * depthT);
 	float foam = clamp(shore + whitecaps, 0.0, 1.0) * (1.0 - ice);
@@ -536,15 +622,21 @@ void main()
 	color = mix(color, iceLit, ice);
 
 	// Surface extinction, matching quad.frag so the coastline stays seamless.
+	// Extinction only (a multiply), so one evaluation serves both terms.
 	if (hasAtmosphere > 0.5) {
-		color = applyAtmosphere(color, lodCameraPos - bodyCenter, localPos);
+		vec3 ext = applyAtmosphere(vec3(1.0), lodCameraPos - bodyCenter, localPos);
+		color *= ext;
+		surface *= ext;
 	}
 
 	// Opacity: the seafloor shows through what the water column, the surface
-	// reflection and foam let pass; the glint stays opaque so it survives
-	// the shallows.
+	// reflection and foam let pass. Premultiplied (Main.c blends ONE,
+	// ONE_MINUS_SRC_ALPHA): where the column turns clear the surface's own
+	// reflection and glint are added over the floor instead of fading out
+	// with the water body, which left a dark ring around every shallow.
 	float alpha = 1.0 - transmit * (1.0 - fresnel) * (1.0 - foam);
-	alpha = max(alpha, clamp(glint, 0.0, 1.0));
 	alpha = mix(alpha, 1.0, ice);
-	FragColor = vec4(toneMap(max(color, 0.0)), alpha);
+	vec3 outCol = toneMap(max(color, 0.0)) * alpha
+	            + toneMap(max(surface, 0.0)) * (1.0 - alpha);
+	FragColor = vec4(outCol, alpha); if (fWave > 1.0) FragColor = vec4(1.0, 0.0, 0.0, 1.0); if (any(isnan(outCol))) FragColor = vec4(0.0, 1.0, 0.0, 1.0);
 }

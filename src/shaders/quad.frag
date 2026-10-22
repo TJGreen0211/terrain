@@ -45,49 +45,65 @@ uniform sampler2D texture1;
 // (cameraPos = lodCameraPos = 0). Planet-local positions are fragPos -
 // bodyCenter.
 uniform vec3 bodyCenter;
-// Height field baked once at startup from the original fbm3 (heightbake.frag).
-// lodK folds the pixel/texel angular-size ratio into log2(dist*lodK), plus
-// the equirect pole and grazing corrections, clamped to the bake's 11 mips
-// (2048 wide).
-uniform sampler2D heightMap;
+// Height field baked at startup (TerrainGen.c, heightbake.frag), a cube map
+// looked up by body-local direction (planetmap.glsl). lodK folds the
+// pixel/texel angular-size ratio into log2(dist*lodK), plus the grazing and
+// face-corner corrections, clamped to the map's mips.
+uniform samplerCube heightMap;
+#include "planetmap.glsl"
 uniform vec3 lodCameraPos;
 uniform float lodK;
 // Sea level from the baked + eroded height field (TerrainGen.c); the height
 // ramp and the material bands all key off this single value, and water.frag
 // gets the identical value so the discard edge sits on the coastline.
 uniform float seaLevel;
-// Water column under sea level (same values and profile as water.frag), for
-// skipping seafloor the water hides (see the deep-sea early-out in main).
+// Water column under sea level (same optics as water.frag, watercolumn.glsl),
+// for skipping seafloor the water hides (see the deep-sea early-out in main)
+// and tinting what it lets through.
 uniform float oceanDepth;
 uniform float oceanRelief;
-const float WATER_ABSORB = 500.0;   // must match water.frag
+#include "watercolumn.glsl"
 // Main-pass near plane, to rewrite gl_FragDepth (see seafloorDepth).
 // The main projection is infinite reversed-Z: depth = depthNear / distance
 // along the view axis.
 uniform float depthNear;
+// Clearance (body radii) the pushed seafloor keeps under sea level: the
+// water shell's largest wave excursion (Main.c waveExcursion), so troughs
+// never dip below it. It used to be a fixed 0.0005 radii, 3.2 km at Earth's
+// size: coastal pixels pushed that far back fell behind skirt walls and
+// neighbouring land patches, which then showed through the clear shallows
+// as blocks and slats along every shore.
+uniform float seaClearance;
 
 const float PI = 3.14159265359;
 
 // Extinction toward the camera, sunlight colour, skylight (Atmosphere.c).
 #include "atmosurface.glsl"
 
-// Terrain height field + lighting controls (tweak here)
-#define TEXEL_ANG       (2.0*PI/2048.0) // heightmap texel angle at the equator, mip 0
+// Terrain height field + lighting controls (tweak here). The *_LOD offsets
+// are in mips of the cube map: tuned on the old 2048-wide equirect map and
+// raised by log2(old texel / face-centre texel) = 0.65 at TERRAIN_MAP_SIZE
+// 1024, so they keep their footprint on the ground.
 #define NORMAL_STRENGTH 0.62    // bump relief amount
-#define SEA_CLIP        0.0005  // min. seafloor clearance under the water, planet radii
 #define BEACH_OFF       0.012   // shoreline width above seaLevel
 #define WET_SAND        0.003   // darker wet sand just above the waterline
 #define LAKE_MIN        0.03    // climate A (lake depth) where lakes start
-#define VALLEY_LOD      3.0     // extra mips for the river-valley greening
-#define LAKE_LOD        2.0     // lakes must survive this many mips (no pit specks)
-#define COAST_LOD       4.0     // beaches need open sea within ~2^COAST_LOD texels
+#define VALLEY_LOD      3.65    // extra mips for the river-valley greening
+#define LAKE_LOD        2.65    // lakes must survive this many mips (no pit specks)
+#define COAST_LOD       4.65    // beaches need open sea within ~2^COAST_LOD texels
 
 // Climate map baked with the height field (TerrainGen.c): R moisture
 // (wind-carried rain + rain shadow, stored at half scale for headroom),
 // G river strength, B alluvial deposits, A lake depth. The style uniforms
 // (palette, temperature/humidity response) come from g_planetStyle and are
 // free to change for alien worlds.
-uniform sampler2D climateMap;
+uniform samplerCube climateMap;
+uniform samplerCube surfaceMap;   // RGB slope, A ambient occlusion (TerrainGen.h)
+// Occlusion strength (debug panel): the skylight takes all of it, the sun
+// TERRAIN_AO_SUN of it, a cavity term that reads as depth from orbit where
+// the shadow maps are too coarse to.
+uniform float terrainAO;
+#define TERRAIN_AO_SUN 0.6
 uniform float landRelief;
 uniform vec3 biomeColors[9];    // rows cold/temperate/hot x cols dry/medium/wet
 uniform vec3 rockColor;
@@ -104,19 +120,8 @@ uniform float hadleyStrength;
 uniform float riverThreshold;
 uniform float rockSlope;
 
-// Equirect uv of a direction + the lod for that latitude (longitude texels
-// shrink by cos(lat), so the same footprint needs a coarser mip).
-vec2 mapUV(vec3 d, float lodBase, out float lod) {
-	float z = clamp(d.z, -1.0, 1.0);
-	float cosLat = max(sqrt(max(1.0 - z*z, 1e-4)), 0.02);
-	lod = clamp(lodBase + log2(1.0/cosLat), 0.0, 11.0);
-	return vec2((atan(d.y, d.x)/PI + 1.0)*0.5, asin(z)/PI + 0.5);
-}
-
-float heightAt(vec3 d, float lodBase) {
-	float lod;
-	vec2 uv = mapUV(d, lodBase, lod);
-	return textureLod(heightMap, uv, lod).r;
+float heightAt(vec3 d, float lod) {
+	return planetMapFine(heightMap, d, lod);
 }
 
 // Seafloor albedo under the water (which adds its own tint): pale sand on
@@ -147,6 +152,43 @@ float vnoise(vec3 p) {
 float vnoiseLod(vec3 d, float f, float pixAng) {
 	float fade = 1.0 - smoothstep(0.25, 0.6, pixAng * f);
 	return mix(0.5, vnoise(d * f), fade);
+}
+
+// Procedural ground textures (TerrainDetail.c, groundtex.frag): tileable
+// rock / ground / sand / snow layers for close-up surface detail. RG =
+// height slope per tile, B = albedo factor, A = height. A tile is one cell
+// of the detail lattice at some level (detail.glsl), so texture coordinates
+// are a small integer cell + fraction: exact anywhere on an Earth-size body,
+// continuous across patches. The tiles do not line up across the 12 cube
+// edges (each face has its own s/t axes): a seam there, only up close.
+// Two lattice levels are blended by distance so a texel stays near a
+// pixel at every range (no visible tiling, no popping), and the whole
+// layer fades out above GROUND_FADE metres per pixel.
+uniform sampler2DArray groundTex;
+uniform float groundTexStrength;   // debug panel, 0 = off
+#define GROUND_TEX_SIZE 512.0
+#define GROUND_RELIEF   0.04          // height range per tile width
+#define GROUND_FADE     vec2(40.0, 300.0)   // m per pixel: full .. gone
+
+// Layers weighted by w (rock, ground, sand, snow) at lattice level n.
+// Returns the albedo factor; grad gets the slope in metres per cube unit
+// along the face's s/t axes (detailSlope's input).
+float groundLevel(int n, vec4 w, float footM, float qLen, out vec2 grad)
+{
+	ivec2 cell;
+	vec2 f;
+	detailLattice(fPatchAddr, fPatchUV, n, cell, f);
+	vec2 uv = vec2(cell & ivec2(63)) + f;
+	float tileM = exp2(1.0 - float(n)) * detailRadius / qLen;
+	float lod = log2(max(footM * GROUND_TEX_SIZE / tileM, 1.0));
+	vec4 acc = vec4(0.0);
+	if (w.x > 0.01) acc += w.x * textureLod(groundTex, vec3(uv, 0.0), lod);
+	if (w.y > 0.01) acc += w.y * textureLod(groundTex, vec3(uv, 1.0), lod);
+	if (w.z > 0.01) acc += w.z * textureLod(groundTex, vec3(uv, 2.0), lod);
+	if (w.w > 0.01) acc += w.w * textureLod(groundTex, vec3(uv, 3.0), lod);
+	// Slope per tile width -> metres per cube unit (a tile is 2^(1-n) units).
+	grad = acc.rg * (GROUND_RELIEF * tileM * exp2(float(n - 1)));
+	return acc.b + (1.0 - (w.x + w.y + w.z + w.w));   // skipped weight stays neutral
 }
 
 // Whittaker-style biome grid: temperature (cold -> hot) x moisture
@@ -197,7 +239,7 @@ float seafloorDepth(float e, vec3 camDir, float graz)
 		return gl_FragCoord.z;
 	float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
 	float D = length(camDir);
-	float clearance = max(SEA_CLIP * R, 4.0 * D / 8388608.0);
+	float clearance = max(seaClearance * R, 4.0 * D / 8388608.0);
 	float poke = (fRadius - 1.0) * R + clearance;   // world units above the target
 	if (poke <= 0.0)
 		return gl_FragCoord.z;
@@ -217,21 +259,20 @@ void main()
 	// planet: dObj lives in the planet-local frame). Every face samples this
 	// one continuous field, so it is seamless across all six quadtree faces.
 	vec3 dObj = normalize(fSurfDir);
-	vec3 up = (abs(dObj.y) > 0.99) ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-	vec3 T = normalize(cross(up, dObj));
-	vec3 B = cross(dObj, T);
 
-	// lod base: pixel angular footprint on the sphere (dist*thetaPixel/r,
+	// lod: pixel angular footprint on the sphere (dist*thetaPixel/r,
 	// folded into lodK) plus grazing correction (footprint grows by 1/cos of
-	// the view angle at the surface).
+	// the view angle at the surface) plus the face-corner bias.
 	vec3 camDir = lodCameraPos - fragPos;
 	float graz = max(abs(dot(normalize(fragPos - bodyCenter), normalize(camDir))), 0.15);
-	float lodBase = log2(max(length(camDir)*lodK, 1e-4)) - log2(graz);
-	// Gradient step = one texel of the mip being sampled, so the bump
-	// resolves exactly the detail the lod shows: a fixed step was ~10
-	// texels wide and blurred every crease up close.
-	float eps = TEXEL_ANG * exp2(clamp(lodBase, 0.0, 11.0));
-	float h  = heightAt(dObj, lodBase);
+	float lodBias = planetMapLodBias(dObj);
+	float maxLod = planetMapMaxLod(heightMap);
+	float lod = clamp(log2(max(length(camDir)*lodK, 1e-4)) - log2(graz) + lodBias, 0.0, maxLod);
+	// Gradient step = one texel of the mip being sampled (its smallest
+	// extent here), so the bump resolves exactly the detail the lod shows:
+	// a fixed step was ~10 texels wide and blurred every crease up close.
+	float eps = planetMapTexel(heightMap) * exp2(lod - lodBias);
+	float h  = heightAt(dObj, lod);
 #ifdef DEPTH_PREPASS
 	gl_FragDepth = seafloorDepth(clamp(h, 0.0, 1.0), camDir, graz);
 	return;
@@ -242,19 +283,20 @@ void main()
 	// by more than ~1/255 of its (dark) brightness: skip all its lighting.
 	if (h < seaLevel) {
 		float dT = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
-		float transmit = exp(-WATER_ABSORB * oceanRelief * dT * dT / graz);
+		float transmit = waterTransmit(dT, oceanRelief, graz);
 		if (transmit < 0.01) {
 			FragColor = vec4(0.0, 0.0, 0.0, 1.0);
 			return;
 		}
 	}
-	float hT = heightAt(normalize(dObj + T * eps), lodBase)
-	         - heightAt(normalize(dObj - T * eps), lodBase);
-	float hB = heightAt(normalize(dObj + B * eps), lodBase)
-	         - heightAt(normalize(dObj - B * eps), lodBase);
-
+	// Slope (raw height per radian, body-local) and ambient occlusion, baked
+	// with the field (TerrainGen.c surfacePixels) and read at the same mip:
+	// one fetch instead of four height differences, and the slope filters
+	// smoothly instead of showing the height texels.
+	vec4 surf = textureLod(surfaceMap, dObj, lod);
 	float e = clamp(h, 0.0, 1.0);
-	vec3 grad = (T * hT + B * hB) / (2.0 * eps);   // central differences
+	vec3 grad = surf.xyz;
+	float ao = surf.w;
 
 	// Terrain detail slope (body-local, m/m; land only): the share the
 	// vertices carry plus the shorter octaves per pixel (down to ~2 px,
@@ -265,7 +307,7 @@ void main()
 		float altD = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
 		gDetail = fDetailSlope;
 #if DETAIL_PIXEL_OCTAVES > 0
-		float envD = detailEnvelope(landRelief * altD * detailRadius, altD);
+		float envD = detailEnvelope(landRelief * altD * detailRadius, length(grad));
 		if (envD > 0.0) {
 			vec3 qD = detailCubePoint(fPatchAddr, fPatchUV);
 			float footM = length(camDir) * detailPix;
@@ -282,14 +324,15 @@ void main()
 	if (e < seaLevel) {
 		// Seafloor, seen through the translucent water (its depth was
 		// pushed behind the shell in the prepass: seafloorDepth).
-		albedo = seafloorColor(e);
+		// The water's alpha takes out the blue share of the column; the
+		// red and green it absorbs faster are taken out here.
+		float dT = clamp((seaLevel - e) / max(oceanDepth, 1e-4), 0.0, 1.0);
+		albedo = seafloorColor(e) * waterFloorTint(dT, oceanRelief, graz);
 		rough = 0.9;
 		waterMask = 0.0;
 	} else {
-		float lod;
-		vec2 uv = mapUV(dObj, lodBase, lod);
-		vec4 clim = textureLod(climateMap, uv, lod);
-		vec4 climWide = textureLod(climateMap, uv, min(lod + VALLEY_LOD, 11.0));
+		vec4 clim = textureLod(climateMap, dObj, lod);
+		vec4 climWide = textureLod(climateMap, dObj, min(lod + VALLEY_LOD, maxLod));
 
 		// Colour variation: continent-scale patches + finer mottling, faded
 		// by the pixel footprint.
@@ -333,7 +376,7 @@ void main()
 		// The coarse mip averages in the nearby seafloor, so it only dips
 		// below sea level near an actual coast: low inland plains stay
 		// plains instead of turning into beaches.
-		float hNear = textureLod(heightMap, uv, min(lod + COAST_LOD, 11.0)).r;
+		float hNear = textureLod(heightMap, dObj, min(lod + COAST_LOD, maxLod)).r;
 		float coastal = 1.0 - smoothstep(seaLevel, seaLevel + 0.01, hNear);
 		float beach = (1.0 - smoothstep(seaLevel + BEACH_OFF * 0.5, seaLevel + BEACH_OFF, e)) * (1.0 - steep) * coastal;
 		float wet = 1.0 - smoothstep(seaLevel, seaLevel + WET_SAND, e);
@@ -349,7 +392,7 @@ void main()
 		// basins become salt pans. Rivers from the drainage map.
 		// min() with a coarser mip drops one-texel erosion pits: only basins
 		// with real area stay flooded.
-		float lakeA = min(clim.a, textureLod(climateMap, uv, min(lod + LAKE_LOD, 11.0)).a * 2.0);
+		float lakeA = min(clim.a, textureLod(climateMap, dObj, min(lod + LAKE_LOD, maxLod)).a * 2.0);
 		// No basins flood (or dry to salt) on a world with no water at all.
 		float lake = smoothstep(LAKE_MIN, LAKE_MIN * 2.0, lakeA) * min(humidity * 4.0, 1.0);
 		float wetBasin = smoothstep(0.15, 0.3, moist);
@@ -365,6 +408,28 @@ void main()
 		albedo = mix(albedo, snowColor * (0.92 + 0.08 * n2), snow);
 		rough = mix(rough, 0.4, snow);
 		waterMask *= 1.0 - snow;
+
+		// Ground textures near the ground, by material (not on water).
+		float footG = length(camDir) * detailPix;
+		float texW = groundTexStrength * (1.0 - smoothstep(GROUND_FADE.x, GROUND_FADE.y, footG))
+		           * (1.0 - waterMask);
+		if (texW > 0.0) {
+			float wRock = steep * (1.0 - snow);
+			float wSand = beach * (1.0 - snow);
+			vec4 w = vec4(wRock, max(1.0 - wRock - wSand - snow, 0.0), wSand, snow);
+			vec3 qG = detailCubePoint(fPatchAddr, fPatchUV);
+			float qLen = length(qG);
+			// Level whose texels are one pixel wide; blend it with the next
+			// coarser one (texels 1-2 and 2-4 px).
+			float L = clamp(log2(2.0 * detailRadius / (GROUND_TEX_SIZE * footG * qLen)), 1.0, 30.0);
+			int n0 = int(floor(L));
+			float t = L - float(n0);
+			vec2 g0, g1;
+			float a0 = groundLevel(n0 - 1, w, footG, qLen, g0);
+			float a1 = groundLevel(n0, w, footG, qLen, g1);
+			gDetail += texW * detailSlope(fPatchAddr.x, qG, mix(g0, g1, t));
+			albedo *= mix(1.0, mix(a0, a1, t), texW);
+		}
 	}
 	color.rgb = albedo;
 	float a2 = max(rough * rough, 0.0004);
@@ -395,6 +460,7 @@ void main()
 	vec3 upGeo = normalize(fragPos - bodyCenter);
 	float sunUp = dot(upGeo, L);
 	vec3 lit = (ambientSky * skyFraction(sunUp) * (0.6 + 0.4 * max(dot(N, upGeo), 0.0))
+	            * mix(1.0, ao, terrainAO)
 	          + NIGHT_FLOOR) * albedo;
 	// Plain Lambert: the cosine falls to zero at the terminator on its own,
 	// and sunTransmittance supplies the reddening. (A wrap term left ~20 %
@@ -432,7 +498,7 @@ void main()
 		// Sunlight reddened by its long path through the air near the
 		// terminator, and cut off as the sun sets behind the limb.
 		vec3 sunCol = sunTransmittance(fragPos - bodyCenter, L, ringSunAngle);
-		lit += (diff + spec) * sunRadiance * sunCol * vis;
+		lit += (diff * mix(1.0, ao, terrainAO * TERRAIN_AO_SUN) + spec) * sunRadiance * sunCol * vis;
 	}
 
 	// Debug panel: which shadow level serves each pixel.

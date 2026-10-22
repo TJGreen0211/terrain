@@ -33,7 +33,7 @@ uniform vec3 sunDir;          // unit, planet -> sun, world axes
 uniform float sunAngle;       // sun's angular radius (sunset cut-off)
 
 // Detail below the weather map.
-uniform sampler2D cloudWind;  // the planet's wind (ocean) map
+uniform samplerCube cloudWind;  // the planet's wind (ocean) map (cube map)
 uniform float windMax;
 uniform float detailLambda0;  // first detail octave's wavelength, m
 uniform vec3 cloudColor;
@@ -146,8 +146,8 @@ void main()
 	// Detail octaves below the map, from ~4 map texels down to the pixel,
 	// carried by the wind like the maps' noise.
 	vec3 pBody = dBody * cloudRadius;
-	vec3 wind = cloudWindAt(dBody, textureLod(cloudWind,
-		vec2((atan(dBody.y, dBody.x) / PI + 1.0) * 0.5, asin(clamp(dBody.z, -1.0, 1.0)) / PI + 0.5), 4.0), windMax);
+	vec3 wind = cloudWindAt(dBody, textureLod(cloudWind, dBody,
+		log2(float(textureSize(cloudWind, 0).x)) - 5.0), windMax);
 	vec3 p0 = pBody - wind * cloudFlowTau.x + cloudFlowSeed0 * detailLambda0;
 	vec3 p1 = pBody - wind * cloudFlowTau.y + cloudFlowSeed1 * detailLambda0;
 	vec2 nn = s > reach ? detailFbm(p0, p1, detailLambda0, footM, CORE_OCTAVES)

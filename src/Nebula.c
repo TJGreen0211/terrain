@@ -129,6 +129,8 @@ static unsigned int frameCount;
 /* Command line. */
 static char bakeName[64];
 static char bakeParams[64];
+static int bakeSeedSet;
+static unsigned int bakeSeed;
 static int bakeSize = NEBULA_SKY_FACE_SIZE;
 static int bakeAxes;
 
@@ -151,6 +153,10 @@ void Nebula_ParseArgs(int argc, char *argv[])
 			bakeSize = atoi(argv[++i]);
 		else if (strcmp(argv[i], "--sky-params") == 0 && i + 1 < argc)
 			strncpy(bakeParams, argv[++i], sizeof bakeParams - 1);
+		else if (strcmp(argv[i], "--sky-seed") == 0 && i + 1 < argc) {
+			bakeSeed = (unsigned int)strtoul(argv[++i], NULL, 10);
+			bakeSeedSet = 1;
+		}
 		else if (strcmp(argv[i], "--sky-axes") == 0)
 			bakeAxes = 1;
 		else if (strcmp(argv[i], "--nebula") == 0)
@@ -622,9 +628,8 @@ static void bakeSky(GLuint cube, int size, int axisDebug, int pump)
 
 	/* Glow pass: mips of the HDR cube (box-filtered, seamless), then
 	   bloom + tone map + contrast into the display-valued sky. Seamless
-	   cube filtering stays on after an in-app bake (the baked sky is drawn
-	   from now on); it is off otherwise, so the stock skybox samples
-	   exactly as before. */
+	   cube filtering stays on: the planet's baked maps are cube maps too
+	   (TerrainGen.c) and need it. */
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 	glActiveTexture(GL_TEXTURE0 + UNIT_HDR);
@@ -650,8 +655,6 @@ static void bakeSky(GLuint cube, int size, int axisDebug, int pump)
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 	endOffscreen(&st);
 	glDeleteTextures(1, &hdrCube);
-	if (pump)
-		glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 }
 
 static void skyDir(char *out, size_t n, const char *name)
@@ -805,6 +808,10 @@ int Nebula_RunBake(void)
 		fprintf(stderr, "[nebula] no settings file for '%s'\n", bakeParams);
 		return 1;
 	}
+	/* --sky-seed overrides the defaults' or the settings file's seed (a
+	   new layout with the same look); the .txt written records it. */
+	if (bakeSeedSet)
+		g_nebula.seed = bakeSeed;
 	Nebula_Init();
 	fprintf(stderr, "[nebula] baking '%s' at %d^2%s\n", bakeName, bakeSize, bakeAxes ? " (axis test)" : "");
 	GLuint cube = newSkyCube(bakeSize);

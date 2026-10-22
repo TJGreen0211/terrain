@@ -7,6 +7,8 @@
 
 #include <windows.h>
 #include <glad/glad.h>
+#include <math.h>
+#include "WorldConfig.h"
 
 /* CPU min/max pyramid of a baked height field (TerrainGen.c). */
 typedef struct TerrainPyramid TerrainPyramid;
@@ -20,20 +22,30 @@ typedef struct TerrainPyramid TerrainPyramid;
 typedef struct {
 	float seaLevel;
 	float oceanDepth;
-	/* RGBA8 climate map baked alongside the height field (same layout, mips):
+	/* RGBA8 climate map baked alongside the height field (the same cube-map
+	   layout, mips):
 	   R = moisture (wind-carried rain, rain shadow, anomaly),
 	   G = river strength (log drainage area, widened by discharge),
 	   B = alluvial deposition from the hydraulic erosion,
 	   A = lake depth (depression filling above sea level).
 	   Freed by TerrainGen_FreePlanet. */
 	unsigned int climateTex;
-	/* RGBA8 ocean map, same layout and mips, from the prevailing winds:
+	/* RGBA8 ocean map (cube map), same layout and mips, from the prevailing
+	   winds:
 	   R = wind speed / WIND_MAX_MS (latitude cells + storm/calm regions),
 	   G, B = wind direction (east, north) * 0.5 + 0.5, the way it blows,
 	   A = fetch: how developed the sea is from open water upwind (0 in the
 	   lee of land, 1 after a long run of open ocean).
 	   Freed by TerrainGen_FreePlanet. */
 	unsigned int oceanTex;
+	/* RGBA16F surface map (cube map, mips): RGB = the height field's slope,
+	   a body-local tangent vector in raw height units per radian; A =
+	   ambient occlusion (cosine-weighted open sky, 0..1). Freed by
+	   TerrainGen_FreePlanet. */
+	unsigned int surfaceTex;
+	/* RMS raw-height step between neighbouring land texels: the map's own
+	   roughness at its finest scale (the detail noise is sized from it). */
+	float landStepRms;
 	/* Height bounds for the quadtree (TerrainGen_HeightRange). */
 	TerrainPyramid *pyramid;
 } PlanetGenParams;
@@ -67,8 +79,10 @@ typedef struct {
 
 extern PlanetStyle g_planetStyle;
 
-/* Binds the climate map to texture unit `unit` and uploads g_planetStyle;
-   harmless for shaders that don't declare the uniforms. */
+/* Binds the climate map to texture unit `unit` (and the surface map to
+   TERRAIN_SURFACE_UNIT) and uploads g_planetStyle; harmless for shaders
+   that don't declare the uniforms. */
+#define TERRAIN_SURFACE_UNIT 16
 void setPlanetSurfaceUniforms(unsigned int shader, int unit);
 
 /* Binds the ocean map to texture unit `unit` for water.vert/.frag. */
@@ -99,8 +113,10 @@ typedef struct {
 	float detailAmt;       /* high-frequency rock texture */
 	/* Erosion (CPU), in pre-normalized [0,1] height units */
 	int thermalPasses;     /* weathering iterations */
-	float thermalTalus;    /* max stable height step per texel */
-	float dropletsPerPx;   /* droplet count = per-px * W * H; dominates bake time */
+	float thermalTalus;    /* max stable height step per reference texel of distance */
+	float dropletsPerPx;   /* droplet count = per-px * 2048 * 1024 (the reference
+	                          equirect grid, TerrainGen.c), whatever the map
+	                          size; dominates bake time */
 	float dropletErosion;  /* fraction of free capacity eroded per step */
 	float dropletDeposit;  /* fraction of surplus deposited per step */
 	float dropletCapacity; /* sediment capacity coefficient */
@@ -112,7 +128,8 @@ extern TerrainBakeSettings g_terrainBake;
 
 /* Full procedural planet height field bake: GPU shaping (heightbake.frag),
    CPU thermal + hydraulic droplet erosion, percentile normalization, sea
-   level statistics, and the 2048x1024 R16F + mip-chain upload. Reentrant:
+   level statistics, and the R32F cube map (TERRAIN_MAP_SIZE per face) +
+   mip-chain upload. Reentrant:
    call again with a new seed to re-bake (the shader program and working FBO
    are cached; only the returned texture is new and owned by the caller).
    step (may be NULL) is invoked TERRAIN_BAKE_STEPS times through the CPU
@@ -146,8 +163,14 @@ void TerrainGen_FreePlanet(PlanetGenParams *p);
    seaLevel), for the quadtree's culling and split distances. HeightRange covers every value
    the body shaders can sample over a spherical cap (dir: body-local unit
    centre, capAngle in radians) at mip `lod` or finer, bilinear and
-   trilinear filtering included. Both return 0 (range 0..0) before the
-   first bake. */
+   trilinear filtering included. lod is sized against a face-centre texel
+   (TerrainGen_MapTexelRad) and not clamped: the shaders' face-corner bias
+   is added inside, before the clamp to mip 0, as the shaders do. Both
+   return 0 (range 0..0) before the first bake. */
+/* The baked maps' geometry (WorldConfig.h TERRAIN_MAP_SIZE): a face-centre
+   texel's angle on the sphere (radians, mip 0) and the coarsest mip. */
+static inline double TerrainGen_MapTexelRad(void) { return 2.0 / TERRAIN_MAP_SIZE; }
+static inline double TerrainGen_MapMaxLod(void) { return log2((double)TERRAIN_MAP_SIZE); }
 int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, float *hmin, float *hmax);
 int TerrainGen_GlobalRange(float *hmin, float *hmax);
 /* GlobalRange of any baked planet, active or not. */

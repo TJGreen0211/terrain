@@ -160,24 +160,39 @@
 #define QT_SKIRT_RANGE_FACTOR     1.5
 #define QT_SKIRT_WIDTH_FRACTION   0.02
 
+/* ---- Baked terrain maps (TerrainGen.c, shaders/planetmap.glsl) ------------
+   Height, climate and ocean maps are cube maps over the body-local sphere:
+   GL's face layout with the plain (gnomonic) projection the quadtree uses,
+   so a face's texel grid lines up with its quadtree nodes. Texels per face
+   edge (power of two). 1024: ~12 km at face centres on Earth, down to ~4 km
+   toward the corners. Bake time and map memory grow with its square. */
+#define TERRAIN_MAP_SIZE          1024
+
 /* ---- Terrain detail (shaders/detail.glsl, TerrainDetail.c) ---------------
-   Fractal noise on land below the baked height map's resolution (~20 km
-   per texel on Earth). Each octave halves the wavelength; octaves fade in
-   with camera distance, as geometry while the triangles can carry them and
-   as shading normals down to ~2 px. Noise stays off the seafloor and ramps
-   in above the shore so land never dips below sea level. */
-/* Coarsest octave's wavelength (m); snapped to a power-of-two lattice on
-   the cube face (12.4 km on Earth). */
-#define TERRAIN_DETAIL_WAVELENGTH_M     12000.0
-/* Its amplitude (m). Peak detail is about twice this (all octaves). */
-#define TERRAIN_DETAIL_AMPLITUDE_M      400.0
+   Fractal noise on land below the baked height map's resolution. Each
+   octave halves the wavelength; octaves fade in with camera distance, as
+   geometry while the triangles can carry them and as shading normals down
+   to ~2 px. Noise stays off the seafloor and ramps in above the shore so
+   land never dips below sea level.
+   It continues the map's own spectrum: the coarsest octave is one map
+   texel long (its lattice is the map's texel grid), and its amplitude is
+   the map's measured height step between neighbouring land texels
+   (PlanetGenParams.landStepRms, in metres at the current landRelief) times
+   the roughness, scaled per place by the map's local slope against that
+   average: rugged where the map is steep, smooth on plains. */
+/* Roughness: coarsest amplitude / the map's RMS texel step (debug panel). */
+#define TERRAIN_DETAIL_ROUGHNESS        1.0
+/* Local scale: the map's slope here over its RMS, clamped to
+   [TERRAIN_DETAIL_PLAINS, TERRAIN_DETAIL_LOCAL_MAX]. The maximum bounds the
+   detail (culling, skirts). */
+#define TERRAIN_DETAIL_LOCAL_MAX        4.0
 /* Amplitude ratio from one octave to the next (0.5 keeps the slope
    similar at every scale; higher = rougher close up). */
 #define TERRAIN_DETAIL_GAIN             0.5
 /* Finest octave's wavelength (m); no finer than ~QT_MIN_VERTEX_SPACING_M
    matters for geometry, finer still only for close-up shading. */
 #define TERRAIN_DETAIL_MIN_WAVELENGTH_M 1.0
-/* Amplitude on low land (plains, coasts) relative to high ground. */
+/* Least local scale (flat ground still gets some detail). */
 #define TERRAIN_DETAIL_PLAINS           0.3
 /* Detail shaded per pixel below the triangle size (normals only, up to 3
    octaves, down to half a triangle edge). 0 = the vertices' slope only.
@@ -259,7 +274,7 @@
    is 2e12). Both switches start off so bench references stay
    pixel-identical: an empty sky name keeps assets/textures/skybox3. */
 #define NEBULA_ENABLE_DEFAULT       0
-#define NEBULA_SKY_NAME             ""
+#define NEBULA_SKY_NAME             "eve2"
 #define NEBULA_RADIUS_M             1.0e12
 #define NEBULA_FAR_START            60.0
 #define NEBULA_FAR_END              200.0
@@ -286,6 +301,21 @@
    is calibrated in body radii (Water.c), so without this the swell would
    be kilometres tall at Earth scale. */
 #define OCEAN_SWELL_RMS_M         2.0
+/* FFT wave cascades (Water.c, Tessendorf): OCEAN_CASCADES patches, the
+   largest OCEAN_WAVE_PATCH_M on a side and each next one OCEAN_CASCADE_RATIO
+   smaller (1000, 173, 30 m), each simulating its own band of wavelengths.
+   The ratio is deliberately not an integer, so the patches' periods never
+   line up and their sum does not visibly repeat. The water shaders tile
+   them over the cube faces (wavecube.glsl) at this size times the debug
+   panel's "Wave scale" (default 10: stylized, larger seas; heights scale
+   with it and time by its square root, so the waves keep their shape and
+   a believable speed). The finest cascade stays at true size, for close-up
+   chop (waveCascadeScale, Water.c). From orbit they filter into the
+   glint's roughness.
+   OCEAN_CASCADES must match WAVE_CASCADES in wavecube.glsl. */
+#define OCEAN_CASCADES            3
+#define OCEAN_WAVE_PATCH_M        1000.0
+#define OCEAN_CASCADE_RATIO       5.77
 
 /* ---- Rendering ------------------------------------------------------------
    MSAA samples of the main scene target. Every sample costs memory

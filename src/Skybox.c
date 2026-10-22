@@ -32,8 +32,8 @@ static GLuint loadNebulaSky(void)
 		faces[i] = paths[i];
 	}
 	// The runtime wisps use the settings the sky was baked with. The baked
-	// glow crosses face edges: filter across them too (only for a nebula
-	// sky, so skybox3 samples as it always has).
+	// glow crosses face edges: filter across them too. (The planet bake
+	// turns seamless filtering on for every sky anyway: TerrainGen.c.)
 	Nebula_LoadParams(g_nebulaSkyName);
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	return loadCubemap(faces);

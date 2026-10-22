@@ -47,7 +47,7 @@ static int pivotBody = BODY_EARTH;  /* pivot <body name>: orbit it (and focus it
 /* pivotat <frame> <body name>: switch the pivot body from that frame on. */
 static long switchFrame[MAX_KEYS]; static int switchBody[MAX_KEYS]; static int nSwitch;
 static int startBody = BODY_EARTH;
-static double pivotOff, phaseDeg, simStart;
+static double pivotOff, phaseDeg, pivotLatDeg, simStart;
 static int pivotGround;           /* poff ground: pivotOff is above the terrain */
 static double timeScale = 1.0;
 static PoseKey keys[MAX_KEYS]; static int nKeys;
@@ -141,6 +141,10 @@ static int loadScene(const char *path)
 			sscanf(line, pivotGround ? "%*s %*s %lf" : "%*s %lf", &pivotOff);
 		} else if (strcmp(tok, "phase") == 0) {
 			sscanf(line, "%*s %lf", &phaseDeg);
+		} else if (strcmp(tok, "pivotlat") == 0) {
+			/* "pivotlat <deg>": tilt the sub-solar pivot toward world +Y
+			   (north) by deg, e.g. to put a coast under the camera. */
+			sscanf(line, "%*s %lf", &pivotLatDeg);
 		} else if (strcmp(tok, "frames") == 0) {
 			sscanf(line, "%*s %ld", &sceneFrames);
 		} else if (strcmp(tok, "pivotat") == 0 && nSwitch < MAX_KEYS) {
@@ -299,7 +303,8 @@ void Bench_UpdateCamera(void)
 		   horizontal, so it cannot be expressed with world pitch. */
 		dvec3 toSun = dsubvec3(g_bodies[BODY_SUN].position, e->position);
 		double psi = atan2(toSun.z, toSun.x) + phaseDeg * (M_PI / 180.0);
-		dvec3 dir = { cos(psi), 0.0, sin(psi) };
+		double lat = pivotLatDeg * (M_PI / 180.0);
+		dvec3 dir = { cos(lat) * cos(psi), sin(lat), cos(lat) * sin(psi) };
 		dvec3 east = { -sin(psi), 0.0, cos(psi) };
 		double phi = yaw * (M_PI / 180.0), el = pitch * (M_PI / 180.0);
 		dvec3 u;

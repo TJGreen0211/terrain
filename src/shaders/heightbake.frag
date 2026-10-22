@@ -1,11 +1,11 @@
 #version 410
 
-// Bakes the planet's shaped height field into an equirectangular map once at
-// startup (and on every re-bake); TerrainGen.c reads it back, runs thermal +
-// hydraulic erosion on the CPU, then uploads the final R16F + mip chain that
-// quad.frag/water.frag sample. The UV convention matches the runtime samples
-// (water.vert wave UV, quad.frag heightAt): u = (atan(y, x)/PI + 1.0)*0.5,
-// v = asin(z)/PI + 0.5.
+// Bakes the planet's shaped height field into the six faces of a cube map
+// once at startup (and on every re-bake); TerrainGen.c reads it back, runs
+// thermal + hydraulic erosion on the CPU, then uploads the final cube map +
+// mip chain that the body shaders sample by direction (planetmap.glsl). The
+// faces are stacked bottom to top in one faceSize x 6*faceSize target, in GL
+// cube-map order and orientation (TerrainGen.c faceM/S/T).
 //
 // Shaping recipe: a plate-tectonics sketch instead of thresholded noise
 // (which always yields noodly fractal continents).
@@ -33,6 +33,7 @@ in vec2 fUV;
 out vec4 BakeOut;
 
 uniform float seed;
+uniform int faceSize;
 #define MAX_PLATES 32
 uniform int plateCount;
 uniform vec4 plates[MAX_PLATES];       // xyz = centre (unit), w = 1 continental
@@ -177,11 +178,23 @@ float band(float dist, float width) {
 	return exp(-t*t);
 }
 
+// Direction through face point (sc, tc) in [-1, 1]^2 of GL cube face f
+// (+X, -X, +Y, -Y, +Z, -Z): the spec's major-axis table, inverted.
+vec3 cubeFaceDir(int f, vec2 st)
+{
+	if (f == 0) return vec3( 1.0, -st.y, -st.x);
+	if (f == 1) return vec3(-1.0, -st.y,  st.x);
+	if (f == 2) return vec3( st.x,  1.0,  st.y);
+	if (f == 3) return vec3( st.x, -1.0, -st.y);
+	if (f == 4) return vec3( st.x, -st.y,  1.0);
+	return vec3(-st.x, -st.y, -1.0);
+}
+
 void main()
 {
-	float lon = (fUV.x*2.0 - 1.0)*PI;
-	float lat = (fUV.y - 0.5)*PI;
-	vec3 d = normalize(vec3(cos(lat)*cos(lon), cos(lat)*sin(lon), sin(lat)));
+	int face = int(gl_FragCoord.y) / faceSize;
+	vec2 st = vec2(gl_FragCoord.x, gl_FragCoord.y - float(face * faceSize)) / float(faceSize) * 2.0 - 1.0;
+	vec3 d = normalize(cubeFaceDir(face, st));
 	// Simplex is unseeded: the seed shifts the noise into a new domain
 	// region (hashed into a small box so float precision holds at the
 	// detail frequencies).

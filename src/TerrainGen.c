@@ -17,8 +17,23 @@
 /* Sea level + ocean depth used by quad.frag/water.frag (see TerrainGen.h). */
 PlanetGenParams g_planetGen = { 0.5f, 0.22f, 0 };
 
-#define HEIGHTMAP_W 2048
-#define HEIGHTMAP_H 1024
+/* The baked maps are cube maps (TERRAIN_MAP_SIZE texels per face edge, GL
+   face order +X -X +Y -Y +Z -Z). CPU fields hold the six faces back to
+   back, texel (i, j) of face f at (f*N + j)*N + i, i along the face's s
+   axis, j along t (GL rows). */
+#define FACE_N      TERRAIN_MAP_SIZE
+#define FACE_TEXELS ((size_t)FACE_N * FACE_N)
+#define CUBE_TEXELS (6 * FACE_TEXELS)
+
+/* Reference grid: the erosion and climate constants below were tuned on a
+   2048x1024 equirect map, in units of its equator texel (PI/1024 rad).
+   They keep those units; the cube code converts with its own texel sizes,
+   so the physics stays the same at any TERRAIN_MAP_SIZE. Moisture and wave
+   fetch stream along latitude rows, so they still run on a grid of this
+   size and are resampled onto the cube (smooth fields: no pinch shows). */
+#define EQ_W 2048
+#define EQ_H 1024
+#define REF_TEXEL_RAD (M_PI / 1024.0)
 
 /* ---- Bake pipeline (tweak here; shaping recipe constants live in
    shaders/heightbake.frag). Erosion runs on the field pre-normalized to
@@ -108,7 +123,7 @@ static void clampFinite(float *buf, size_t n)
 	}
 }
 
-static float rowCos[HEIGHTMAP_H];
+static float rowCos[EQ_H];
 
 /* cos(latitude) of every texel row's centre: the row's area weight. */
 static void initRowCos(int H)
@@ -120,11 +135,175 @@ static void initRowCos(int H)
 	}
 }
 
+/* ---------------- Cube map geometry ---------------- */
+
+/* GL's cube faces (the spec's major-axis table): a face point with face
+   coordinates sc, tc in [-1, 1] lies along M + sc*S + tc*T. */
+static const double faceM[6][3] = {
+	{ 1, 0, 0}, {-1, 0, 0}, {0,  1, 0}, {0, -1, 0}, {0, 0,  1}, { 0, 0, -1} };
+static const double faceS[6][3] = {
+	{ 0, 0, -1}, { 0, 0, 1}, {1,  0, 0}, {1,  0, 0}, {1, 0,  0}, {-1, 0,  0} };
+static const double faceT[6][3] = {
+	{ 0, -1, 0}, { 0, -1, 0}, {0,  0, 1}, {0,  0, -1}, {0, -1, 0}, { 0, -1, 0} };
+
+static inline double dot3(const double a[3], const double b[3])
+{
+	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/* Direction (not normalized) of face point (sc, tc); also valid past the
+   face edge, on the face's plane. */
+static inline void faceDir(int f, double sc, double tc, double d[3])
+{
+	for (int k = 0; k < 3; k++)
+		d[k] = faceM[f][k] + sc * faceS[f][k] + tc * faceT[f][k];
+}
+
+/* The face a direction lands on and its face coordinates there. */
+static inline int dirFace(const double d[3], double *sc, double *tc)
+{
+	double ax = fabs(d[0]), ay = fabs(d[1]), az = fabs(d[2]);
+	int f = (ax >= ay && ax >= az) ? (d[0] >= 0.0 ? 0 : 1)
+	      : (ay >= az ? (d[1] >= 0.0 ? 2 : 3) : (d[2] >= 0.0 ? 4 : 5));
+	double ma = dot3(d, faceM[f]);
+	*sc = dot3(d, faceS[f]) / ma;
+	*tc = dot3(d, faceT[f]) / ma;
+	return f;
+}
+
+/* Face coordinate of texel centre i on an n-texel face edge, and back. */
+static inline double texelToFace(double i, int n) { return (2.0 * i + 1.0) / n - 1.0; }
+static inline double faceToTexel(double s, int n) { return (s + 1.0) * 0.5 * n - 0.5; }
+
+/* Index of texel (i, j) of face f in an n-per-edge cube field. i and j may
+   lie off the face (a few texels): the texel is then found across the edge
+   by projecting its centre onto the neighbouring face. One texel past an
+   edge this gives exactly the adjacent texel of the next face (the texel
+   grids meet edge to edge), the same neighbour seamless filtering uses. */
+static size_t cubeIndex(int n, int f, int i, int j)
+{
+	if ((unsigned)i < (unsigned)n && (unsigned)j < (unsigned)n)
+		return ((size_t)f * n + j) * n + i;
+	double d[3], sc, tc;
+	faceDir(f, texelToFace(i, n), texelToFace(j, n), d);
+	int g = dirFace(d, &sc, &tc);
+	int ii = (int)floor((sc + 1.0) * 0.5 * n), jj = (int)floor((tc + 1.0) * 0.5 * n);
+	ii = ii < 0 ? 0 : (ii > n - 1 ? n - 1 : ii);
+	jj = jj < 0 ? 0 : (jj > n - 1 ? n - 1 : jj);
+	return ((size_t)g * n + jj) * n + ii;
+}
+
+/* Unit direction of texel (i, j) of face f (FACE_N per edge). */
+static inline void texelDir(int f, int i, int j, double d[3])
+{
+	faceDir(f, texelToFace(i, FACE_N), texelToFace(j, FACE_N), d);
+	double inv = 1.0 / sqrt(dot3(d, d));
+	d[0] *= inv; d[1] *= inv; d[2] *= inv;
+}
+
+/* Per-texel metric, the same on every face (index j*N + i): area = solid
+   angle and spS / spT = centre spacing to the next texel along s / t, in
+   reference-texel units (REF_TEXEL_RAD, its square for the area). The
+   plain projection's texels shrink toward the face corners, to ~1/3 of
+   the centre's area. */
+static float *texArea, *texSpS, *texSpT;
+static float texAreaMax;
+
+static void initCubeMetric(void)
+{
+	if (texArea) return;
+	texArea = malloc(FACE_TEXELS * sizeof(float));
+	texSpS = malloc(FACE_TEXELS * sizeof(float));
+	texSpT = malloc(FACE_TEXELS * sizeof(float));
+	if (!texArea || !texSpS || !texSpT) {
+		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
+		exit(1);
+	}
+	double t = 2.0 / FACE_N / REF_TEXEL_RAD;   /* face-centre texel, ref units */
+	texAreaMax = 0.0f;
+	for (int j = 0; j < FACE_N; j++)
+		for (int i = 0; i < FACE_N; i++) {
+			double sc = texelToFace(i, FACE_N), tc = texelToFace(j, FACE_N);
+			double r2 = 1.0 + sc * sc + tc * tc;
+			size_t k = (size_t)j * FACE_N + i;
+			texArea[k] = (float)(t * t / (r2 * sqrt(r2)));
+			texSpS[k] = (float)(t * sqrt(1.0 + tc * tc) / r2);
+			texSpT[k] = (float)(t * sqrt(1.0 + sc * sc) / r2);
+			if (texArea[k] > texAreaMax) texAreaMax = texArea[k];
+		}
+}
+
+/* Bilinear sample of a cube field along direction d (clamped at the face
+   edges: for the smooth climate fields only). */
+static float sampleCube(const float *field, const double d[3])
+{
+	double sc, tc;
+	int f = dirFace(d, &sc, &tc);
+	double x = faceToTexel(sc, FACE_N), y = faceToTexel(tc, FACE_N);
+	x = x < 0.0 ? 0.0 : (x > FACE_N - 1 ? FACE_N - 1 : x);
+	y = y < 0.0 ? 0.0 : (y > FACE_N - 1 ? FACE_N - 1 : y);
+	int x0 = (int)x, y0 = (int)y;
+	if (x0 > FACE_N - 2) x0 = FACE_N - 2;
+	if (y0 > FACE_N - 2) y0 = FACE_N - 2;
+	float fx = (float)(x - x0), fy = (float)(y - y0);
+	const float *r0 = field + ((size_t)f * FACE_N + y0) * FACE_N + x0;
+	const float *r1 = r0 + FACE_N;
+	return (r0[0] * (1.0f - fx) + r0[1] * fx) * (1.0f - fy) + (r1[0] * (1.0f - fx) + r1[1] * fx) * fy;
+}
+
+/* Bilinear sample of an EQ_W x EQ_H equirect field along unit direction d
+   (longitude wraps, latitude clamps). */
+static float sampleEquirect(const float *field, const double d[3])
+{
+	double lon = atan2(d[1], d[0]);
+	double lat = asin(d[2] < -1.0 ? -1.0 : (d[2] > 1.0 ? 1.0 : d[2]));
+	double x = (lon / M_PI + 1.0) * 0.5 * EQ_W - 0.5;
+	double y = (lat / M_PI + 0.5) * EQ_H - 0.5;
+	y = y < 0.0 ? 0.0 : (y > EQ_H - 1 ? EQ_H - 1 : y);
+	int x0 = (int)floor(x), y0 = (int)y;
+	if (y0 > EQ_H - 2) y0 = EQ_H - 2;
+	float fx = (float)(x - x0), fy = (float)(y - y0);
+	int x1 = ((x0 + 1) % EQ_W + EQ_W) % EQ_W;
+	x0 = (x0 % EQ_W + EQ_W) % EQ_W;
+	const float *r0 = field + (size_t)y0 * EQ_W, *r1 = r0 + EQ_W;
+	return (r0[x0] * (1.0f - fx) + r0[x1] * fx) * (1.0f - fy) + (r1[x0] * (1.0f - fx) + r1[x1] * fx) * fy;
+}
+
+/* Resamples a cube field onto a new EQ_W x EQ_H equirect field. */
+static float *cubeToEquirect(const float *field)
+{
+	float *eq = malloc((size_t)EQ_W * EQ_H * sizeof(float));
+	for (int y = 0; y < EQ_H; y++) {
+		double lat = (((double)y + 0.5) / EQ_H - 0.5) * M_PI;
+		for (int x = 0; x < EQ_W; x++) {
+			double lon = (((double)x + 0.5) / EQ_W * 2.0 - 1.0) * M_PI;
+			double d[3] = { cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat) };
+			eq[(size_t)y * EQ_W + x] = sampleCube(field, d);
+		}
+	}
+	return eq;
+}
+
+/* Resamples an equirect field onto a new cube field. */
+static float *equirectToCube(const float *eq)
+{
+	float *field = malloc(CUBE_TEXELS * sizeof(float));
+	for (int f = 0; f < 6; f++)
+		for (int j = 0; j < FACE_N; j++)
+			for (int i = 0; i < FACE_N; i++) {
+				double d[3];
+				texelDir(f, i, j, d);
+				field[((size_t)f * FACE_N + j) * FACE_N + i] = sampleEquirect(eq, d);
+			}
+	return field;
+}
+
 /* Area-weighted percentiles via histogram (no sort): each texel counts with
-   its row's cos(lat), so the oversampled polar rows don't skew the stats.
-   With 4096 bins over a smooth distribution the error is well below one
-   texel's height step, and it keeps the 2M-value percentiles cheap (MSVC
-   qsort measured ~1.7 s). One build answers several queries. */
+   its area, so small texels (equirect polar rows, cube face corners) don't
+   skew the stats. With 4096 bins over a smooth distribution the error is
+   well below one texel's height step, and it keeps multi-million-value
+   percentiles cheap (MSVC qsort measured ~1.7 s at 2M). One build answers
+   several queries. */
 #define PCTL_BINS 4096
 typedef struct {
 	float lo, hi;
@@ -133,9 +312,11 @@ typedef struct {
 	double hist[PCTL_BINS];
 } Histo;
 
-static void histoBuild(const float *buf, int W, int H, Histo *Hs)
+/* Area weight of value k: w[(k / div) % period]. Equirect: div = width,
+   w = rowCos; cube: div = 1, w = texArea (one face's texels). */
+static void histoBuild(const float *buf, size_t n, const float *w, size_t div, size_t period,
+                       Histo *Hs)
 {
-	size_t n = (size_t)W * H;
 	float lo = FLT_MAX, hi = -FLT_MAX;
 	for (size_t i = 0; i < n; i++) {
 		float v = buf[i];
@@ -147,15 +328,25 @@ static void histoBuild(const float *buf, int W, int H, Histo *Hs)
 	Hs->binToVal = (double)(hi - lo) / (double)(PCTL_BINS - 1);
 	double scale = 1.0 / Hs->binToVal;
 	memset(Hs->hist, 0, sizeof Hs->hist);
-	for (int y = 0; y < H; y++) {
-		const float *row = buf + (size_t)y * W;
-		double w = rowCos[y];
-		for (int x = 0; x < W; x++) {
-			int b = (int)((double)(row[x] - lo) * scale);
-			Hs->hist[b < 0 ? 0 : (b > PCTL_BINS - 1 ? PCTL_BINS - 1 : b)] += w;
+	for (size_t base = 0, blk = 0; base < n; base += div, blk++) {
+		double wt = w[blk % period];
+		size_t end = base + div < n ? base + div : n;
+		for (size_t i = base; i < end; i++) {
+			int b = (int)((double)(buf[i] - lo) * scale);
+			Hs->hist[b < 0 ? 0 : (b > PCTL_BINS - 1 ? PCTL_BINS - 1 : b)] += wt;
 		}
-		Hs->total += w * W;
+		Hs->total += wt * (double)(end - base);
 	}
+}
+
+static void histoBuildCube(const float *buf, Histo *Hs)
+{
+	histoBuild(buf, CUBE_TEXELS, texArea, 1, FACE_TEXELS, Hs);
+}
+
+static void histoBuildEq(const float *buf, Histo *Hs)
+{
+	histoBuild(buf, (size_t)EQ_W * EQ_H, rowCos, EQ_W, EQ_H, Hs);
 }
 
 static float histoPctl(const Histo *Hs, double p)
@@ -191,12 +382,13 @@ static void stretch01(float *h, size_t n, float lo, float hi)
    removes 2x its excess, overshooting the talus and amplifying ~1.5x per
    pass — the field explodes exponentially. Immediate transfers always damp.
    Gauss-Seidel drags material along the sweep direction, so odd passes run
-   the sweep backwards to cancel the bias. The east/west talus is scaled by
-   cos(lat) (those neighbours are physically closer), so the poles don't
-   over-erode. S wraps, T clamps. */
-static void thermalErode(float *h, int W, int H, int passes, float talus,
-                         void (*step)(void))
+   the sweep backwards to cancel the bias. talus is per reference texel of
+   distance; each pair's is scaled by its actual spacing, so the stable
+   slope is the same everywhere on the faces. Edge texels pair with the
+   neighbouring face's. */
+static void thermalErode(float *h, int passes, float talus, void (*step)(void))
 {
+	const int N = FACE_N;
 	int stepEvery = passes / TERRAIN_THERMAL_STEPS;
 	if (stepEvery < 1) stepEvery = 1;
 	int stepsTaken = 0;
@@ -206,29 +398,42 @@ static void thermalErode(float *h, int W, int H, int passes, float talus,
 			stepsTaken++;
 		}
 		int rev = p & 1;
-		for (int yy = 0; yy < H; yy++) {
-			int y = rev ? H - 1 - yy : yy;
-			size_t row = (size_t)y * W;
-			float talusX = talus * rowCos[y];
-			for (int xx = 0; xx < W; xx++) {
-				int x = rev ? W - 1 - xx : xx;
-				size_t i = row + x;
-				float hc = h[i];
-				#define TPAIR(j, t) { \
-						float hn = h[j]; \
-						if (hn < hc) { \
-							float excess = hc - hn - (t); \
-							if (excess > 0.0f) { \
-								float mv = 0.5f * excess; \
-								hc -= mv; h[j] += mv; \
-							} \
-						} }
-				TPAIR(row + (x > 0 ? x - 1 : W - 1), talusX);
-				TPAIR(row + (x < W - 1 ? x + 1 : 0), talusX);
-				if (y > 0) TPAIR(row - W + x, talus);
-				if (y < H - 1) TPAIR(row + W + x, talus);
-				#undef TPAIR
-				h[i] = hc;
+		for (int ff = 0; ff < 6; ff++) {
+			int f = rev ? 5 - ff : ff;
+			for (int jj = 0; jj < N; jj++) {
+				int j = rev ? N - 1 - jj : jj;
+				size_t row = ((size_t)f * N + j) * N;
+				const float *spS = texSpS + (size_t)j * N, *spT = texSpT + (size_t)j * N;
+				int edgeRow = j == 0 || j == N - 1;
+				for (int ii = 0; ii < N; ii++) {
+					int i = rev ? N - 1 - ii : ii;
+					size_t c = row + i;
+					float hc = h[c];
+					float tS = talus * spS[i], tT = talus * spT[i];
+					#define TPAIR(n, t) { \
+							size_t nj = (n); \
+							float hn = h[nj]; \
+							if (hn < hc) { \
+								float excess = hc - hn - (t); \
+								if (excess > 0.0f) { \
+									float mv = 0.5f * excess; \
+									hc -= mv; h[nj] += mv; \
+								} \
+							} }
+					if (edgeRow || i == 0 || i == N - 1) {
+						TPAIR(cubeIndex(N, f, i - 1, j), tS);
+						TPAIR(cubeIndex(N, f, i + 1, j), tS);
+						TPAIR(cubeIndex(N, f, i, j - 1), tT);
+						TPAIR(cubeIndex(N, f, i, j + 1), tT);
+					} else {
+						TPAIR(c - 1, tS);
+						TPAIR(c + 1, tS);
+						TPAIR(c - N, tT);
+						TPAIR(c + N, tT);
+					}
+					#undef TPAIR
+					h[c] = hc;
+				}
 			}
 		}
 	}
@@ -267,35 +472,45 @@ static void initBrush(void)
 	for (int k = 0; k < brushN; k++) brushW[k] /= sum;
 }
 
-/* Bilinear height + gradient at a texel position, x wrapping across the
-   dateline. Caller keeps y in [0, H-2]. */
-static inline float sampleHG(const float *h, int W, float x, float y, float *gx, float *gy)
+/* Droplet positions are texel-centre coordinates on one face: texel i's
+   centre is x = i, and the face spans [-0.5, N - 0.5]. Sampling and
+   deposits use the position clamped to [0, N - 1 - CLAMP_EPS] (the half
+   texel strip along each edge reads the edge cell). */
+#define CLAMP_EPS 1e-3f
+static inline float clampFace(float x)
+{
+	return x < 0.0f ? 0.0f : (x > FACE_N - 1 - CLAMP_EPS ? FACE_N - 1 - CLAMP_EPS : x);
+}
+
+/* Bilinear height + gradient (per texel) at a clamped position on one face
+   (face points at the face's first texel). */
+static inline float sampleHG(const float *face, float x, float y, float *gx, float *gy)
 {
 	int x0 = (int)x, y0 = (int)y;
-	int x1 = x0 + 1; if (x1 >= W) x1 = 0;
 	float fx = x - (float)x0, fy = y - (float)y0;
-	const float *r0 = h + (size_t)y0 * W;
-	const float *r1 = r0 + W;
-	float h00 = r0[x0], h10 = r0[x1], h01 = r1[x0], h11 = r1[x1];
+	const float *r0 = face + (size_t)y0 * FACE_N + x0;
+	const float *r1 = r0 + FACE_N;
+	float h00 = r0[0], h10 = r0[1], h01 = r1[0], h11 = r1[1];
 	*gx = (h10 - h00) * (1.0f - fy) + (h11 - h01) * fy;
 	*gy = (h01 - h00) * (1.0f - fx) + (h11 - h10) * fx;
 	return h00 * (1.0f - fx) * (1.0f - fy) + h10 * fx * (1.0f - fy)
 	     + h01 * (1.0f - fx) * fy + h11 * fx * fy;
 }
 
-/* Spread amt over the brush centred on texel (cx, cy): positive deposits
-   (never raising a texel above ceil), negative erodes (never below zero).
+/* Spread amt over the brush centred on texel (cx, cy) of face f: positive
+   deposits (never raising a texel above ceil), negative erodes (never
+   below zero). Near an edge the brush reaches across into the next face.
    Returns the amount actually moved (signed like amt). */
-static inline float applyBrush(float *h, int W, int H, int cx, int cy, float amt,
-                               float ceil)
+static inline float applyBrush(float *h, int f, int cx, int cy, float amt, float ceil)
 {
+	const int R = DROPLET_BRUSH_RADIUS;
+	int inside = cx >= R && cy >= R && cx < FACE_N - R && cy < FACE_N - R;
+	size_t c = ((size_t)f * FACE_N + cy) * FACE_N + cx;
 	float moved = 0.0f;
 	for (int k = 0; k < brushN; k++) {
-		int yy = cy + brushDY[k];
-		if (yy < 0 || yy >= H) continue;
-		int xx = cx + brushDX[k];
-		if (xx < 0) xx += W; else if (xx >= W) xx -= W;
-		float *t = &h[(size_t)yy * W + xx];
+		size_t i = inside ? c + (ptrdiff_t)brushDY[k] * FACE_N + brushDX[k]
+		                  : cubeIndex(FACE_N, f, cx + brushDX[k], cy + brushDY[k]);
+		float *t = &h[i];
 		float d = amt * brushW[k];
 		if (d < 0.0f && -d > *t) d = -*t;
 		if (d > 0.0f && *t + d > ceil) d = fmaxf(ceil - *t, 0.0f);
@@ -305,23 +520,53 @@ static inline float applyBrush(float *h, int W, int H, int cx, int cy, float amt
 	return moved;
 }
 
+/* A droplet at (x, y) on face f stepped to (nx, ny) off the face: moves it
+   onto the face its new position lands on, and turns its heading (dx, dy:
+   unit, in that face's physical s/t frame) to match. */
+static int crossFace(int f, float x, float y, float *nx, float *ny, float *dx, float *dy)
+{
+	double d[3], p[3], sc, tc;
+	faceDir(f, texelToFace(*nx, FACE_N), texelToFace(*ny, FACE_N), d);
+	faceDir(f, texelToFace(x, FACE_N), texelToFace(y, FACE_N), p);
+	int g = dirFace(d, &sc, &tc);
+	/* The previous position on g's plane gives the heading there. */
+	double ma = dot3(p, faceM[g]);
+	double psc = dot3(p, faceS[g]) / ma, ptc = dot3(p, faceT[g]) / ma;
+	*nx = (float)faceToTexel(sc, FACE_N);
+	*ny = (float)faceToTexel(tc, FACE_N);
+	size_t k = (size_t)(int)clampFace(*ny) * FACE_N + (int)clampFace(*nx);
+	float ex = (float)(sc - psc) * texSpS[k], ey = (float)(tc - ptc) * texSpT[k];
+	float len = sqrtf(ex * ex + ey * ey);
+	if (len > 1e-12f) { *dx = ex / len; *dy = ey / len; }
+	return g;
+}
+
 /* Hydraulic erosion, droplet method (Mei et al. 2007 / Lague): droplets
    spawn on land only (above the pre-erosion sea level) with an area-uniform
-   density (row rejection by cos(lat)), move one physical texel per step
-   downhill with inertia, erode with a radial brush up to their transport
-   capacity (never more than the height they just dropped, so they can't dig
-   pits) and deposit the surplus. Uphill steps fill the pit behind them.
-   A droplet that reaches the sea drops its load there (river deltas) and
-   dies, so the seafloor is never carved. Equirect correction: the x
-   gradient and x motion are divided by cos(lat) so droplets travel
-   isotropically on the sphere. Every on-land deposit is also summed into
-   dep (alluvial plains for the climate map). */
-static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
+   density (rejection by texel area), move downhill with inertia, erode
+   with a radial brush up to their transport capacity (never more than the
+   height they just dropped, so they can't dig pits) and deposit the
+   surplus. Uphill steps fill the pit behind them. A droplet that reaches
+   the sea drops its load there (river deltas) and dies, so the seafloor is
+   never carved. Headings and gradients are taken in physical units (the
+   face texels' spacing varies), and droplets carry on across face edges.
+   The droplet count, path length and per-distance rates are the reference
+   grid's (one step = one face-centre texel; lifetime, evaporation, erosion
+   and deposition rates convert, and capacity follows the slope rather than
+   the drop per step), so the erosion is the same at any map size; the
+   brush stays 2 texels, so channels get as sharp as the map. Every on-land
+   deposit is also summed into dep (alluvial plains for the climate map). */
+static void hydraulicErode(float *h, float *dep, float seaLevel0,
                            const TerrainBakeSettings *bs, void (*step)(void))
 {
-	size_t n = (size_t)W * H;
-	long drops = (long)((double)bs->dropletsPerPx * (double)n);
-	const float evapKeep = 1.0f - bs->dropletEvap;
+	const int N = FACE_N;
+	long drops = (long)((double)bs->dropletsPerPx * EQ_W * EQ_H);
+	const float stepLen = (float)(2.0 / N / REF_TEXEL_RAD);   /* ref texels per step */
+	const int maxSteps = (int)(DROPLET_MAX_STEPS / stepLen + 0.5f);
+	const float evapKeep = powf(1.0f - bs->dropletEvap, stepLen);
+	const float erodeRate = 1.0f - powf(1.0f - bs->dropletErosion, stepLen);
+	const float depositRate = 1.0f - powf(1.0f - bs->dropletDeposit, stepLen);
+	const float invStep = 1.0f / stepLen;
 	const float inertia = bs->dropletInertia;
 	long stepEvery = drops / TERRAIN_HYDRO_STEPS;
 	if (stepEvery < 1) stepEvery = 1;
@@ -331,16 +576,17 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 			step();
 			stepsTaken++;
 		}
-		/* Spawn: random land texel, accepted with probability cos(lat). */
+		/* Spawn: random land texel, accepted with probability by area. */
 		float x = 0.0f, y = 0.0f;
-		int found = 0;
+		int f = 0, found = 0;
 		for (int tries = 0; tries < 32; tries++) {
-			x = xsRand() * (float)W;
-			y = xsRand() * (float)(H - 1);
-			if (x >= (float)W) x = 0.0f;
-			int iy = (int)y;
-			if (xsRand() > rowCos[iy]) continue;
-			if (h[(size_t)iy * W + (int)x] > seaLevel0) { found = 1; break; }
+			f = (int)(xsRand() * 6.0f);
+			if (f > 5) f = 5;
+			x = xsRand() * (float)(N - 1);
+			y = xsRand() * (float)(N - 1);
+			size_t k = (size_t)(int)y * N + (int)x;
+			if (xsRand() * texAreaMax > texArea[k]) continue;
+			if (h[(size_t)f * FACE_TEXELS + k] > seaLevel0) { found = 1; break; }
 		}
 		if (!found) continue;
 
@@ -349,26 +595,29 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 		float water = DROPLET_START_WATER;
 		float sediment = 0.0f;
 		float gx, gy;
-		float hCur = sampleHG(h, W, x, y, &gx, &gy);
+		float hCur = sampleHG(h + (size_t)f * FACE_TEXELS, x, y, &gx, &gy);
 
-		for (int s = 0; s < DROPLET_MAX_STEPS; s++) {
-			int cx = (int)x, cy = (int)y;
-			float invCos = 1.0f / rowCos[cy];
+		for (int s = 0; s < maxSteps; s++) {
+			float xs = clampFace(x), ys = clampFace(y);
+			int cx = (int)xs, cy = (int)ys;
+			size_t k = (size_t)cy * N + cx;
+			float spS = texSpS[k], spT = texSpT[k];
 
-			float ndx = dx * inertia - gx * invCos * (1.0f - inertia);
-			float ndy = dy * inertia - gy * (1.0f - inertia);
+			/* Gradient per reference texel of distance. */
+			float ndx = dx * inertia - gx / spS * (1.0f - inertia);
+			float ndy = dy * inertia - gy / spT * (1.0f - inertia);
 			float len = sqrtf(ndx * ndx + ndy * ndy);
 			if (len < 1e-9f) break;           /* stalled/flat: kill, never divide */
 			dx = ndx / len; dy = ndy / len;
 
-			float nx = x + dx * invCos;
-			float ny = y + dy;
-			if (nx < 0.0f) nx += (float)W; else if (nx >= (float)W) nx -= (float)W;
-			if (nx >= (float)W) nx = 0.0f;
-			if (ny < 0.0f || ny >= (float)(H - 1)) break;  /* reached a pole */
+			float nx = x + dx * stepLen / spS;
+			float ny = y + dy * stepLen / spT;
+			int nf = f;
+			if (nx < -0.5f || ny < -0.5f || nx > N - 0.5f || ny > N - 0.5f)
+				nf = crossFace(f, x, y, &nx, &ny, &dx, &dy);
 
 			float ngx, ngy;
-			float hNew = sampleHG(h, W, nx, ny, &ngx, &ngy);
+			float hNew = sampleHG(h + (size_t)nf * FACE_TEXELS, clampFace(nx), clampFace(ny), &ngx, &ngy);
 			float dh = hNew - hCur;
 
 			if (hNew < seaLevel0) {
@@ -376,32 +625,31 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 				   just under sea level so deltas never surface as one-texel
 				   specks along the coast; the rest is carried out to sea. */
 				if (sediment > 0.0f)
-					applyBrush(h, W, H, (int)nx, (int)ny, sediment,
+					applyBrush(h, nf, (int)clampFace(nx), (int)clampFace(ny), sediment,
 					           seaLevel0 - DELTA_DEPTH);
 				break;
 			}
 
-			float capacity = fmaxf(-dh, DROPLET_MIN_SLOPE) * speed * water * bs->dropletCapacity;
+			float capacity = fmaxf(-dh * invStep, DROPLET_MIN_SLOPE) * speed * water * bs->dropletCapacity;
 			if (sediment > capacity || dh > 0.0f) {
 				float amt = (dh > 0.0f) ? fminf(dh, sediment)
-				                        : (sediment - capacity) * bs->dropletDeposit;
+				                        : (sediment - capacity) * depositRate;
 				if (amt > 0.0f) {
 					/* Bilinear deposit at the droplet's own position. */
-					float fx = x - (float)cx, fy = y - (float)cy;
-					int cx1 = cx + 1; if (cx1 >= W) cx1 = 0;
-					float *r0 = h + (size_t)cy * W;
-					float *r1 = r0 + W;
-					r0[cx]  += amt * (1.0f - fx) * (1.0f - fy);
-					r0[cx1] += amt * fx * (1.0f - fy);
-					r1[cx]  += amt * (1.0f - fx) * fy;
-					r1[cx1] += amt * fx * fy;
-					dep[(size_t)cy * W + cx] += amt;
+					float fx = xs - (float)cx, fy = ys - (float)cy;
+					float *r0 = h + (size_t)f * FACE_TEXELS + k;
+					float *r1 = r0 + N;
+					r0[0] += amt * (1.0f - fx) * (1.0f - fy);
+					r0[1] += amt * fx * (1.0f - fy);
+					r1[0] += amt * (1.0f - fx) * fy;
+					r1[1] += amt * fx * fy;
+					dep[(size_t)f * FACE_TEXELS + k] += amt;
 					sediment -= amt;
 				}
 			} else {
-				float amt = fminf((capacity - sediment) * bs->dropletErosion, -dh);
+				float amt = fminf((capacity - sediment) * erodeRate, -dh);
 				if (amt > 0.0f)
-					sediment -= applyBrush(h, W, H, cx, cy, -amt, FLT_MAX);
+					sediment -= applyBrush(h, f, cx, cy, -amt, FLT_MAX);
 			}
 
 			speed = sqrtf(fmaxf(speed * speed - dh * DROPLET_GRAVITY, 0.0f));
@@ -409,7 +657,7 @@ static void hydraulicErode(float *h, float *dep, int W, int H, float seaLevel0,
 			/* Carry the new sample forward (the brush may have nudged it
 			   slightly; re-sampling costs a third of the loop for no
 			   visible gain). */
-			x = nx; y = ny;
+			f = nf; x = nx; y = ny;
 			hCur = hNew; gx = ngx; gy = ngy;
 		}
 	}
@@ -437,10 +685,11 @@ static void ensureBakeResources(void)
 	glBindVertexArray(0);
 
 	/* Working RGBA16F target, read back as GL_RG / GL_FLOAT (the two
-	   channels the bake uses). */
+	   channels the bake uses): the six faces stacked bottom to top, so a
+	   readback row is face * N + j, the CPU field layout. */
 	glGenTextures(1, &workTex);
 	glBindTexture(GL_TEXTURE_2D, workTex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, HEIGHTMAP_W, HEIGHTMAP_H, 0,
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, FACE_N, 6 * FACE_N, 0,
 	             GL_RGBA, GL_HALF_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -456,14 +705,60 @@ static void ensureBakeResources(void)
 		        (unsigned)glCheckFramebufferStatus(GL_FRAMEBUFFER));
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-	initRowCos(HEIGHTMAP_H);
+	initRowCos(EQ_H);
+	initCubeMetric();
 	initBrush();
 }
 
 /* ---------------- Climate map ---------------- */
 
-/* Separable box blur, x radius scaled by 1/cos(lat) so the footprint is
-   round on the sphere; x wraps, y clamps. Two passes ~ a soft tent. */
+/* Separable box blur of a cube field, radius r texels, two passes ~ a
+   soft tent. Each face is blurred from a copy padded with its neighbours'
+   texels, so the result is continuous across the edges. */
+static void blurCube(float *field, int r)
+{
+	const int N = FACE_N, P = N + 2 * r;
+	float *pad = malloc((size_t)P * P * sizeof(float));
+	float *tmp = malloc((size_t)P * P * sizeof(float));
+	float *out = malloc(CUBE_TEXELS * sizeof(float));
+	double inv = 1.0 / (double)(2 * r + 1);
+	for (int pass = 0; pass < 2; pass++) {
+		for (int f = 0; f < 6; f++) {
+			for (int y = -r; y < N + r; y++)
+				for (int x = -r; x < N + r; x++)
+					pad[(size_t)(y + r) * P + x + r] = field[cubeIndex(N, f, x, y)];
+			/* Rows: running window sums for padded columns [r, P - r). */
+			for (int y = 0; y < P; y++) {
+				const float *row = pad + (size_t)y * P;
+				double acc = 0.0;
+				for (int k = 0; k < 2 * r + 1; k++) acc += row[k];
+				for (int x = r; x < P - r; x++) {
+					tmp[(size_t)y * P + x] = (float)(acc * inv);
+					if (x + r + 1 < P) acc += row[x + r + 1] - row[x - r];
+				}
+			}
+			/* Columns, into the face's interior. */
+			float *dst = out + (size_t)f * FACE_TEXELS;
+			for (int x = 0; x < N; x++) {
+				double acc = 0.0;
+				for (int k = 0; k < 2 * r + 1; k++) acc += tmp[(size_t)k * P + x + r];
+				for (int y = 0; y < N; y++) {
+					dst[(size_t)y * N + x] = (float)(acc * inv);
+					if (y + 2 * r + 1 < P)
+						acc += tmp[(size_t)(y + 2 * r + 1) * P + x + r] - tmp[(size_t)y * P + x + r];
+				}
+			}
+		}
+		memcpy(field, out, CUBE_TEXELS * sizeof(float));
+	}
+	free(out);
+	free(tmp);
+	free(pad);
+}
+
+/* Separable box blur of an equirect field, x radius scaled by 1/cos(lat)
+   so the footprint is round on the sphere; x wraps, y clamps. Two passes ~
+   a soft tent. */
 static void blurField(float *f, int W, int H, int r)
 {
 	float *tmp = malloc((size_t)(W > H ? W : H) * sizeof(float));
@@ -509,10 +804,10 @@ static void blurField(float *f, int W, int H, int r)
    the land's MOIST_NORM_PCT percentile and nudged by the regional anomaly
    noise so the climate isn't purely zonal. The latitude rain belts
    (equatorial ITCZ, subtropical deserts) are applied live in quad.frag so
-   they stay tunable per planet. */
-static void computeMoisture(const float *h, const float *anom, float sea,
-                            int W, int H, float *m)
+   they stay tunable per planet. Runs on the EQ_W x EQ_H equirect grid. */
+static void computeMoisture(const float *h, const float *anom, float sea, float *m)
 {
+	const int W = EQ_W, H = EQ_H;
 	for (int y = 0; y < H; y++) {
 		const float *row = h + (size_t)y * W;
 		float *out = m + (size_t)y * W;
@@ -551,7 +846,7 @@ static void computeMoisture(const float *h, const float *anom, float sea,
 	size_t n = (size_t)W * H;
 	float *landVals = malloc(n * sizeof(float));
 	for (size_t i = 0; i < n; i++) landVals[i] = h[i] >= sea ? m[i] : 0.0f;
-	histoBuild(landVals, W, H, &mh);
+	histoBuildEq(landVals, &mh);
 	free(landVals);
 	double landArea = 0.0, allArea = 0.0;
 	for (int y = 0; y < H; y++) {
@@ -623,12 +918,15 @@ static inline PQNode pqPop(void)
    through closed basins; the flood level above the ground there is a lake.
    The pop order is ascending water level, so walking it backwards visits
    upstream texels first: accumulating rain-weighted area along the drain
-   tree gives each texel's discharge. River strength = log2 discharge,
-   widened by RIVER_WIDEN per texel so big rivers survive the mip chain. */
+   tree gives each texel's discharge (in reference-texel areas, so the
+   river constants hold at any map size). River strength = log2 discharge,
+   widened by RIVER_WIDEN per texel so big rivers survive the mip chain.
+   Runs on the cube faces; edge texels' neighbours are across the edge. */
 static void computeDrainage(const float *h, const float *moist, float sea,
-                            int W, int H, float *river, float *lake)
+                            float *river, float *lake)
 {
-	size_t n = (size_t)W * H;
+	const int N = FACE_N;
+	const size_t n = CUBE_TEXELS;
 	float *filled = malloc(n * sizeof(float));
 	int *recv = malloc(n * sizeof(int));
 	int *order = malloc(n * sizeof(int));
@@ -637,23 +935,25 @@ static void computeDrainage(const float *h, const float *moist, float sea,
 	pqN = 0;
 	static const int NDX[8] = { -1, 1, 0, 0, -1, 1, -1, 1 };
 	static const int NDY[8] = { 0, 0, -1, 1, -1, -1, 1, 1 };
+	/* Neighbour k of texel c (face f, texel i, j). */
+	#define NBR(c, f, i, j, k) \
+		(((i) > 0 && (i) < N - 1 && (j) > 0 && (j) < N - 1) \
+		 ? (int)((c) + NDY[k] * N + NDX[k]) \
+		 : (int)cubeIndex(N, (f), (i) + NDX[k], (j) + NDY[k]))
 
 	for (size_t i = 0; i < n; i++) {
 		recv[i] = -1;
 		if (h[i] < sea) { done[i] = 1; filled[i] = h[i]; }
 	}
 	/* Seeds: ocean texels touching land. */
-	for (int y = 0; y < H; y++)
-		for (int x = 0; x < W; x++) {
-			size_t i = (size_t)y * W + x;
-			if (h[i] >= sea) continue;
-			for (int k = 0; k < 8; k++) {
-				int yy = y + NDY[k];
-				if (yy < 0 || yy >= H) continue;
-				int xx = (x + NDX[k] + W) % W;
-				if (h[(size_t)yy * W + xx] >= sea) { pqPush(h[i], (int)i); break; }
+	for (int f = 0; f < 6; f++)
+		for (int j = 0; j < N; j++)
+			for (int i = 0; i < N; i++) {
+				int c = (int)(((size_t)f * N + j) * N + i);
+				if (h[c] >= sea) continue;
+				for (int k = 0; k < 8; k++)
+					if (h[NBR(c, f, i, j, k)] >= sea) { pqPush(h[c], c); break; }
 			}
-		}
 	if (pqN == 0) {   /* no ocean at all: drain to the global minimum */
 		size_t lo = 0;
 		for (size_t i = 1; i < n; i++) if (h[i] < h[lo]) lo = i;
@@ -665,17 +965,15 @@ static void computeDrainage(const float *h, const float *moist, float sea,
 	while (pqN > 0) {
 		PQNode c = pqPop();
 		if (h[c.i] >= sea) order[m++] = c.i;
-		int x = c.i % W, y = c.i / W;
+		int f = c.i / (int)FACE_TEXELS, rem = c.i % (int)FACE_TEXELS;
+		int i = rem % N, j = rem / N;
 		for (int k = 0; k < 8; k++) {
-			int yy = y + NDY[k];
-			if (yy < 0 || yy >= H) continue;
-			int xx = (x + NDX[k] + W) % W;
-			int j = yy * W + xx;
-			if (done[j]) continue;
-			done[j] = 1;
-			filled[j] = fmaxf(h[j], c.h);
-			recv[j] = c.i;
-			pqPush(filled[j], j);
+			int q = NBR(c.i, f, i, j, k);
+			if (done[q]) continue;
+			done[q] = 1;
+			filled[q] = fmaxf(h[q], c.h);
+			recv[q] = c.i;
+			pqPush(filled[q], q);
 		}
 	}
 	free(pq); pq = NULL;
@@ -683,15 +981,18 @@ static void computeDrainage(const float *h, const float *moist, float sea,
 
 	/* Rain-weighted, area-weighted discharge, upstream first. */
 	float *acc = river;   /* reuse the output buffer for the accumulation */
-	for (int y = 0; y < H; y++) {
-		double latDeg = fabs((((double)y + 0.5) / (double)H - 0.5) * 180.0);
-		float rowRain = hadleyFactorC(latDeg) * rowCos[y];
-		for (int x = 0; x < W; x++) {
-			size_t i = (size_t)y * W + x;
-			float r = 2.0f * moist[i] * rowRain;
-			acc[i] = h[i] >= sea ? (RIVER_RAIN_FLOOR * rowCos[y] + (r > 0.0f ? r : 0.0f)) : 0.0f;
-		}
-	}
+	for (int f = 0; f < 6; f++)
+		for (int j = 0; j < N; j++)
+			for (int i = 0; i < N; i++) {
+				size_t c = ((size_t)f * N + j) * N + i;
+				if (h[c] < sea) { acc[c] = 0.0f; continue; }
+				double d[3];
+				texelDir(f, i, j, d);
+				float area = texArea[(size_t)j * N + i];
+				double latDeg = asin(fmin(fabs(d[2]), 1.0)) * (180.0 / M_PI);
+				float r = 2.0f * moist[c] * hadleyFactorC(latDeg) * area;
+				acc[c] = RIVER_RAIN_FLOOR * area + (r > 0.0f ? r : 0.0f);
+			}
 	for (size_t k = m; k-- > 0; ) {
 		int c = order[k], r = recv[c];
 		if (r >= 0 && h[r] >= sea) acc[r] += acc[c];
@@ -708,24 +1009,24 @@ static void computeDrainage(const float *h, const float *moist, float sea,
 	free(filled);
 
 	/* Widen: max over a 5x5 window of (strength - falloff * distance). */
-	for (int y = 0; y < H; y++)
-		for (int x = 0; x < W; x++) {
-			size_t i = (size_t)y * W + x;
-			if (h[i] < sea) { river[i] = 0.0f; continue; }
-			float best = L[i];
-			for (int dy = -2; dy <= 2; dy++) {
-				int yy = y + dy;
-				if (yy < 0 || yy >= H) continue;
-				for (int dx = -2; dx <= 2; dx++) {
-					if (!dx && !dy) continue;
-					int xx = (x + dx + W) % W;
-					float v = L[(size_t)yy * W + xx]
-					        - RIVER_WIDEN * sqrtf((float)(dx * dx + dy * dy));
-					if (v > best) best = v;
-				}
+	for (int f = 0; f < 6; f++)
+		for (int j = 0; j < N; j++)
+			for (int i = 0; i < N; i++) {
+				size_t c = ((size_t)f * N + j) * N + i;
+				if (h[c] < sea) { river[c] = 0.0f; continue; }
+				int inside = i >= 2 && j >= 2 && i < N - 2 && j < N - 2;
+				float best = L[c];
+				for (int dy = -2; dy <= 2; dy++)
+					for (int dx = -2; dx <= 2; dx++) {
+						if (!dx && !dy) continue;
+						size_t q = inside ? c + (ptrdiff_t)dy * N + dx
+						                  : cubeIndex(N, f, i + dx, j + dy);
+						float v = L[q] - RIVER_WIDEN * sqrtf((float)(dx * dx + dy * dy));
+						if (v > best) best = v;
+					}
+				river[c] = best;
 			}
-			river[i] = best;
-		}
+	#undef NBR
 	free(L);
 }
 
@@ -737,41 +1038,64 @@ static unsigned char toByte(float v)
 
 /* Uploads an RGBA8 map (climate / ocean layout) with its mip chain. GL:
    main thread only. */
-static GLuint uploadRGBA8(const unsigned char *px, int W, int H)
+/* Uploads a cube map (faces back to back, faceBytes each) with its mip
+   chain. Seamless filtering is switched on for good: the body shaders
+   sample across face edges. GL: main thread only. */
+static GLuint uploadCube(GLenum internalFormat, GLenum format, GLenum type,
+                         const void *px, size_t faceBytes)
 {
 	GLuint tex;
 	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	for (int f = 0; f < 6; f++)
+		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, internalFormat, FACE_N, FACE_N, 0,
+		             format, type, (const unsigned char *)px + f * faceBytes);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
-	glGenerateMipmap(GL_TEXTURE_2D);
+	glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, 0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	return tex;
 }
 
-/* Builds the RGBA8 climate map's pixels (layout in TerrainGen.h). CPU only:
-   runs on the bake worker. */
-static unsigned char *climatePixels(const float *h, const float *anom, float *dep, float sea,
-                                    int W, int H)
+static GLuint uploadRGBA8(const unsigned char *px)
 {
-	size_t n = (size_t)W * H;
-	float *moist = malloc(n * sizeof(float));
+	return uploadCube(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, px, FACE_TEXELS * 4);
+}
+
+/* Radius in cube texels of a distance in reference texels (face centre). */
+static int refToCubeTexels(double r)
+{
+	int t = (int)(r * REF_TEXEL_RAD / (2.0 / FACE_N) + 0.5);
+	return t < 1 ? 1 : t;
+}
+
+/* Builds the RGBA8 climate map's pixels (layout in TerrainGen.h), one cube
+   field each. hEq / anomEq: the height and anomaly on the equirect grid,
+   for the moisture's latitude streams. CPU only: runs on the bake worker. */
+static unsigned char *climatePixels(const float *h, const float *hEq, const float *anomEq,
+                                    float *dep, float sea)
+{
+	size_t n = CUBE_TEXELS;
+	float *moistEq = malloc((size_t)EQ_W * EQ_H * sizeof(float));
+	computeMoisture(hEq, anomEq, sea, moistEq);
+	float *moist = equirectToCube(moistEq);
+	free(moistEq);
 	float *river = malloc(n * sizeof(float));
 	float *lake = malloc(n * sizeof(float));
-	computeMoisture(h, anom, sea, W, H, moist);
-	computeDrainage(h, moist, sea, W, H, river, lake);
+	computeDrainage(h, moist, sea, river, lake);
 
 	/* Alluvium: soften, then normalize by its 99th area percentile. */
 	static Histo dh;
-	blurField(dep, W, H, 2);
-	histoBuild(dep, W, H, &dh);
+	blurCube(dep, refToCubeTexels(2.0));
+	histoBuildCube(dep, &dh);
 	float dNorm = histoPctl(&dh, 0.99);
 	if (!(dNorm > 1e-9f)) dNorm = 1e-9f;
 
@@ -834,10 +1158,14 @@ static void prevailingWind(double absLat, float *zonal, float *pole, float *spee
 /* RGBA8 ocean map (layout in TerrainGen.h). Fetch streams along each
    latitude row with the zonal wind, like the moisture: open water adds its
    length, land resets it, two laps converge the wrap. Lee coasts and the
-   water behind islands stay calm; windward coasts face a developed sea. */
-static unsigned char *oceanPixels(const float *h, const float *anom, float sea, int W, int H)
+   water behind islands stay calm; windward coasts face a developed sea.
+   The fetch runs on the equirect grid (hEq) and is resampled; the wind
+   comes from each cube texel's own latitude and anomaly. */
+static unsigned char *oceanPixels(const float *hEq, const float *anom, float sea)
 {
+	const int W = EQ_W, H = EQ_H;
 	size_t n = (size_t)W * H;
+	const float *h = hEq;
 	float *fetch = malloc(n * sizeof(float));
 	double texelKm = 2.0 * M_PI * PLANET_RADIUS_KM / (double)W;
 	for (int y = 0; y < H; y++) {
@@ -860,32 +1188,174 @@ static unsigned char *oceanPixels(const float *h, const float *anom, float sea, 
 	/* Soften the row-by-row streaks into lee shadows. */
 	blurField(fetch, W, H, 2);
 
-	unsigned char *px = malloc(n * 4);
-	for (int y = 0; y < H; y++) {
-		double lat = (((double)y + 0.5) / (double)H - 0.5) * 180.0;
-		float zonal, pole, speed;
-		prevailingWind(fabs(lat), &zonal, &pole, &speed);
-		float north = lat >= 0.0 ? pole : -pole;
-		float len = sqrtf(zonal * zonal + north * north);
-		float de = len > 1e-4f ? zonal / len : 1.0f;
-		float dn = len > 1e-4f ? north / len : 0.0f;
-		for (int x = 0; x < W; x++) {
-			size_t i = (size_t)y * W + x;
-			float u = speed * (1.0f + WIND_ANOMALY_AMT * anom[i]);
-			px[i * 4 + 0] = toByte(u / WIND_MAX_MS);
-			px[i * 4 + 1] = toByte(de * 0.5f + 0.5f);
-			px[i * 4 + 2] = toByte(dn * 0.5f + 0.5f);
-			px[i * 4 + 3] = toByte(fetch[i]);
+	unsigned char *px = malloc(CUBE_TEXELS * 4);
+	for (int f = 0; f < 6; f++)
+		for (int j = 0; j < FACE_N; j++)
+			for (int i = 0; i < FACE_N; i++) {
+				size_t c = ((size_t)f * FACE_N + j) * FACE_N + i;
+				double d[3];
+				texelDir(f, i, j, d);
+				double lat = asin(fmax(fmin(d[2], 1.0), -1.0)) * (180.0 / M_PI);
+				float zonal, pole, speed;
+				prevailingWind(fabs(lat), &zonal, &pole, &speed);
+				float north = lat >= 0.0 ? pole : -pole;
+				float len = sqrtf(zonal * zonal + north * north);
+				float de = len > 1e-4f ? zonal / len : 1.0f;
+				float dn = len > 1e-4f ? north / len : 0.0f;
+				float u = speed * (1.0f + WIND_ANOMALY_AMT * anom[c]);
+				px[c * 4 + 0] = toByte(u / WIND_MAX_MS);
+				px[c * 4 + 1] = toByte(de * 0.5f + 0.5f);
+				px[c * 4 + 2] = toByte(dn * 0.5f + 0.5f);
+				px[c * 4 + 3] = toByte(sampleEquirect(fetch, d));
+			}
+	free(fetch);
+	return px;
+}
+
+/* ---------------- Surface map (slope + ambient occlusion) ---------------- */
+
+/* RGBA16F surface map (layout in TerrainGen.h): the field's slope as a
+   body-local vector (so seamless filtering and mips average it correctly
+   across face edges) and a horizon-based ambient occlusion. quad.frag reads
+   it instead of differencing four height samples per pixel. */
+#define AO_DIRS   8
+#define AO_STEPS  6           /* samples at 1, 2, 4 ... 32 texels */
+
+/* float -> IEEE half (round to nearest; finite input). */
+static unsigned short toHalf(float f)
+{
+	union { float f; unsigned int u; } v;
+	v.f = f;
+	unsigned int sign = (v.u >> 16) & 0x8000u;
+	int e = (int)((v.u >> 23) & 0xffu) - 127 + 15;
+	unsigned int man = v.u & 0x7fffffu;
+	if (e >= 31)
+		return (unsigned short)(sign | 0x7c00u);
+	if (e <= 0) {
+		if (e < -10)
+			return (unsigned short)sign;
+		man |= 0x800000u;
+		unsigned int t = (unsigned int)(14 - e);
+		unsigned int hm = man >> t;
+		if ((man >> (t - 1)) & 1u) hm++;
+		return (unsigned short)(sign | hm);
+	}
+	unsigned int hv = sign | ((unsigned int)e << 10) | (man >> 13);
+	if (man & 0x1000u) hv++;   /* a carry into the exponent is still right */
+	return (unsigned short)hv;
+}
+
+typedef struct {
+	const float *h, *relief;
+	unsigned short *px;
+	int face;
+} SurfaceTask;
+
+/* One face of the surface map. Slope: central differences in face
+   coordinates (neighbours across the edges), turned into the body-local
+   tangent vector g with g . dd/dsc = dh/dsc and g . dd/dtc = dh/dtc (raw
+   height units per radian, like quad.frag's old differences). AO: in
+   AO_DIRS directions, the highest horizon within 32 texels over the
+   relief (body radii, sphere curvature included); a horizon at tan t
+   leaves the cosine-weighted sky fraction 1 / (1 + t^2). */
+static unsigned __stdcall surfaceFace(void *arg)
+{
+	const SurfaceTask *task = arg;
+	const int N = FACE_N, f = task->face;
+	const float *h = task->h, *rel = task->relief;
+	static const int DX[AO_DIRS] = { 1, 1, 0, -1, -1, -1, 0, 1 };
+	static const int DY[AO_DIRS] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+	const double ds = 2.0 / N;   /* face-coordinate step per texel */
+	for (int j = 0; j < N; j++)
+		for (int i = 0; i < N; i++) {
+			size_t c = ((size_t)f * N + j) * N + i;
+			int edge = i == 0 || j == 0 || i == N - 1 || j == N - 1;
+			double hs = (h[edge ? cubeIndex(N, f, i + 1, j) : c + 1]
+			           - h[edge ? cubeIndex(N, f, i - 1, j) : c - 1]) / (2.0 * ds);
+			double ht = (h[edge ? cubeIndex(N, f, i, j + 1) : c + N]
+			           - h[edge ? cubeIndex(N, f, i, j - 1) : c - N]) / (2.0 * ds);
+			double sc = texelToFace(i, N), tc = texelToFace(j, N);
+			double q[3], d[3], e1[3], e2[3];
+			faceDir(f, sc, tc, q);
+			double r = sqrt(dot3(q, q));
+			for (int k = 0; k < 3; k++) d[k] = q[k] / r;
+			double dS = dot3(d, faceS[f]), dT = dot3(d, faceT[f]);
+			for (int k = 0; k < 3; k++) {
+				e1[k] = (faceS[f][k] - d[k] * dS) / r;
+				e2[k] = (faceT[f][k] - d[k] * dT) / r;
+			}
+			double aa = dot3(e1, e1), ab = dot3(e1, e2), bb = dot3(e2, e2);
+			double inv = 1.0 / (aa * bb - ab * ab);
+			double ca = (bb * hs - ab * ht) * inv, cb = (aa * ht - ab * hs) * inv;
+
+			size_t m = (size_t)j * N + i;
+			double sp = 0.5 * (texSpS[m] + texSpT[m]) * REF_TEXEL_RAD;   /* radians per texel */
+			double r0 = rel[c], vis = 0.0;
+			int inside = i >= 32 && j >= 32 && i < N - 32 && j < N - 32;
+			for (int a = 0; a < AO_DIRS; a++) {
+				double len = (DX[a] && DY[a]) ? M_SQRT2 : 1.0, tmax = 0.0;
+				for (int s = 0, dist = 1; s < AO_STEPS; s++, dist *= 2) {
+					size_t q2 = inside ? c + (ptrdiff_t)DY[a] * dist * N + DX[a] * dist
+					                   : cubeIndex(N, f, i + DX[a] * dist, j + DY[a] * dist);
+					double dl = dist * len * sp;
+					double t = (rel[q2] - r0 - 0.5 * dl * dl) / dl;
+					if (t > tmax) tmax = t;
+				}
+				vis += 1.0 / (1.0 + tmax * tmax);
+			}
+
+			unsigned short *o = task->px + c * 4;
+			for (int k = 0; k < 3; k++)
+				o[k] = toHalf((float)(ca * e1[k] + cb * e2[k]));
+			o[3] = toHalf((float)(vis / AO_DIRS));
+		}
+	return 0;
+}
+
+/* Builds the surface map's half-float pixels, one thread per face. Uses
+   the style's relief at bake time (re-bake after changing landRelief /
+   oceanRelief to update the occlusion). stepRms: RMS height step between
+   neighbouring land texels (raw units), the detail noise's reference. */
+static unsigned short *surfacePixels(const float *h, float sea, float oceanDepth, float *stepRms)
+{
+	const PlanetStyle *ps = &g_planetStyle;
+	float *rel = malloc(CUBE_TEXELS * sizeof(float));
+	unsigned short *px = malloc(CUBE_TEXELS * 4 * sizeof(unsigned short));
+	double landScale = ps->landRelief / fmax(1.0 - sea, 1e-3);
+	double sum2 = 0.0;
+	size_t cnt = 0;
+	for (size_t c = 0; c < CUBE_TEXELS; c++) {
+		double s = fmin(fmax((sea - h[c]) / fmax(oceanDepth, 1e-4), 0.0), 1.0);
+		rel[c] = (float)(landScale * fmax(h[c] - sea, 0.0) - ps->oceanRelief * s * s);
+		if ((c % FACE_N) + 1 < FACE_N && h[c] >= sea && h[c + 1] >= sea) {
+			double dh = h[c + 1] - h[c];
+			sum2 += dh * dh;
+			cnt++;
 		}
 	}
-	free(fetch);
+	*stepRms = cnt ? (float)sqrt(sum2 / cnt) : 0.0f;
+
+	SurfaceTask tasks[6];
+	HANDLE th[6];
+	for (int f = 0; f < 6; f++) {
+		tasks[f].h = h; tasks[f].relief = rel; tasks[f].px = px; tasks[f].face = f;
+		th[f] = (HANDLE)_beginthreadex(NULL, 0, surfaceFace, &tasks[f], 0, NULL);
+		if (!th[f])
+			surfaceFace(&tasks[f]);   /* no thread: do it here */
+	}
+	for (int f = 0; f < 6; f++)
+		if (th[f]) {
+			WaitForSingleObject(th[f], INFINITE);
+			CloseHandle(th[f]);
+		}
+	free(rel);
 	return px;
 }
 
 void setOceanUniforms(unsigned int shader, int unit)
 {
 	glActiveTexture(GL_TEXTURE0 + unit);
-	glBindTexture(GL_TEXTURE_2D, g_planetGen.oceanTex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, g_planetGen.oceanTex);
 	glUniform1i(glGetUniformLocation(shader, "oceanMap"), unit);
 	glUniform1f(glGetUniformLocation(shader, "windMax"), WIND_MAX_MS);
 	glActiveTexture(GL_TEXTURE0);
@@ -942,8 +1412,11 @@ void setPlanetSurfaceUniforms(unsigned int shader, int unit)
 {
 	const PlanetStyle *ps = &g_planetStyle;
 	glActiveTexture(GL_TEXTURE0 + unit);
-	glBindTexture(GL_TEXTURE_2D, g_planetGen.climateTex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, g_planetGen.climateTex);
 	glUniform1i(glGetUniformLocation(shader, "climateMap"), unit);
+	glActiveTexture(GL_TEXTURE0 + TERRAIN_SURFACE_UNIT);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, g_planetGen.surfaceTex);
+	glUniform1i(glGetUniformLocation(shader, "surfaceMap"), TERRAIN_SURFACE_UNIT);
 	uniformSrgb3(shader, "biomeColors", &ps->biome[0][0][0], 9);
 	uniformSrgb3(shader, "rockColor", ps->rock, 1);
 	uniformSrgb3(shader, "snowColor", ps->snow, 1);
@@ -962,7 +1435,8 @@ void setPlanetSurfaceUniforms(unsigned int shader, int unit)
 }
 
 /* Debug: when TERRAIN_DUMP names a file, write the final normalized field
-   there as raw float32 (W*H, row 0 = south pole) for offline inspection. */
+   there as raw float32 (the six N x N faces back to back, GL face order and
+   orientation) for offline inspection. TERRAIN_DUMP_CLIMATE likewise. */
 static void debugDump(const float *h, size_t n)
 {
 	const char *path = getenv("TERRAIN_DUMP");
@@ -1073,15 +1547,17 @@ static void uploadShaping(const TerrainBakeSettings *bs)
 /* ---------------- Full bake ---------------- */
 
 /* ---------------- Height bounds pyramid ----------------
-   Min/max mip pyramid of the final field, for the quadtree's per-node
-   culling and split distances. Level k texel = min/max of the 2x2 (or 2x1)
-   block of level k-1: the same footprint glGenerateMipmap averages, so any
-   mip sample the shaders take lies inside the [min, max] of its block. */
+   Min/max mip pyramid of the final field, per cube face, for the
+   quadtree's per-node culling and split distances. Level k texel = min/max
+   of the 2x2 block of level k-1: the same footprint glGenerateMipmap
+   averages, so any mip sample the shaders take lies inside the [min, max]
+   of its block (or, near a face edge, of its block and the neighbouring
+   face's, which seamless filtering blends in). */
 #define PYR_MAX_LEVELS 16
 struct TerrainPyramid {
 	int levels;
-	int w[PYR_MAX_LEVELS], h[PYR_MAX_LEVELS];
-	float *mn[PYR_MAX_LEVELS], *mx[PYR_MAX_LEVELS];   /* level 0: mn == mx == the field */
+	int n[PYR_MAX_LEVELS];                             /* texels per face edge */
+	float *mn[PYR_MAX_LEVELS], *mx[PYR_MAX_LEVELS];   /* six faces; level 0: mn == mx == the field */
 };
 
 static void freePyramid(TerrainPyramid *p)
@@ -1100,35 +1576,35 @@ void TerrainGen_FreePlanet(PlanetGenParams *p)
 {
 	if (p->climateTex) glDeleteTextures(1, &p->climateTex);
 	if (p->oceanTex) glDeleteTextures(1, &p->oceanTex);
+	if (p->surfaceTex) glDeleteTextures(1, &p->surfaceTex);
 	freePyramid(p->pyramid);
 	memset(p, 0, sizeof *p);
 }
 
-/* Takes ownership of h (W x H, the uploaded field). */
-static TerrainPyramid *buildPyramid(float *h, int W, int H)
+/* Takes ownership of h (the uploaded cube field). */
+static TerrainPyramid *buildPyramid(float *h)
 {
 	TerrainPyramid *pp = calloc(1, sizeof *pp);
-	pp->w[0] = W; pp->h[0] = H;
+	pp->n[0] = FACE_N;
 	pp->mn[0] = pp->mx[0] = h;
 	pp->levels = 1;
-	while ((pp->w[pp->levels-1] > 1 || pp->h[pp->levels-1] > 1) && pp->levels < PYR_MAX_LEVELS) {
+	while (pp->n[pp->levels-1] > 1 && pp->levels < PYR_MAX_LEVELS) {
 		int k = pp->levels;
-		int pw = pp->w[k-1], ph = pp->h[k-1];
-		int w = pw > 1 ? pw / 2 : 1, hh = ph > 1 ? ph / 2 : 1;
-		float *mn = malloc((size_t)w * hh * sizeof(float));
-		float *mx = malloc((size_t)w * hh * sizeof(float));
-		const float *pmn = pp->mn[k-1], *pmx = pp->mx[k-1];
-		for (int y = 0; y < hh; y++) {
-			int y0 = 2*y, y1 = 2*y + 1 < ph ? 2*y + 1 : ph - 1;
-			for (int x = 0; x < w; x++) {
-				int x0 = 2*x, x1 = 2*x + 1 < pw ? 2*x + 1 : pw - 1;
-				size_t a = (size_t)y0*pw + x0, b = (size_t)y0*pw + x1;
-				size_t c = (size_t)y1*pw + x0, d = (size_t)y1*pw + x1;
-				mn[(size_t)y*w + x] = fminf(fminf(pmn[a], pmn[b]), fminf(pmn[c], pmn[d]));
-				mx[(size_t)y*w + x] = fmaxf(fmaxf(pmx[a], pmx[b]), fmaxf(pmx[c], pmx[d]));
-			}
+		int pn = pp->n[k-1], n = pn / 2;
+		float *mn = malloc((size_t)6 * n * n * sizeof(float));
+		float *mx = malloc((size_t)6 * n * n * sizeof(float));
+		for (int f = 0; f < 6; f++) {
+			const float *pmn = pp->mn[k-1] + (size_t)f * pn * pn;
+			const float *pmx = pp->mx[k-1] + (size_t)f * pn * pn;
+			float *omn = mn + (size_t)f * n * n, *omx = mx + (size_t)f * n * n;
+			for (int y = 0; y < n; y++)
+				for (int x = 0; x < n; x++) {
+					size_t a = (size_t)(2*y) * pn + 2*x, c = a + pn;
+					omn[(size_t)y*n + x] = fminf(fminf(pmn[a], pmn[a+1]), fminf(pmn[c], pmn[c+1]));
+					omx[(size_t)y*n + x] = fmaxf(fmaxf(pmx[a], pmx[a+1]), fmaxf(pmx[c], pmx[c+1]));
+				}
 		}
-		pp->w[k] = w; pp->h[k] = hh;
+		pp->n[k] = n;
 		pp->mn[k] = mn; pp->mx[k] = mx;
 		pp->levels++;
 	}
@@ -1155,9 +1631,41 @@ int TerrainGen_PlanetRange(const PlanetGenParams *planet, float *hmin, float *hm
 		*hmin = *hmax = 0.0f;
 		return 0;
 	}
-	int top = P->levels - 1;
-	*hmin = P->mn[top][0];
-	*hmax = P->mx[top][0];
+	int top = P->levels - 1;   /* one texel per face */
+	float lo = FLT_MAX, hi = -FLT_MAX;
+	for (int f = 0; f < 6; f++) {
+		lo = fminf(lo, P->mn[top][f]);
+		hi = fmaxf(hi, P->mx[top][f]);
+	}
+	*hmin = lo;
+	*hmax = hi;
+	return 1;
+}
+
+/* Box of face coordinates (sc0, sc1, tc0, tc1) covering a spherical cap
+   (unit centre c, angle cap) on face f; 0 if the cap misses the face. The
+   angle of a point from the face centre toward S, seen around the T axis,
+   is a longitude about T: over a cap it spans asin(sin(cap) / cos(lat))
+   either side of the centre's (lat measured from the T pole), and
+   sc = tan of it. Likewise tc, about S. */
+static int capFaceBox(const double c[3], double cap, int f, double box[4])
+{
+	for (int a = 0; a < 2; a++) {
+		const double *U = a ? faceT[f] : faceS[f];   /* the coordinate's axis */
+		const double *Q = a ? faceS[f] : faceT[f];   /* the pole it turns about */
+		double lat = asin(fmax(fmin(dot3(c, Q), 1.0), -1.0));
+		double lo = -0.25 * M_PI, hi = 0.25 * M_PI;
+		if (cap + fabs(lat) < 0.5 * M_PI) {
+			double lon = atan2(dot3(c, U), dot3(c, faceM[f]));
+			double dl = asin(fmin(sin(cap) / cos(lat), 1.0));
+			lo = fmax(lo, lon - dl);
+			hi = fmin(hi, lon + dl);
+			if (lo > hi)
+				return 0;
+		}
+		box[2*a] = tan(lo);
+		box[2*a + 1] = tan(hi);
+	}
 	return 1;
 }
 
@@ -1169,60 +1677,63 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 		return 0;
 	}
 
-	/* Cap -> lat/lon box -> the shaders' equirectangular uv:
-	   u = atan2(y, x)/(2 pi) + 0.5, v = asin(z)/pi + 0.5. */
-	double lat = asin(fmax(fmin(dir[2], 1.0), -1.0));
-	double lon = atan2(dir[1], dir[0]);
-	double latLo = lat - capAngle, latHi = lat + capAngle;
-	double u0 = 0.0, u1 = 1.0;
-	if (latLo > -0.5*M_PI && latHi < 0.5*M_PI) {
-		double s = sin(capAngle) / cos(lat);
-		if (s < 1.0) {
-			double dLon = asin(s);
-			u0 = (lon - dLon) / (2.0*M_PI) + 0.5;
-			u1 = (lon + dLon) / (2.0*M_PI) + 0.5;
-		}
-	}
-	double v0 = fmax(latLo / M_PI + 0.5, 0.0), v1 = fmin(latHi / M_PI + 0.5, 1.0);
+	/* The shaders move the mip toward the face corners, where texels are
+	   smaller (planetmap.glsl planetMapLodBias: -log2(m^2), m = the
+	   direction's major component): add the most the cap can get. */
+	double len = sqrt(dot3(dir, dir));
+	double c[3] = { dir[0] / len, dir[1] / len, dir[2] / len };
+	double mC = fmax(fabs(c[0]), fmax(fabs(c[1]), fabs(c[2])));
+	double aMax = fmin(acos(fmin(mC, 1.0)) + capAngle, acos(1.0 / sqrt(3.0)));
+	double mMin = cos(aMax);
+	lod += -log2(mMin * mMin);
+
+	double box[6][4];
+	int touched[6];
+	for (int f = 0; f < 6; f++)
+		touched[f] = capFaceBox(c, capAngle, f, box[f]);
 
 	/* Mip 0 only (every deep node at planet scale): the sampled surface is
 	   exactly the bilinear interpolation of the texels, whose extremes over
 	   a box lie at the box corners, where its edges cross texel rows /
 	   columns, or at texel centres inside it. Evaluating just those gives
-	   the exact range: tight bounds for nodes far smaller than a texel. */
+	   the exact range: tight bounds for nodes far smaller than a texel.
+	   Texels off the face (the half-texel strip along an edge) are the
+	   neighbouring face's, as with seamless filtering. */
 	if (lod <= 0.0) {
-		int W = P->w[0], H = P->h[0];
-		double xa = u0 * W - 0.5, xb = u1 * W - 0.5;
-		double ya = v0 * H - 0.5, yb = v1 * H - 0.5;
-		if (xb - xa <= 16.0 && yb - ya <= 16.0) {
-			double xs[20], ys[20];
-			int nx = 0, ny = 0;
-			xs[nx++] = xa;
-			for (double g = floor(xa) + 1.0; g < xb; g += 1.0) xs[nx++] = g;
-			xs[nx++] = xb;
-			ys[ny++] = ya;
-			for (double g = floor(ya) + 1.0; g < yb; g += 1.0) ys[ny++] = g;
-			ys[ny++] = yb;
-
-			const float *f = P->mn[0];
+		const int N = P->n[0];
+		int tiny = 1;
+		for (int f = 0; f < 6 && tiny; f++)
+			if (touched[f])
+				tiny = (box[f][1] - box[f][0]) * 0.5 * N <= 16.0
+				     && (box[f][3] - box[f][2]) * 0.5 * N <= 16.0;
+		if (tiny) {
+			const float *fld = P->mn[0];
 			float lo = FLT_MAX, hi = -FLT_MAX;
-			for (int j = 0; j < ny; j++) {
-				/* GL clamp-to-edge in v, repeat in u. */
-				int y0 = (int)floor(ys[j]);
-				double fy = ys[j] - y0;
-				int y1 = y0 + 1;
-				y0 = y0 < 0 ? 0 : (y0 > H - 1 ? H - 1 : y0);
-				y1 = y1 < 0 ? 0 : (y1 > H - 1 ? H - 1 : y1);
-				for (int i = 0; i < nx; i++) {
-					int x0 = (int)floor(xs[i]);
-					double fx = xs[i] - x0;
-					int x1 = ((x0 + 1) % W + W) % W;
-					x0 = (x0 % W + W) % W;
-					double a = f[(size_t)y0*W + x0] + fx * (f[(size_t)y0*W + x1] - f[(size_t)y0*W + x0]);
-					double b = f[(size_t)y1*W + x0] + fx * (f[(size_t)y1*W + x1] - f[(size_t)y1*W + x0]);
-					float v = (float)(a + fy * (b - a));
-					if (v < lo) lo = v;
-					if (v > hi) hi = v;
+			for (int f = 0; f < 6; f++) {
+				if (!touched[f]) continue;
+				double xa = faceToTexel(box[f][0], N), xb = faceToTexel(box[f][1], N);
+				double ya = faceToTexel(box[f][2], N), yb = faceToTexel(box[f][3], N);
+				double xs[20], ys[20];
+				int nx = 0, ny = 0;
+				xs[nx++] = xa;
+				for (double g = floor(xa) + 1.0; g < xb; g += 1.0) xs[nx++] = g;
+				xs[nx++] = xb;
+				ys[ny++] = ya;
+				for (double g = floor(ya) + 1.0; g < yb; g += 1.0) ys[ny++] = g;
+				ys[ny++] = yb;
+				for (int j = 0; j < ny; j++) {
+					int y0 = (int)floor(ys[j]);
+					double fy = ys[j] - y0;
+					for (int i = 0; i < nx; i++) {
+						int x0 = (int)floor(xs[i]);
+						double fx = xs[i] - x0;
+						double h00 = fld[cubeIndex(N, f, x0, y0)], h10 = fld[cubeIndex(N, f, x0 + 1, y0)];
+						double h01 = fld[cubeIndex(N, f, x0, y0 + 1)], h11 = fld[cubeIndex(N, f, x0 + 1, y0 + 1)];
+						double a = h00 + fx * (h10 - h00), b = h01 + fx * (h11 - h01);
+						float v = (float)(a + fy * (b - a));
+						if (v < lo) lo = v;
+						if (v > hi) hi = v;
+					}
 				}
 			}
 			/* Float uv/filtering differences on the GPU side. */
@@ -1235,32 +1746,37 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 
 	/* Otherwise the min/max pyramid: at least the coarsest mip the shader
 	   may read there (a coarser block's min/max bounds every finer sample
-	   inside it), and coarse enough that the box spans a handful of
+	   inside it), and coarse enough that each face's box spans a handful of
 	   texels. */
 	int top = P->levels - 1;
 	int k = (int)ceil(fmax(lod, 0.0));
 	if (k > top) k = top;
-	while (k < top && ((u1 - u0) * P->w[k] > 8.0 || (v1 - v0) * P->h[k] > 8.0))
+	for (;;) {
+		int fits = 1;
+		for (int f = 0; f < 6 && fits; f++)
+			if (touched[f])
+				fits = (box[f][1] - box[f][0]) * 0.5 * P->n[k] <= 8.0
+				    && (box[f][3] - box[f][2]) * 0.5 * P->n[k] <= 8.0;
+		if (fits || k == top) break;
 		k++;
+	}
 
-	/* Texels bilinear filtering touches (texel coords u*W - 0.5), plus one
-	   more each side so the finer mip of a trilinear blend stays inside. */
-	int W = P->w[k], H = P->h[k];
-	int x0 = (int)floor(u0 * W - 0.5) - 1, x1 = (int)floor(u1 * W - 0.5) + 2;
-	int y0 = (int)floor(v0 * H - 0.5) - 1, y1 = (int)floor(v1 * H - 0.5) + 2;
-	if (x1 - x0 + 1 >= W) { x0 = 0; x1 = W - 1; }
-	if (y0 < 0) y0 = 0;
-	if (y1 > H - 1) y1 = H - 1;
-
-	float lo = FLT_MAX, hi = -FLT_MAX;
+	/* Texels bilinear filtering touches, plus one more each side so the
+	   finer mip of a trilinear blend stays inside; off-face texels are the
+	   neighbouring face's. */
+	const int n = P->n[k];
 	const float *mn = P->mn[k], *mx = P->mx[k];
-	for (int y = y0; y <= y1; y++) {
-		for (int x = x0; x <= x1; x++) {
-			int xi = ((x % W) + W) % W;   /* longitude wraps */
-			size_t i = (size_t)y * W + xi;
-			if (mn[i] < lo) lo = mn[i];
-			if (mx[i] > hi) hi = mx[i];
-		}
+	float lo = FLT_MAX, hi = -FLT_MAX;
+	for (int f = 0; f < 6; f++) {
+		if (!touched[f]) continue;
+		int x0 = (int)floor(faceToTexel(box[f][0], n)) - 1, x1 = (int)floor(faceToTexel(box[f][1], n)) + 2;
+		int y0 = (int)floor(faceToTexel(box[f][2], n)) - 1, y1 = (int)floor(faceToTexel(box[f][3], n)) + 2;
+		for (int y = y0; y <= y1; y++)
+			for (int x = x0; x <= x1; x++) {
+				size_t i = cubeIndex(n, f, x, y);
+				if (mn[i] < lo) lo = mn[i];
+				if (mx[i] > hi) hi = mx[i];
+			}
 	}
 	*hmin = lo;
 	*hmax = hi;
@@ -1293,9 +1809,10 @@ struct TerrainBakeJob {
 	/* CPU stage results, uploaded by the finish */
 	TerrainPyramid *pyramid;      /* level 0 is the final field */
 	unsigned char *climatePx, *oceanPx;
-	float seaLevel, oceanDepth;
+	unsigned short *surfacePx;    /* half floats */
+	float seaLevel, oceanDepth, landStepRms;
 	/* Upload results (STAGE_UPLOAD: one per poll) */
-	GLuint climateTex, oceanTex, heightTex;
+	GLuint climateTex, oceanTex, surfaceTex, heightTex;
 	double uploadS;
 	clock_t t[7];
 	int background;
@@ -1316,12 +1833,13 @@ static void workerStep(void)
    stay in the program between frames. */
 static void shapeStrips(TerrainBakeJob *job, int end)
 {
-	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
+	const int W = FACE_N, H = 6 * FACE_N;
 	if (job->strip == 0) {
 		ensureBakeResources();
 		job->t[0] = clock();
 		glUseProgram(bakeProgram);
 		glUniform1f(glGetUniformLocation(bakeProgram, "seed"), (float)job->bs.seed);
+		glUniform1i(glGetUniformLocation(bakeProgram, "faceSize"), FACE_N);
 		uploadPlates(&job->bs);
 		uploadShaping(&job->bs);
 	}
@@ -1348,7 +1866,7 @@ static void shapeStrips(TerrainBakeJob *job, int end)
 	if (!scissor) glDisable(GL_SCISSOR_TEST);
 }
 
-#define READBACK_BYTES ((size_t)HEIGHTMAP_W * HEIGHTMAP_H * 2 * sizeof(float))
+#define READBACK_BYTES (CUBE_TEXELS * 2 * sizeof(float))
 
 static float *allocRG(void)
 {
@@ -1368,7 +1886,7 @@ static void readbackNow(TerrainBakeJob *job)
 	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadPixels(0, 0, HEIGHTMAP_W, HEIGHTMAP_H, GL_RG, GL_FLOAT, job->rg);
+	glReadPixels(0, 0, FACE_N, 6 * FACE_N, GL_RG, GL_FLOAT, job->rg);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	job->t[1] = clock();
 }
@@ -1382,7 +1900,7 @@ static void readbackStart(TerrainBakeJob *job)
 	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadPixels(0, 0, HEIGHTMAP_W, HEIGHTMAP_H, GL_RG, GL_FLOAT, (void *)0);
+	glReadPixels(0, 0, FACE_N, 6 * FACE_N, GL_RG, GL_FLOAT, (void *)0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 	job->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -1423,8 +1941,7 @@ static int readbackCollect(TerrainBakeJob *job, int wait)
 static void bakeCPU(TerrainBakeJob *job)
 {
 	const TerrainBakeSettings *bs = &job->bs;
-	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
-	const size_t n = (size_t)W * H;
+	const size_t n = CUBE_TEXELS;
 	static Histo hf;   /* 32 KB: keep it off the stack */
 
 	xsState = bs->seed * 2654435761u | 1u;
@@ -1445,24 +1962,24 @@ static void bakeCPU(TerrainBakeJob *job)
 
 	/* Pre-normalize so the erosion constants are in fixed [0,1] units. The
 	   shaper's sea level is raw 0; track where it lands. */
-	histoBuild(h, W, H, &hf);
+	histoBuildCube(h, &hf);
 	float preLo = histoPctl(&hf, PRE_LO_PCT), preHi = histoPctl(&hf, PRE_HI_PCT);
 	stretch01(h, n, preLo, preHi);
 	float seaLevel0 = (0.0f - preLo) / fmaxf(preHi - preLo, 1e-6f);
 	job->t[2] = clock();
 
 	/* 3. Thermal erosion (weathering), then 4. hydraulic droplet erosion. */
-	thermalErode(h, W, H, bs->thermalPasses, bs->thermalTalus, job->step);
+	thermalErode(h, bs->thermalPasses, bs->thermalTalus, job->step);
 	job->t[3] = clock();
 
 	/* Droplets spawn only on land; reaching the sea is a river mouth. */
-	hydraulicErode(h, dep, W, H, seaLevel0, bs, job->step);
+	hydraulicErode(h, dep, seaLevel0, bs, job->step);
 	job->t[4] = clock();
 
 	/* 5. Percentile-stretch the relief to [0,1], carrying the sea level
 	   (raw 0, set by the plate crust) through it, + ocean depth (95th area
 	   percentile of depth below sea level, feeds the water.frag tint). */
-	histoBuild(h, W, H, &hf);
+	histoBuildCube(h, &hf);
 	float lo = histoPctl(&hf, NORMALIZE_LO_PCT);
 	float hi = histoPctl(&hf, NORMALIZE_HI_PCT);
 	float range = hi - lo;
@@ -1479,15 +1996,12 @@ static void bakeCPU(TerrainBakeJob *job)
 	float oceanDepth = 0.15f;
 	if (seaLevel > 1e-6f) {
 		double dscale = (double)(PCTL_BINS - 1) / (double)seaLevel;
-		for (int y = 0; y < H; y++) {
-			const float *row = h + (size_t)y * W;
-			double w = rowCos[y];
-			for (int x = 0; x < W; x++) {
-				if (row[x] < seaLevel) {
-					oceanArea += w;
-					int b = (int)((double)(seaLevel - row[x]) * dscale);
-					dhist[b < 0 ? 0 : (b > PCTL_BINS - 1 ? PCTL_BINS - 1 : b)] += w;
-				}
+		for (size_t i = 0; i < n; i++) {
+			if (h[i] < seaLevel) {
+				double w = texArea[i % FACE_TEXELS];
+				oceanArea += w;
+				int b = (int)((double)(seaLevel - h[i]) * dscale);
+				dhist[b < 0 ? 0 : (b > PCTL_BINS - 1 ? PCTL_BINS - 1 : b)] += w;
 			}
 		}
 		if (oceanArea > 0.0) {
@@ -1506,15 +2020,20 @@ static void bakeCPU(TerrainBakeJob *job)
 	debugDump(h, n);
 	job->t[5] = clock();
 
-	/* 7. Climate map (moisture, rivers, alluvium, lakes) and ocean map. */
-	job->climatePx = climatePixels(h, anom, dep, seaLevel, W, H);
-	job->oceanPx = oceanPixels(h, anom, seaLevel, W, H);
+	/* 7. Climate map (moisture, rivers, alluvium, lakes) and ocean map. The
+	   latitude streams (moisture, fetch) run on an equirect copy. */
+	float *hEq = cubeToEquirect(h), *anomEq = cubeToEquirect(anom);
+	job->climatePx = climatePixels(h, hEq, anomEq, dep, seaLevel);
+	job->oceanPx = oceanPixels(hEq, anom, seaLevel);
+	job->surfacePx = surfacePixels(h, seaLevel, oceanDepth, &job->landStepRms);
+	free(hEq);
+	free(anomEq);
 	free(anom);
 	free(dep);
 	job->seaLevel = seaLevel;
 	job->oceanDepth = oceanDepth;
 	/* Keeps h as level 0 of the quadtree's height-bounds pyramid. */
-	job->pyramid = buildPyramid(h, W, H);
+	job->pyramid = buildPyramid(h);
 	job->t[6] = clock();
 }
 
@@ -1594,53 +2113,44 @@ static void freeJob(TerrainBakeJob *job)
 	free(job->rg);
 	free(job->climatePx);
 	free(job->oceanPx);
+	free(job->surfacePx);
 	freePyramid(job->pyramid);
-	GLuint tex[3] = { job->climateTex, job->oceanTex, job->heightTex };
-	for (int k = 0; k < 3; k++)
+	GLuint tex[4] = { job->climateTex, job->oceanTex, job->surfaceTex, job->heightTex };
+	for (int k = 0; k < 4; k++)
 		if (tex[k]) glDeleteTextures(1, &tex[k]);
 	free(job);
 }
 
-static GLuint uploadHeight(const float *h, int W, int H)
+static GLuint uploadHeight(const float *h)
 {
-	GLuint tex;
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, W, H, 0, GL_RED, GL_FLOAT, h);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	/* Longitude is periodic; the latitude clamp keeps the poles from
-	   wrapping into each other. */
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, 0);
-	return tex;
+	return uploadCube(GL_R32F, GL_RED, GL_FLOAT, h, FACE_TEXELS * sizeof(float));
 }
 
-/* 8. Upload: climate / ocean maps and the final field (the same sampling
-   params the body shaders expect) with full mip chains, one per call (all:
-   the rest at once). R32F: half floats would round heights to ~100 m
+/* 8. Upload: climate / ocean / surface maps and the final field (the same
+   sampling params the body shaders expect) with full mip chains, one per
+   call (all: the rest at once). R32F: half floats would round heights to ~100 m
    steps at Earth scale, and the CPU bounds pyramid must see exactly the
    values the GPU samples. Returns 1 when all three are up. */
 static int uploadNext(TerrainBakeJob *job, int all)
 {
-	const int W = HEIGHTMAP_W, H = HEIGHTMAP_H;
 	job->stage = STAGE_UPLOAD;
 	do {
 		clock_t u0 = clock();
 		if (!job->climateTex) {
-			job->climateTex = uploadRGBA8(job->climatePx, W, H);
+			job->climateTex = uploadRGBA8(job->climatePx);
 			free(job->climatePx);
 			job->climatePx = NULL;
 		} else if (!job->oceanTex) {
-			job->oceanTex = uploadRGBA8(job->oceanPx, W, H);
+			job->oceanTex = uploadRGBA8(job->oceanPx);
 			free(job->oceanPx);
 			job->oceanPx = NULL;
+		} else if (!job->surfaceTex) {
+			job->surfaceTex = uploadCube(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, job->surfacePx,
+			                             FACE_TEXELS * 4 * sizeof(unsigned short));
+			free(job->surfacePx);
+			job->surfacePx = NULL;
 		} else if (!job->heightTex) {
-			job->heightTex = uploadHeight(job->pyramid->mn[0], W, H);
+			job->heightTex = uploadHeight(job->pyramid->mn[0]);
 		}
 		job->uploadS += (double)(clock() - u0) / CLOCKS_PER_SEC;
 	} while (all && !job->heightTex);
@@ -1654,20 +2164,22 @@ static GLuint bakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
 	uploadNext(job, 1);
 	out->climateTex = job->climateTex;
 	out->oceanTex = job->oceanTex;
+	out->surfaceTex = job->surfaceTex;
 	out->seaLevel = job->seaLevel;
 	out->oceanDepth = job->oceanDepth;
+	out->landStepRms = job->landStepRms;
 	out->pyramid = job->pyramid;
 	job->pyramid = NULL;
 	GLuint heightTex = job->heightTex;
-	job->climateTex = job->oceanTex = job->heightTex = 0;
+	job->climateTex = job->oceanTex = job->surfaceTex = job->heightTex = 0;
 
 	const clock_t *t = job->t;
 	double s = (double)(CLOCKS_PER_SEC);
-	fprintf(stderr, "[terrain] bake seed %u%s: shape+readback %.3f s, split %.2f s, thermal %.2f s, hydro %.2f s, sea %.2f s, climate %.2f s, upload %.3f s -> seaLevel %.4f, oceanDepth %.4f\n",
+	fprintf(stderr, "[terrain] bake seed %u%s: shape+readback %.3f s, split %.2f s, thermal %.2f s, hydro %.2f s, sea %.2f s, climate %.2f s, upload %.3f s -> seaLevel %.4f, oceanDepth %.4f, land step %.5f\n",
 	        job->bs.seed, job->background ? " (background)" : "",
 	        (double)(t[1] - t[0]) / s, (double)(t[2] - t[1]) / s, (double)(t[3] - t[2]) / s,
 	        (double)(t[4] - t[3]) / s, (double)(t[5] - t[4]) / s, (double)(t[6] - t[5]) / s,
-	        job->uploadS, job->seaLevel, job->oceanDepth);
+	        job->uploadS, job->seaLevel, job->oceanDepth, job->landStepRms);
 
 	freeJob(job);
 	return heightTex;

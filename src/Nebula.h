@@ -116,7 +116,8 @@ extern int g_nebulaBakeSize;
 nebulaParams nebulaDefaults(void);
 
 /* Command line: --bake-sky <name> [--sky-size <n>] [--sky-axes]
-   [--sky-params <set>: settings from nebula_<set>.txt], and
+   [--sky-params <set>: settings from nebula_<set>.txt]
+   [--sky-seed <n>: overrides the seed], and
    --sky <name>, --nebula (in-system pass on). Before the window exists. */
 void Nebula_ParseArgs(int argc, char *argv[]);
 int Nebula_BakeRequested(void);

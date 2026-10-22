@@ -19,7 +19,9 @@ uniform vec3 lightPosition;
 // vertices near the coast stay close to it. lodK/lodCameraPos drive the vertex texture-fetch
 // LOD, combined with the quadtree node's cell size so the geometry follows
 // the field at its own resolution and never crinkles finer than it can draw.
-uniform sampler2D heightMap;
+uniform samplerCube heightMap;
+uniform samplerCube surfaceMap;   // slope: sizes the detail (detailEnvelope)
+#include "planetmap.glsl"
 uniform float seaLevel;
 uniform float landRelief;
 uniform float oceanRelief;
@@ -69,12 +71,11 @@ void main()
 	// Vertex texture fetch of the shaping field at the resolution of the
 	// patches at this distance (never finer than a pixel footprint either).
 	float vDist = length(sphere - lodCameraPos);
-	vec2 huv = vec2((atan(d.y, d.x)/PI + 1.0)*0.5,
-	                (asin(clamp(d.z, -1.0, 1.0))/PI + 0.5));
-	float lodCell = log2(max(vDist*lodCellK, 1.0));
-	float lodPix = log2(max(vDist*lodK, 1e-4));
-	float lod = clamp(max(lodCell, lodPix), 0.0, 11.0);
-	float h = textureLod(heightMap, huv, lod).r;
+	// (The face-corner bias goes on before the clamp to mip 0.)
+	float lodCell = log2(max(vDist*lodCellK, 1e-30));
+	float lodPix = log2(max(vDist*lodK, 1e-30));
+	float lod = clamp(max(lodCell, lodPix) + planetMapLodBias(d), 0.0, planetMapMaxLod(heightMap));
+	float h = textureLod(heightMap, d, lod).r;
 
 	// Relief as a fraction of the planet radius (model scale): a linear ramp
 	// from sea level to the field maximum on land, and a squared shelf down
@@ -93,7 +94,8 @@ void main()
 	// Detail noise on land, faded by this vertex's distance (the same for
 	// every patch sharing it, so no cracks), in metres -> body radii.
 	float alt01 = max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
-	float env = detailEnvelope(landRelief * alt01 * detailRadius, alt01);
+	float mapSlope = h > seaLevel ? length(textureLod(surfaceMap, d, lod).xyz) : 0.0;
+	float env = detailEnvelope(landRelief * alt01 * detailRadius, mapSlope);
 	vec3 q = patchCube(uv);
 	vec2 gradCube;
 	float detail = detailVertex(pAddr, uv, length(q),

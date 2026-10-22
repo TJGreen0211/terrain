@@ -363,6 +363,10 @@ static void cameraSection(void)
 		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
 	nk_checkbox_label(ctx, "Legacy float vertex path", &g_qtLegacyPath);
 	nk_checkbox_label(ctx, "Terrain detail noise", &g_terrainDetail);
+	sliderRow("Detail roughness", &g_detailRoughness, 0.0f, 3.0f, 0.05f, "%.2f");
+	sliderRow("Terrain AO", &g_terrainAO, 0.0f, 1.0f, 0.05f, "%.2f");
+	sliderRow("Ground textures", &g_terrainTexStrength, 0.0f, 1.0f, 0.05f, "%.2f");
+	nk_layout_row_dynamic(ctx, rowHeight, 1);
 	nk_checkbox_label(ctx, "Tint shadow cascades", &g_shadowDebug);
 	nk_labelf(ctx, NK_TEXT_LEFT, "Shadow cascades: %d", g_cascades.count);
 	for (int i = 0; i < g_cascades.count; i++)
@@ -387,7 +391,7 @@ static void waterSection(void)
 	sliderRow("Wave height", &w[1], 0.0f, 1.5f, 0.01f, "%.2f");
 	sliderRow("Choppiness", &w[4], 0.0f, 3.0f, 0.01f, "%.2f");
 	sliderRow("Normal strength", &w[2], 0.0f, 4.0f, 0.01f, "%.2f");
-	sliderRow("Tiling", &w[3], 1.0f, 32.0f, 0.1f, "%.1f");
+	sliderRow("Wave scale", &w[3], 0.25f, 30.0f, 0.05f, "%.2f");
 
 	nk_layout_row_dynamic(ctx, rowHeight, 1);
 	if (nk_button_label(ctx, "Reset water"))

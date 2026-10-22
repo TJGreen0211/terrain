@@ -28,7 +28,9 @@ uniform int detailOctaves;     // octave count; 0 = detail off
 uniform float detailAmp0;      // coarsest octave amplitude, metres
 uniform float detailGain;      // amplitude ratio per octave (wavelength halves)
 uniform float detailAmpTotal;  // sum of every octave's amplitude, metres
-uniform float detailPlains;    // amplitude on low land relative to high ground
+uniform float detailPlains;    // least local scale (flat ground)
+uniform float detailLocalMax;  // most local scale (bounds the detail)
+uniform float detailSlopeToStep; // |map slope| -> local scale (TerrainDetail.c)
 uniform float detailRadius;    // body radius, metres
 uniform float detailPix;       // radians per pixel: 2 tan(fov/2) / H
 uniform float detailTriPx;     // this pass's LOD target, px per triangle edge
@@ -168,18 +170,20 @@ vec3 detailCubePoint(ivec4 addr, vec2 uv)
 	return q;
 }
 
-// Amplitude envelope (0..1) for land hAboveM metres above sea level at
-// relative altitude alt01 (0 = shore, 1 = highest peaks). The coastal ramp
-// keeps |detail| <= hAboveM (the noise is within [-1, 1] and
-// smoothstep(t) <= 2t), so land never dips below the sea and the per-pixel
-// coastline (quad.frag, water.frag) still matches the geometry. Low land is
-// smoother than high ground.
-float detailEnvelope(float hAboveM, float alt01)
+// Amplitude envelope (0..detailLocalMax) for land hAboveM metres above sea
+// level where the baked map's slope is mapSlope (|surfaceMap.xyz|, raw
+// units per radian): the local scale continues the map's roughness here
+// (steep ranges rugged, plains smooth). The coastal ramp keeps |detail| <=
+// hAboveM (the noise is within [-1, 1] and smoothstep(t) <= 2t), so land
+// never dips below the sea and the per-pixel coastline (quad.frag,
+// water.frag) still matches the geometry.
+float detailEnvelope(float hAboveM, float mapSlope)
 {
 	if (detailOctaves <= 0)
 		return 0.0;
-	float coast = smoothstep(0.0, 1.0, hAboveM / (2.0 * detailAmpTotal));
-	return coast * mix(detailPlains, 1.0, smoothstep(0.0, 0.3, alt01));
+	float local = clamp(mapSlope * detailSlopeToStep, detailPlains, detailLocalMax);
+	float coast = smoothstep(0.0, 1.0, hAboveM / (2.0 * detailAmpTotal * local));
+	return coast * local;
 }
 
 // Wavelength (m) of the coarsest octave at a point with cube radius qLen:

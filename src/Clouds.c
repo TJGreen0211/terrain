@@ -231,10 +231,10 @@ static void buildMap(int body, GLuint tex, double t)
 	glUseProgram(mapProgram);
 	glUniform2f(glGetUniformLocation(mapProgram, "mapSize"), (float)mapW, (float)mapH);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, g->climateTex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, g->climateTex);
 	glUniform1i(glGetUniformLocation(mapProgram, "climateMap"), 0);
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, g->oceanTex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, g->oceanTex);
 	glUniform1i(glGetUniformLocation(mapProgram, "windMap"), 1);
 	glUniform1f(glGetUniformLocation(mapProgram, "windMax"), WIND_MAP_MAX_MS);
 	glUniform1f(glGetUniformLocation(mapProgram, "planetRadius"), (float)R);
@@ -477,7 +477,7 @@ static void setSlabUniforms(GLuint s, mat4 proj, mat4 view, dvec3 cam, int body)
 	glUniform1f(glGetUniformLocation(s, "detailLambda0"), (float)detailLambda0(body));
 	glUniform3f(glGetUniformLocation(s, "cloudColor"), c->color[0], c->color[1], c->color[2]);
 	glActiveTexture(GL_TEXTURE0 + SLAB_UNIT_WIND);
-	glBindTexture(GL_TEXTURE_2D, genFor(body)->oceanTex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, genFor(body)->oceanTex);
 	glActiveTexture(GL_TEXTURE0);
 	glUniform1i(glGetUniformLocation(s, "cloudWind"), SLAB_UNIT_WIND);
 	bindNoise(s, SLAB_UNIT_NOISE);

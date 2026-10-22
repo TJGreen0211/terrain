@@ -1,8 +1,9 @@
 #version 410
 
 // Builds one weather map (Clouds.c) for a planet at one simulation time:
-// R = coverage field (signed, + 0.5), G = column thickness, in the climate map's equirect layout
-// over the body-fixed frame (pole = +Z).
+// R = coverage field (signed, + 0.5), G = column thickness, in an equirect layout
+// over the body-fixed frame (pole = +Z). The climate and wind maps it reads
+// are cube maps, looked up by direction (planetmap.glsl).
 //
 // Coverage is the style's coverage potential (how cloudy this place tends to
 // be) thresholded against domain-warped FBM (Schneider and Vos 2015's
@@ -15,8 +16,8 @@ const float PI = 3.14159265359;
 out vec4 FragColor;
 
 uniform vec2 mapSize;
-uniform sampler2D climateMap;   // R = moisture (TerrainGen.c)
-uniform sampler2D windMap;      // the ocean map: wind speed and direction
+uniform samplerCube climateMap; // R = moisture (TerrainGen.c)
+uniform samplerCube windMap;    // the ocean map: wind speed and direction
 uniform float windMax;
 uniform float planetRadius;     // m
 uniform float texelM;           // map texel at the equator, m
@@ -63,7 +64,7 @@ float shapeNoise(vec3 p, vec3 wind, float tau, vec3 seed, float lambda0, int oct
 void main()
 {
 	vec2 uv = gl_FragCoord.xy / mapSize;
-	float lon = (uv.x * 2.0 - 1.0) * PI;   // inverse of mapUV (quad.frag)
+	float lon = (uv.x * 2.0 - 1.0) * PI;   // long/lat of this weather-map texel
 	float lat = (uv.y - 0.5) * PI;
 	vec3 d = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
 	vec3 p = d * planetRadius;
@@ -73,9 +74,10 @@ void main()
 	float pot = coverage;
 	if (style == STYLE_CLIMATE) {
 		// Broad moisture (the climate map's R holds half-scale rain), from a
-		// coarse mip: thresholding a sharp field (it steps at every coast)
-		// would trace the map's texels as stair-stepped cloud edges.
-		float m = clamp(2.0 * textureLod(climateMap, uv, 6.0).r, 0.0, 1.0);
+		// coarse mip (8 texels per face, ~11 deg): thresholding a sharp field
+		// (it steps at every coast) would trace the map's texels as
+		// stair-stepped cloud edges.
+		float m = clamp(2.0 * textureLod(climateMap, d, log2(float(textureSize(climateMap, 0).x)) - 3.0).r, 0.0, 1.0);
 		float climate = latitudeBelts(absLatDeg) * mix(0.6, 1.25, m);
 		pot = coverage * mix(1.0, climate, climateWeight);
 	} else if (style == STYLE_BANDED) {
@@ -85,7 +87,7 @@ void main()
 	pot = clamp(pot, 0.0, 1.0);
 
 	// Shape noise, moved along the (smoothed) wind by both flow phases.
-	vec3 wind = cloudWindAt(d, textureLod(windMap, uv, 3.0), windMax);
+	vec3 wind = cloudWindAt(d, textureLod(windMap, d, log2(float(textureSize(windMap, 0).x)) - 6.0), windMax);
 	float lambda0 = weatherScale * planetRadius;
 	int octaves = int(clamp(ceil(log2(lambda0 / (2.0 * texelM))) + 1.0, 1.0, 9.0));
 	float n0 = shapeNoise(p, wind, cloudFlowTau.x, cloudFlowSeed0, lambda0, octaves);

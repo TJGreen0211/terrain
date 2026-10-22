@@ -20,7 +20,9 @@ uniform int instanced;
 // Geometric relief (see quad.vert), only for the planet: same height field,
 // same lod selection, same skirt drop. Moon geometry stays undisplaced.
 uniform float displace;
-uniform sampler2D heightMap;
+uniform samplerCube heightMap;
+uniform samplerCube surfaceMap;   // as quad.vert
+#include "planetmap.glsl"
 uniform float seaLevel;
 uniform float landRelief;
 uniform float oceanRelief;
@@ -43,19 +45,18 @@ void main()
 			// Identical to quad.vert: patch-size lod vs pixel-footprint lod,
 			// both by vertex distance.
 			float vDist = length(sphere - lodCameraPos);
-			vec2 huv = vec2((atan(d.y, d.x)/PI + 1.0)*0.5,
-			                (asin(clamp(d.z, -1.0, 1.0))/PI + 0.5));
-			float lodCell = log2(max(vDist*lodCellK, 1.0));
-			float lodPix = log2(max(vDist*lodK, 1e-4));
-			float lod = clamp(max(lodCell, lodPix), 0.0, 11.0);
-			float h = textureLod(heightMap, huv, lod).r;
+			float lodCell = log2(max(vDist*lodCellK, 1e-30));
+			float lodPix = log2(max(vDist*lodK, 1e-30));
+			float lod = clamp(max(lodCell, lodPix) + planetMapLodBias(d), 0.0, planetMapMaxLod(heightMap));
+			float h = textureLod(heightMap, d, lod).r;
 			float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
 			lift = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
 			     - oceanRelief * s * s;
 			// Detail as quad.vert, faded for this walk's coarser triangles
 			// (detailTriPx = QT_SHADOW_TRIANGLE_PX).
 			float alt01 = max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
-			float env = detailEnvelope(landRelief * alt01 * detailRadius, alt01);
+			float mapSlope = h > seaLevel ? length(textureLod(surfaceMap, d, lod).xyz) : 0.0;
+			float env = detailEnvelope(landRelief * alt01 * detailRadius, mapSlope);
 			vec2 gradCube;
 			lift += detailVertex(pAddr, uv, length(patchCube(uv)),
 			                     vDist * detailPix, env, gradCube) / detailRadius;
