@@ -25,9 +25,11 @@ char *readShader(char *filename)
 	return content;	
 }
 
-/* Expands `#include "file"` lines (nested up to MAX_INCLUDE_DEPTH, path
-   relative to the including file's directory), so shared GLSL lives in one
-   file. A #line after each insert keeps compile errors on the including
+/* Expands `#include "file"` lines (nested up to MAX_INCLUDE_DEPTH), so shared
+   GLSL lives in one file. "file" is looked up in the including file's
+   directory first, then as a shader name ("world/clouds/cloudlayer.glsl",
+   engine/core/paths.h), which is how a module includes another module's
+   chunk. A #line after each insert keeps compile errors on the including
    file's numbering. */
 #define MAX_INCLUDE_DEPTH 8
 static char *expandIncludes(char *src, const char *shaderPath, int depth)
@@ -58,11 +60,20 @@ static char *expandIncludes(char *src, const char *shaderPath, int depth)
 			const char *q0 = strchr(p, '"');
 			const char *q1 = q0 ? strchr(q0 + 1, '"') : NULL;
 			if (q0 && q1 && q1 < line + lineLen) {
-				char path[520];
-				snprintf(path, sizeof(path), "%s%.*s", dir, (int)(q1 - q0 - 1), q0 + 1);
-				insert = expandIncludes(readShader(path), path, depth + 1);
+				char path[520], named[520] = "";
+				int nameLen = (int)(q1 - q0 - 1);
+				snprintf(path, sizeof(path), "%s%.*s", dir, nameLen, q0 + 1);
+				char *text = readShader(path);
+				if (text == NULL) {
+					Paths_Shader(named, sizeof(named), "%.*s", nameLen, q0 + 1);
+					text = readShader(named);
+					if (text != NULL)
+						snprintf(path, sizeof(path), "%s", named);
+				}
+				insert = expandIncludes(text, path, depth + 1);
 				if (insert == NULL)
-					fprintf(stderr, "Shader include not found: %s\n", path);
+					fprintf(stderr, "Shader include not found: %s (tried %s and %s)\n",
+					        shaderPath, path, named);
 				snprintf(directive, sizeof(directive), "\n#line %d\n", lineNo + 1);
 			}
 		}

@@ -1,9 +1,10 @@
 #include "paths.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 /* Relative to build/, the exe's folder (see paths.h). */
-#define SHADER_ROOT "../src/shaders/"
+#define SHADER_ROOT "../src/"
 #define ASSET_ROOT  "../assets/"
 #define BENCH_ROOT  "../bench/"
 
@@ -19,12 +20,18 @@ static char *joinv(char *out, size_t n, const char *root, const char *fmt, va_li
 	return out;
 }
 
+/* "<module folder>/<file>" -> SHADER_ROOT "<module folder>/shaders/<file>".
+   A bare "<file>" has an empty module folder: src/shaders/<file>. */
 char *Paths_Shader(char *out, size_t n, const char *fmt, ...)
 {
+	char name[260];
 	va_list ap;
 	va_start(ap, fmt);
-	joinv(out, n, SHADER_ROOT, fmt, ap);
+	vsnprintf(name, sizeof name, fmt, ap);
 	va_end(ap);
+	const char *slash = strrchr(name, '/');
+	int folder = slash ? (int)(slash - name) + 1 : 0;
+	snprintf(out, n, "%s%.*sshaders/%s", SHADER_ROOT, folder, name, name + folder);
 	return out;
 }
 

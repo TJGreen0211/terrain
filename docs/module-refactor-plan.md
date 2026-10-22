@@ -164,9 +164,15 @@ rewriting them is out of scope.
    - The `extern g_*` set drops to roughly zero.
 6. **Shared GLSL chunks stay with the module that owns their data, and includes name
    that module.**
-   - Example: `quad.frag` writes `#include "clouds/cloudlayer.glsl"`.
-   - The loader resolves an include against the including file's folder first, then
-     against one shader root.
+   - Shader names are `<module folder>/<file>`, relative to `src/`. The module's
+     `shaders/` subfolder is implied: `world/clouds/cloudlayer.glsl` is
+     `src/world/clouds/shaders/cloudlayer.glsl`. The tier is part of the name, so
+     there is no search and no ambiguity (implemented in phase 3, `Paths_Shader`).
+   - Loaders and `#include` both use these names. Example: `quad.frag` writes
+     `#include "world/clouds/cloudlayer.glsl"`, and `Sun.c` loads
+     `"world/bodies/sun.vert"`.
+   - An include tries the including file's folder first, so chunks inside one
+     module include each other by bare file name.
    - This keeps ownership clear and makes real coupling visible: terrain shaders do
      depend on clouds, atmosphere and rings.
 7. **`WorldConfig.h` stays one file.** This is a standing preference: keep
@@ -209,8 +215,13 @@ A phase is green only when all four checks pass:
 - Do this before the big moves, so every later phase builds incrementally.
 
 **Phase 3 — shader loader include root.**
-- Teach `LoadShader.c` to search the shader root after the includer's folder.
+- Teach `LoadShader.c` to resolve an include as a shader name (rule 6) after the
+  includer's folder.
 - Commit it on its own and verify it with `visual_check` before moving any shader.
+- Done 2026-10-22. It was also checked with a throwaway move: `tonemap.glsl` went
+  to `engine/gfx/shaders/` and the sun shaders to `world/bodies/shaders/`, and the
+  result was pixel-identical. A missing include prints the includer and both
+  paths tried.
 
 **Phase 4 — directory moves.**
 - `git mv` everything into the §2 layout, including the shaders into each module's

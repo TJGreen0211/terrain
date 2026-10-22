@@ -6,15 +6,21 @@
 /* Runtime file roots. main() chdir's to the exe's folder (build/), so every
    root is relative to that folder; moving the exe means editing paths.c only.
 
-   Shaders: loaders take names relative to the shader root ("quad.vert") and
-   prefix it themselves (LoadShader.c). Assets and bench files: build the path
-   with Paths_Asset / Paths_Bench, which take a printf format. */
+   Shaders are named "<module folder>/<file>", relative to src/: each module
+   keeps its shaders in a shaders/ subfolder, which the name leaves out.
+       "world/clouds/clouds.frag" -> src/world/clouds/shaders/clouds.frag
+       "quad.vert"                -> src/shaders/quad.vert (not yet moved)
+   Loaders take shader names and resolve them themselves (LoadShader.c), and
+   GLSL #include uses the same names (after trying the includer's folder).
+   Assets and bench files: build the path with Paths_Asset / Paths_Bench.
+   All three Paths_* builders take a printf format. */
 const char *Paths_ShaderRoot(void);
 const char *Paths_AssetRoot(void);
 const char *Paths_BenchRoot(void);
 
-/* root + formatted rel into out (n bytes); returns out. */
+/* Shader name -> file path, as above. */
 char *Paths_Shader(char *out, size_t n, const char *fmt, ...);
+/* root + formatted rel into out (n bytes); returns out. */
 char *Paths_Asset(char *out, size_t n, const char *fmt, ...);
 char *Paths_Bench(char *out, size_t n, const char *fmt, ...);
 
