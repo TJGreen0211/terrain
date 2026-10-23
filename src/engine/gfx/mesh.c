@@ -22,7 +22,7 @@ vec3 *Mesh_Tangents(int vertexNumber, vec3 *points, vec3 *tangent)
 		deltaUV2.y = points[i+2].y - points[i].y;
 
 		//float fDiv = (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y)
-		float f = 1.0 / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
+		float f = (float)(1.0 / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y));
 		tangent[i].x = f  * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
 		tangent[i].y = f  * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
 		tangent[i].z = f  * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
@@ -94,9 +94,9 @@ vec3 unitCircle(vec3 p)
 	vec3 t = {0.0, 0.0, 0.0};
 	if(length > 0)
 	{
-		t.x = p.x / sqrt(length);
-		t.y = p.y / sqrt(length);
-		t.z = p.z / sqrt(length);
+		t.x = (float)(p.x / sqrt(length));
+		t.y = (float)(p.y / sqrt(length));
+		t.z = (float)(p.z / sqrt(length));
 	}
 	return t;
 }
@@ -119,7 +119,7 @@ void divideTriangle(vec3 a, vec3 b, vec3 c, int count, sphere *s)
 
 sphere Mesh_Tetrahedron(int count, sphere *s)
 {
-	int numTriangles = pow(4, count+1);
+	int numTriangles = (int)pow(4, count+1);
 	int numVertices = 3 * numTriangles;
 	
 	int mallocVertSize = numVertices*sizeof(vec3);
@@ -130,9 +130,9 @@ sphere Mesh_Tetrahedron(int count, sphere *s)
 	
 	vec3 v[4] = {
 		{ 0.0, 0.0, 1.0 },
-		{ 0.0, 0.942809, -0.333333},
-		{ -0.816497, -0.471405, -0.333333 },
-		{ 0.816497, -0.471405, -0.333333 }
+		{ 0.0f, 0.942809f, -0.333333f },
+		{ -0.816497f, -0.471405f, -0.333333f },
+		{ 0.816497f, -0.471405f, -0.333333f }
     };
     
     divideTriangle( v[0], v[1], v[2], count, s);
@@ -226,9 +226,9 @@ obj Mesh_LoadObj(char *fname)
 			fscanf(fp, "%d", &ix);
 			fscanf(fp, "%d", &iy);
 			fscanf(fp, "%d", &iz);
-			faces[j].x = ix;
-			faces[j].y = iy;
-			faces[j].z = iz;
+			faces[j].x = (float)ix;
+			faces[j].y = (float)iy;
+			faces[j].z = (float)iz;
 			//printf("%f, %f, %f\n", faces[j].x, faces[j].y, faces[j].z);
 			j++;
 		}
@@ -247,9 +247,9 @@ obj Mesh_LoadObj(char *fname)
 	
 	for(int i = 0; i < faceCount; i++)
 	{
-		a = faces[i].x-1;
-		b = faces[i].y-1;
-		c = faces[i].z-1;
+		a = (int)faces[i].x-1;
+		b = (int)faces[i].y-1;
+		c = (int)faces[i].z-1;
 		
 		one.x = verts[b].x - verts[a].x;
 		one.y = verts[b].y - verts[a].y;

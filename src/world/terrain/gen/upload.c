@@ -110,7 +110,7 @@ void uploadPlates(const TerrainBakeSettings *bs)
 	               : (bs->plateCount > TERRAIN_PLATE_MAX ? TERRAIN_PLATE_MAX : bs->plateCount);
 	plRng = bs->seed * 747796405u + 2891336453u;
 	if (!plRng) plRng = 1u;
-	float minDot = cosf(PLATE_MIN_SEP);
+	float minDot = cosf((float)PLATE_MIN_SEP);
 	for (int tries = 0; np < plateCount && tries < 10000; tries++) {
 		float v[3];
 		plRandDir(v);

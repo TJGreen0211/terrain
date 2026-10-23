@@ -12,6 +12,10 @@
 #define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
 #define NK_INCLUDE_FONT_BAKING
 #define NK_INCLUDE_DEFAULT_FONT
+/* C5287 (mixing enum types in |, ==): nuklear does this on purpose. */
+#pragma warning(push)
+#pragma warning(disable: 5287)
 #include <nuklear/nuklear.h>
+#pragma warning(pop)
 
 #endif

@@ -337,7 +337,7 @@ void Bench_MaybeCapture(void)
 		if (shots[i] == frame) { hit = 1; break; }
 	if (!hit) return;
 
-	int w = (int)Window_Width(), h = (int)Window_Height();
+	int w = Window_Width(), h = Window_Height();
 	unsigned char *px = malloc((size_t)w * h * 4);
 	if (!px) return;
 	glReadBuffer(GL_BACK);

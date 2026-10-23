@@ -1,7 +1,7 @@
 #include "world/terrain/quad_cube.h"
 
 int subdivideFace(quadCube *qc, vec3 start, int divisions, float fdivisions, int index) {
-	float offset = 2.0/(fdivisions);
+	float offset = (float)(2.0/(fdivisions));
 	for(int i = 0; i < divisions; i++) {
 		start.x = 1.0;
 		for(int j = 0; j < divisions; j++) {
@@ -37,7 +37,7 @@ int subdivideFace(quadCube *qc, vec3 start, int divisions, float fdivisions, int
 }
 
 int subdivideZ(quadCube *qc, vec3 start, int divisions, float fdivisions, int index) {
-	float offset = 2.0/(fdivisions);
+	float offset = (float)(2.0/(fdivisions));
 	for(int i = 0; i < divisions; i++) {
 		start.z = 1.0;
 		for(int j = 0; j < divisions; j++) {
@@ -73,7 +73,7 @@ int subdivideZ(quadCube *qc, vec3 start, int divisions, float fdivisions, int in
 }
 
 int subdivideY(quadCube *qc, vec3 start, int divisions, float fdivisions, int index) {
-	float offset = 2.0/(fdivisions);
+	float offset = (float)(2.0/(fdivisions));
 	for(int i = 0; i < divisions; i++) {
 		start.x = 1.0;
 		for(int j = 0; j < divisions; j++) {

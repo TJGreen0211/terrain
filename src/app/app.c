@@ -57,8 +57,8 @@ static GLuint initQuadCube(int divisions) {
 	*tangent = *Mesh_Tangents(qc.vertexNumber, qc.points, tangent);
 
 	for(int i = 0; i < qc.vertexNumber; i++) {
-    	texCoords[i].x = (atan2(qc.points[i].y, qc.points[i].x) / 3.1415926 + 1.0) * 0.5;
-    	texCoords[i].y = asin(qc.points[i].z) / 3.1415926 + 0.5;
+    	texCoords[i].x = (float)((atan2(qc.points[i].y, qc.points[i].x) / 3.1415926 + 1.0) * 0.5);
+    	texCoords[i].y = (float)(asin(qc.points[i].z) / 3.1415926 + 0.5);
     }
     *vna = *Mesh_SmoothNormals(vna, qc.points, qc.normals, qc.vertexNumber);
     //vao = Buffer_CreateMesh(qc.points, qc.size, vna, qc.nsize, texCoords, sizeof(texCoords[0])*qc.vertexNumber);
@@ -91,8 +91,8 @@ static GLuint initSphere() {
     *vna = *Mesh_SmoothNormals(vna, planet.points, planet.normals, planet.vertexNumber);
 
     for(int i = 0; i < planet.vertexNumber; i++) {
-    	texCoords[i].x = (atan2(planet.points[i].y, planet.points[i].x) / 3.1415926 + 1.0) * 0.5;
-    	texCoords[i].y = asin(planet.points[i].z) / 3.1415926 + 0.5;
+    	texCoords[i].x = (float)((atan2(planet.points[i].y, planet.points[i].x) / 3.1415926 + 1.0) * 0.5);
+    	texCoords[i].y = (float)(asin(planet.points[i].z) / 3.1415926 + 0.5);
     }
 
 	vao = Buffer_CreateMesh(planet.points, planet.size, planet.normals, planet.nsize, texCoords, sizeof(texCoords[0])*planet.vertexNumber);

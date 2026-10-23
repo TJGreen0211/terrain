@@ -17,7 +17,7 @@ char *readShader(char *filename)
 			rewind(fp);
 			if (count > 0) {
             	content = (char *)malloc(sizeof(char) * (count+1));
-            	count = fread(content,sizeof(char),count,fp);
+            	count = (int)fread(content,sizeof(char),count,fp);
             	content[count] = '\0';
         	}
 			fclose(fp);
@@ -138,7 +138,7 @@ GLuint Shader_LoadDefines(char *shaderName, int shaderType, const char *defines)
 	char *shaderStr = insertDefines(expandIncludes(readShader(shaderPath), shaderPath, 0), defines);
 
 	printf("Compiling %d, %s shader\n", shaderType, shaderPath);
-	GLint length = strlen(shaderStr);
+	GLint length = (GLint)strlen(shaderStr);
 	glShaderSource(shader, 1, (const char **)&shaderStr, &length);
 	glCompileShader(shader);
 	

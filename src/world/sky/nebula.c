@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include "engine/gfx/shader.h"
 #include "world/sky/nebula.h"
 #include "world/bodies/bodies.h"

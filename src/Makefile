@@ -9,7 +9,7 @@
 # it. Changing CFLAGS or INCLUDE_PATHS is not tracked: run `nmake clean`.
 
 CC = cl.exe
-CFLAGS = /nologo /W3 /we4013 /O2 /openmp /D_USE_MATH_DEFINES /MD
+CFLAGS = /nologo /W3 /we4013 /O2 /openmp /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /MD
 OUTDIR = ..\build
 OBJDIR = $(OUTDIR)\obj
 PROG = $(OUTDIR)\cube.exe

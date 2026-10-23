@@ -145,7 +145,7 @@ dmat4 dmultiplymat4(dmat4 c, dmat4 d)
 }
 
 float quatLength(quaternion q) {
-	return sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+	return (float)sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
 }
 
 quaternion quatNormalize(quaternion q) {
@@ -202,9 +202,9 @@ tmat3x3<T, P> Result(T(1));
 mat4 quaternionToRotation(quaternion q) {
 	mat4 rotation = {
 		{
-		{1.0-2.0*(q.y*q.y + q.z*q.z), 	  2.0*(q.x*q.y + q.z*q.w), 	   2.0*(q.x*q.z - q.y*q.w), 0.0},
-		{	 2.0*(q.x*q.y - q.z*q.w), 1.0-2.0*(q.x*q.x + q.z*q.z), 	   2.0*(q.y*q.z + q.x*q.w), 0.0},
-		{    2.0*(q.x*q.z + q.y*q.w),     2.0*(q.y*q.z - q.x*q.w), 1.0-2.0*(q.x*q.x + q.y*q.y), 0.0},
+		{(float)(1.0-2.0*(q.y*q.y + q.z*q.z)), (float)(2.0*(q.x*q.y + q.z*q.w)), (float)(2.0*(q.x*q.z - q.y*q.w)), 0.0},
+		{(float)(2.0*(q.x*q.y - q.z*q.w)), (float)(1.0-2.0*(q.x*q.x + q.z*q.z)), (float)(2.0*(q.y*q.z + q.x*q.w)), 0.0},
+		{(float)(2.0*(q.x*q.z + q.y*q.w)), (float)(2.0*(q.y*q.z - q.x*q.w)), (float)(1.0-2.0*(q.x*q.x + q.y*q.y)), 0.0},
 		{	 0.0, 						  0.0, 					   0.0, 						1.0}
 		}
 	};
@@ -213,10 +213,10 @@ mat4 quaternionToRotation(quaternion q) {
 
 quaternion angleAxis(float angle, vec3 axis, vec3 point) {
 	quaternion r, p;
-	r.w = cos(angle/2.0);
-	r.x = axis.x * sin(angle/2.0);
-	r.y = axis.y * sin(angle/2.0);
-	r.z = axis.z * sin(angle/2.0);
+	r.w = (float)cos(angle/2.0);
+	r.x = (float)(axis.x * sin(angle/2.0));
+	r.y = (float)(axis.y * sin(angle/2.0));
+	r.z = (float)(axis.z * sin(angle/2.0));
 
 	p.w = 0.0;
 	p.x = point.x;
@@ -331,15 +331,15 @@ float dotvec2(vec2 u, vec2 v) {
 }
 
 float lengthvec4(vec4 v) {
-	return sqrt(dotvec4(v, v));
+	return (float)sqrt(dotvec4(v, v));
 }
 
 float lengthvec3(vec3 v) {
-	return sqrt(dotvec3(v, v));
+	return (float)sqrt(dotvec3(v, v));
 }
 
 float lengthvec2(vec2 v) {
-	return sqrt(dotvec2(v, v));
+	return (float)sqrt(dotvec2(v, v));
 }
 
 vec4 normalizevec4(vec4 v) {
@@ -419,30 +419,30 @@ mat4 identityMatrix() {
 
 mat4 rotateX(float theta)
 {
-	float angle = (M_PI / 180.0) * theta;
+	float angle = (float)((M_PI / 180.0) * theta);
 	mat4 rotation = IDENTITY_MATRIX;
-	rotation.m[2][2] = rotation.m[1][1] = cos(angle);
-	rotation.m[2][1] = sin(angle);
+	rotation.m[2][2] = rotation.m[1][1] = (float)cos(angle);
+	rotation.m[2][1] = (float)sin(angle);
 	rotation.m[1][2] = -rotation.m[2][1];
 	return rotation;
 }
 
 mat4 rotateY(float theta)
 {
-	float angle = (M_PI / 180.0) * theta;
+	float angle = (float)((M_PI / 180.0) * theta);
 	mat4 rotation = IDENTITY_MATRIX;
-	rotation.m[2][2] = rotation.m[0][0] = cos(angle);
-	rotation.m[0][2] = sin(angle);
+	rotation.m[2][2] = rotation.m[0][0] = (float)cos(angle);
+	rotation.m[0][2] = (float)sin(angle);
 	rotation.m[2][0] = -rotation.m[0][2];
 	return rotation;
 }
 
 mat4 rotateZ(float theta)
 {
-	float angle = (M_PI / 180.0) * theta;
+	float angle = (float)((M_PI / 180.0) * theta);
 	mat4 rotation = IDENTITY_MATRIX;
-	rotation.m[0][0] = rotation.m[1][1] = cos(angle);
-	rotation.m[1][0] = sin(angle);
+	rotation.m[0][0] = rotation.m[1][1] = (float)cos(angle);
+	rotation.m[1][0] = (float)sin(angle);
 	rotation.m[0][1] = -rotation.m[1][0];
 	return rotation;
 }
@@ -601,14 +601,14 @@ mat2 transposemat2(mat2 a) {
 
 mat4 perspective(float fovy, float aspect, float zNear, float zFar)
 {
-	float top = tan(fovy*(3.14159265358979323846 / 180.0)/2) * zNear;
+	float top = (float)(tan(fovy*(3.14159265358979323846 / 180.0)/2) * zNear);
 	float right = top * aspect;
 
 	mat4 c = ZERO_MATRIX;
 	c.m[0][0] = zNear/right;
 	c.m[1][1] = zNear/top;
 	c.m[2][2] = -(zFar + zNear)/(zFar - zNear);
-	c.m[2][3] = -2.0*zFar*zNear/(zFar - zNear);
+	c.m[2][3] = (float)(-2.0*zFar*zNear/(zFar - zNear));
 	c.m[3][2] = -1.0;
 	c.m[3][3] = 0.0;
 	return c;
@@ -621,7 +621,7 @@ mat4 perspective(float fovy, float aspect, float zNear, float zFar)
    distance (depth test GL_GREATER, clear to 0). */
 mat4 perspectiveReversedInf(float fovy, float aspect, float zNear)
 {
-	float top = tan(fovy*(3.14159265358979323846 / 180.0)/2) * zNear;
+	float top = (float)(tan(fovy*(3.14159265358979323846 / 180.0)/2) * zNear);
 	float right = top * aspect;
 
 	mat4 c = ZERO_MATRIX;
@@ -637,12 +637,12 @@ mat4 perspectiveReversedInf(float fovy, float aspect, float zNear)
 mat4 frustum(float left, float right, float bottom, float top, float zNear, float zFar)
 {
 	mat4 c = ZERO_MATRIX;
-	c.m[0][0] = 2.0*zNear/(right - left);
+	c.m[0][0] = (float)(2.0*zNear/(right - left));
     c.m[0][2] = (right + left)/(right - left);
-    c.m[1][1] = 2.0*zNear/(top - bottom);
+    c.m[1][1] = (float)(2.0*zNear/(top - bottom));
     c.m[1][2] = (top + bottom)/(top - bottom);
     c.m[2][2] = -(zFar + zNear)/(zFar - zNear);
-    c.m[2][3] = -2.0*zFar*zNear/(zFar - zNear);
+    c.m[2][3] = (float)(-2.0*zFar*zNear/(zFar - zNear));
     c.m[3][2] = -1.0;
     c.m[3][3] = 0.0;
     return c;
@@ -651,9 +651,9 @@ mat4 frustum(float left, float right, float bottom, float top, float zNear, floa
 mat4 ortho(float left, float right, float bottom, float top, float zNear, float zFar )
 {
     mat4 c = ZERO_MATRIX;
-    c.m[0][0] = 2.0/(right - left);
-    c.m[1][1] = 2.0/(top - bottom);
-    c.m[2][2] = 2.0/(zNear - zFar);
+    c.m[0][0] = (float)(2.0/(right - left));
+    c.m[1][1] = (float)(2.0/(top - bottom));
+    c.m[2][2] = (float)(2.0/(zNear - zFar));
     c.m[3][3] = 1.0;
     c.m[0][3] = -(right + left)/(right - left);
     c.m[1][3] = -(top + bottom)/(top - bottom);

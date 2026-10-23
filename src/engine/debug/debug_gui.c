@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS // nuklear's NK_INCLUDE_STANDARD_IO uses fopen
 #include "engine/debug/debug_gui.h"
 #include "engine/debug/profiler.h"
 

@@ -395,7 +395,7 @@ static void useTree(const QuadTree_Body *body, double trianglePx)
 	k.detailAmp = body->detailAmp;
 	k.detailSeam = body->detailSeam;
 	k.relief = body->relief;
-	k.windowHeight = Window_Height();
+	k.windowHeight = (float)Window_Height();
 	if(treeValid && memcmp(&k, &treeKey, sizeof k) == 0)
 		return;
 	treeKey = k;
@@ -663,7 +663,7 @@ static qtKey makeKey(const QuadTree_Body *body, mat4 viewProj, int useHorizon, i
 	k.viewProj = viewProj;
 	k.horizon = useHorizon;
 	k.cullNear = cullNear;
-	k.windowHeight = Window_Height();
+	k.windowHeight = (float)Window_Height();
 	return k;
 }
 

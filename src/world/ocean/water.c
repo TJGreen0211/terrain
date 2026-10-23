@@ -41,24 +41,24 @@ vec4 gaussRand() {
 	float noise02 = ((float)rand() + 1.0f)/((float)RAND_MAX + 1.0f);
 	float noise03 = ((float)rand() + 1.0f)/((float)RAND_MAX + 1.0f);
 
-	float u0 = 2.0*M_PI*noise00;
-	float v0 = sqrt(-2.0 * logf(noise01));
-	float u1 = 2.0*M_PI*noise02;
-	float v1 = sqrt(-2.0 * logf(noise03));
-	vec4 grnd = {v0*cos(u0), v0 *sin(u0), v1*cos(u1), v1 * sin(u1)};
+	float u0 = (float)(2.0*M_PI*noise00);
+	float v0 = (float)sqrt(-2.0 * logf(noise01));
+	float u1 = (float)(2.0*M_PI*noise02);
+	float v1 = (float)sqrt(-2.0 * logf(noise03));
+	vec4 grnd = {(float)(v0*cos(u0)), (float)(v0*sin(u0)), (float)(v1*cos(u1)), (float)(v1*sin(u1))};
 	return grnd;
 }
 
 float phillips(vec2 k) {
 	float A = 4.0;
-	float g = 9.81;
+	float g = 9.81f;
 	vec2 waveDir = {30.0, 0.0};
 
 	float k2 = k.x * k.x + k.y * k.y;
 	if(k2 < 0.0001) return 0.0;
 	float wV = lengthvec2(waveDir);
 	float L = (wV*wV)/g;
-	float dampingVal = 0.0001;
+	float dampingVal = 0.0001f;
 	float omegaK = dotvec2(normalizevec2(waveDir),normalizevec2(k));
 	//vec2 test = normalizevec2(k);
 	//printf("omegaK: %f, wV: %f, L: %f\n", omegaK, wV, L);
@@ -66,12 +66,12 @@ float phillips(vec2 k) {
 	//	         exp(-1/(kL)^2)
 	//P(k) = A * --------------- * |K . W|^2 * exp(-k^2*l^2)
 	//				 k^4
-	return A * (exp(-1.0/ (k2 * L * L))/(k2*k2)) * (omegaK*omegaK*omegaK*omegaK) * exp(-k2*L*L*dampingVal*dampingVal);
+	return (float)(A * (exp(-1.0/ (k2 * L * L))/(k2*k2)) * (omegaK*omegaK*omegaK*omegaK) * exp(-k2*L*L*dampingVal*dampingVal));
 }
 
 static float waveNumber(float n, int dim, float L) {
 	float idx = (n < (dim / 2.0f)) ? n : n - dim;
-	return 2.0f*M_PI*idx/L;
+	return (float)(2.0f*M_PI*idx/L);
 }
 
 // Spectra are stored row-major: column M is texture u (east), row N is
@@ -101,7 +101,7 @@ static void initH0(int dim, float L, float kLo, float kHi, complexType *h0k, com
 			float kl = sqrtf(k.x*k.x + k.y*k.y);
 
 			vec4 grnd = gaussRand();
-			float h0 = 1/sqrt(2.0) * sqrt(phillips(k)) * dk;
+			float h0 = (float)(1/sqrt(2.0) * sqrt(phillips(k)) * dk);
 			if(kl < kLo || kl >= kHi) h0 = 0.0;
 			// Nyquist bins are their own mirror: i*k*h there is not Hermitian
 			// and would leak into the packed imaginary channels.

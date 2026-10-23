@@ -1,15 +1,15 @@
 #include "engine/platform/window.h"
 #include "engine/platform/input.h"
 
-static float windowWidth = 1.0f, windowHeight = 1.0f;
+static int windowWidth = 1, windowHeight = 1;
 
 /* Minimizing reports 0x0; keep the last real size so the projection aspect
    never divides by zero. */
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 	(void)window;
 	if (width > 0 && height > 0) {
-		windowWidth = (float)width;
-		windowHeight = (float)height;
+		windowWidth = width;
+		windowHeight = height;
 	}
 }
 
@@ -35,8 +35,8 @@ GLFWwindow *Window_Create(const char *title, int fixedWidth, int fixedHeight) {
 		width = mode->width;
 		height = mode->height;
 	}
-	windowWidth = (float)width;
-	windowHeight = (float)height;
+	windowWidth = width;
+	windowHeight = height;
 	GLFWwindow* window = glfwCreateWindow(width, height, title, NULL, NULL);
 	if (window == NULL)
 		return NULL;
@@ -59,10 +59,10 @@ GLFWwindow *Window_Create(const char *title, int fixedWidth, int fixedHeight) {
 
 /* Cached framebuffer size: these are called many times per frame, and
    glfwGetVideoMode is an uncached EnumDisplaySettingsW call on Win32. */
-float Window_Height() {
+int Window_Height() {
 	return windowHeight;
 }
 
-float Window_Width() {
+int Window_Width() {
 	return windowWidth;
 }

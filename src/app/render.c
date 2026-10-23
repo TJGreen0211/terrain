@@ -83,7 +83,7 @@ static void setReversedDepth(int on) {
 
 /* Main camera projection for every main-pass draw (infinite reversed-Z). */
 static mat4 cameraProjection(void) {
-	return perspectiveReversedInf((float)CAMERA_FOV_Y_DEG, Window_Width()/Window_Height(), CAMERA_NEAR);
+	return perspectiveReversedInf((float)CAMERA_FOV_Y_DEG, (float)Window_Width()/Window_Height(), CAMERA_NEAR);
 }
 
 /* Main camera projection * view (FrameContext.viewProj); the quadtree
@@ -137,7 +137,7 @@ void Render_Frame(App *app)
 	frame.view = Camera_ViewMatrix();
 	frame.viewProj = getViewProjection();
 	frame.nearPlane = CAMERA_NEAR;
-	frame.viewportH = Window_Height();
+	frame.viewportH = (float)Window_Height();
 	frame.lightPos = lightPosition;
 	frame.time = App_Time();
 	GasGiant_SetTime(frame.time);
@@ -233,13 +233,13 @@ void Render_Frame(App *app)
 	   requests from the debug panel (blocking). */
 	Nebula_Update();
 
-	int sceneW = (int)Window_Width(), sceneH = (int)Window_Height();
+	int sceneW = Window_Width(), sceneH = Window_Height();
 	ensureSceneTarget(sceneW, sceneH);
 	glBindFramebuffer(GL_FRAMEBUFFER, SceneTarget_Framebuffer());
 	glViewport(0, 0, sceneW, sceneH);
 	setReversedDepth(1);
 
-	glClearColor(0.1, 0.0, 0.2, 1.0);
+	glClearColor(0.1f, 0.0f, 0.2f, 1.0f);
 	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
 	//Skybox: full-screen background, drawn first (far plane, no depth write)
