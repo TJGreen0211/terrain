@@ -110,6 +110,27 @@ static int capFaceBox(const double c[3], double cap, int f, double box[4])
 	return 1;
 }
 
+/* planetmap.glsl planetMapFine filters a 2x2 block that reaches into the
+   coast band (seastate.glsl seaCoastBand, up to quad.frag's BEACH_OFF
+   above seaLevel) with Catmull-Rom over the surrounding 4x4 texels, at any
+   lod below 1 (so anywhere a fragment comes close enough). Its negative
+   lobes overshoot the texels: per axis they weigh at most 0.125 (t = 1/2),
+   so in 2D 2 * 0.125 * 1.125 of the texels' range. Unbounded, the water
+   culled shoreline patches where the overshoot dips below sea level. */
+#define COAST_BAND_TOP   0.012f
+#define CR_OVERSHOOT     0.28125f
+
+/* 0 (range untouched) when every block is above the band: bilinear. */
+static int widenCoastFilter(float *lo, float *hi)
+{
+	if (*lo > g_planetGen.seaLevel + COAST_BAND_TOP)
+		return 0;
+	float over = CR_OVERSHOOT * (*hi - *lo);
+	*lo -= over;
+	*hi += over;
+	return 1;
+}
+
 int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, float *hmin, float *hmax)
 {
 	const TerrainPyramid *P = activePyramid();
@@ -150,10 +171,18 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 		if (tiny) {
 			const float *fld = P->mn[0];
 			float lo = FLT_MAX, hi = -FLT_MAX;
+			/* The texels Catmull-Rom reaches: one beyond the bilinear 2x2. */
+			float tlo = FLT_MAX, thi = -FLT_MAX;
 			for (int f = 0; f < 6; f++) {
 				if (!touched[f]) continue;
 				double xa = faceToTexel(box[f][0], N), xb = faceToTexel(box[f][1], N);
 				double ya = faceToTexel(box[f][2], N), yb = faceToTexel(box[f][3], N);
+				for (int y = (int)floor(ya) - 1; y <= (int)floor(yb) + 2; y++)
+					for (int x = (int)floor(xa) - 1; x <= (int)floor(xb) + 2; x++) {
+						float v = fld[cubeIndex(N, f, x, y)];
+						if (v < tlo) tlo = v;
+						if (v > thi) thi = v;
+					}
 				double xs[20], ys[20];
 				int nx = 0, ny = 0;
 				xs[nx++] = xa;
@@ -179,8 +208,14 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 			}
 			/* Float uv/filtering differences on the GPU side. */
 			float eps = 1e-6f * (hi - lo) + 1e-7f;
-			*hmin = lo - eps;
-			*hmax = hi + eps;
+			lo -= eps;
+			hi += eps;
+			if (widenCoastFilter(&tlo, &thi)) {
+				lo = fminf(lo, tlo);
+				hi = fmaxf(hi, thi);
+			}
+			*hmin = lo;
+			*hmax = hi;
 			return 1;
 		}
 	}
@@ -219,6 +254,8 @@ int TerrainGen_HeightRange(const double dir[3], double capAngle, double lod, flo
 				if (mx[i] > hi) hi = mx[i];
 			}
 	}
+	/* Those texels already cover Catmull-Rom's 4x4 reach. */
+	widenCoastFilter(&lo, &hi);
 	*hmin = lo;
 	*hmax = hi;
 	return 1;

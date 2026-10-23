@@ -135,7 +135,8 @@ CloudVolumeParams *CloudVolume_Params(void);
 /* How far the march reaches (m): the Max distance setting, or farther
    when the camera is high above the layers (aboveLayers: its height over
    their lowest base, m), but within the weather map. The clouds fade out
-   over the last 40%; a provider fading anything into them uses the same.
+   by their opacity from 35% of it; a provider fading anything into them
+   uses the same.
    A scene's own reach replaces it (still within the map). The march also
    ends where the air has hidden everything. */
 double CloudVolume_Reach(double aboveLayers, double mapExtent);

@@ -63,7 +63,7 @@ uniform float gasInside;        // share of the haze the interior pass draws (ga
 uniform int gasOctaves;         // detail octaves: more close to the cloud tops
 uniform float gasGlowFade;      // the glow beyond the limb (0 once the camera is in the shell)
 uniform float gasDeep;          // 1: the deck lies under the interior's cloud layers (darker)
-uniform float gasDeepReach;     // m: how far those layers reach (fading over the last 40%)
+uniform float gasDeepReach;     // m: how far those layers reach (fading from 35% of it)
 
 const float GAS_NOISE_PERIOD = 32.0;   // lattice cells per tile (gas_giant.c)
 
@@ -334,7 +334,7 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 	// Under the interior's cloud layers, as far as they reach: there the
 	// deck is the deep layer below them (darker, no high clouds); beyond,
 	// it keeps the look from outside, so the clouds fade into it.
-	float deep = gasDeep * (1.0 - smoothstep(0.6 * gasDeepReach, gasDeepReach, hitM));
+	float deep = gasDeep * (1.0 - smoothstep(0.35 * gasDeepReach, gasDeepReach, hitM));
 	float mu = max(dot(n, -d), 0.0);
 	float mu0 = dot(n, sunV);
 	float foot = pixelR / max(mu, 0.08);       // one pixel on the cloud tops, radii

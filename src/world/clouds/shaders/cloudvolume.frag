@@ -236,6 +236,14 @@ vec4 airTo(float tEnd, float ph, vec3 airLin)
 	return vec4(L, T);
 }
 
+// Toward the reach the clouds, mist and deck fade out by their opacity
+// (thinning the density instead leaves thick cloud opaque to the last,
+// ending on a sharp circle).
+float reachFade(float t)
+{
+	return 1.0 - smoothstep(0.35 * maxDistance, maxDistance, t);
+}
+
 // Where the air along the ray has hidden everything behind (optical
 // depth 5), up to tMax.
 float airReach(float tMax)
@@ -437,12 +445,12 @@ void main()
 		float sigma = 0.0;
 		if (densityV(pv, a, foot, false, alb) > 0.0) {
 			sigma = densityV(pv, a, foot, true, alb);
-			sigma *= 1.0 - smoothstep(0.6 * maxDistance, maxDistance, t);
 		}
+		float fr = reachFade(t);
 		if (sigma <= 0.0) {
 			if (sm <= 1e-7)
 				continue;
-			float extM = exp(-sm * dt);
+			float extM = mix(1.0, exp(-sm * dt), fr);
 			float wM = T * (1.0 - extM);
 			L += Sm * wM * TaS;
 			dSum += t * wM;
@@ -508,7 +516,7 @@ void main()
 		// With the mist, by their shares of the extinction.
 		S = (sigma * S + sm * Sm) / (sigma + sm);
 		sigma += sm;
-		float ext = exp(-sigma * dt);
+		float ext = mix(1.0, exp(-sigma * dt), fr);
 		float wgt = T * (1.0 - ext);
 		L += S * wgt * TaS;
 		dSum += t * wgt;
@@ -543,7 +551,7 @@ void main()
 			if (sm > 1e-7) {
 				vec3 pv = gD * t;
 				float mus = dot((camUp * gRc + pv) / r, sunDir);
-				float extM = exp(-sm * dt);
+				float extM = mix(1.0, exp(-sm * dt), reachFade(t));
 				float wM = T * (1.0 - extM);
 				L += mistLight(pv, a, mus, deckLin, skyLin) * wM * TaS;
 				dSum += t * wM;
@@ -555,7 +563,8 @@ void main()
 		// behind (the provider's own look of the far cloud tops).
 		vec3 relD = camToMap + viewToBody * (gD * tDeck);
 		vec2 uvD = vec2(dot(relD, mapEast), dot(relD, mapNorth)) / mapExtent + 0.5;
-		float wD = T * smoothstep(0.0, 0.15, min(min(uvD.x, uvD.y), min(1.0 - uvD.x, 1.0 - uvD.y)));
+		float wD = T * smoothstep(0.0, 0.15, min(min(uvD.x, uvD.y), min(1.0 - uvD.x, 1.0 - uvD.y)))
+		         * reachFade(tDeck);
 		L += deckLight(gD * tDeck, tDeck, deckLin, skyLin, groundLin) * wD * Ta;
 		dSum += tDeck * wD;
 		wSum += wD;

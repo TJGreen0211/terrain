@@ -231,9 +231,11 @@ static double mapExtent(double radius, double altitude)
 
 double GasInterior_CloudReach(double H, double radius, double altitude)
 {
+	/* From high up, past the horizon to the far cloud tops (within the map). */
 	double extent = mapExtent(radius, altitude);
-	return fmin(fmax(GAS_CLOUD_REACH_M, CloudVolume_Reach(altitude - GAS_CLOUD_MID_BASE_H * H, extent)),
-	            0.45 * extent);
+	double horizon = sqrt(2.0 * radius * fmax(altitude, 0.0)) + sqrt(2.0 * radius * GAS_CLOUD_TOP_TOP_H * H);
+	double reach = fmax(GAS_CLOUD_REACH_M, CloudVolume_Reach(altitude - GAS_CLOUD_MID_BASE_H * H, extent));
+	return fmin(fmax(reach, horizon), 0.45 * extent);
 }
 
 float GasInterior_VolumeFade(double H, double altitude)

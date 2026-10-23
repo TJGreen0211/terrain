@@ -126,8 +126,9 @@
    weather map is a patch under the camera, GAS_CLOUD_MAP_EXTENT_M wide
    among the clouds, from higher up GAS_CLOUD_MAP_HORIZONS times the
    distance to the horizon (at most GAS_CLOUD_MAP_MAX_RADII radii); they
-   reach GAS_CLOUD_REACH_M (within 0.45 of it), or as far as the haze lets
-   anything be seen. */
+   reach GAS_CLOUD_REACH_M, from higher up the far cloud tops at the horizon
+   (within 0.45 of the map either way), or as far as the haze lets anything
+   be seen, fading out by opacity from 35% of that. */
 #define GAS_CLOUD_MID_BASE_H      0.0
 #define GAS_CLOUD_MID_TOP_H       2.0
 #define GAS_CLOUD_TOP_BASE_H      2.1
@@ -139,7 +140,7 @@
 #define GAS_CLOUD_FADE_LO_H       10.0
 #define GAS_CLOUD_FADE_HI_H       45.0
 #define GAS_CLOUD_MAP_EXTENT_M    6.0e6
-#define GAS_CLOUD_MAP_HORIZONS    1.6
+#define GAS_CLOUD_MAP_HORIZONS    2.4
 #define GAS_CLOUD_MAP_MAX_RADII   1.2
 /* The cloud ranges in that map: their size north-south (several times
    longer east-west), with canyons of clear air between them. */
