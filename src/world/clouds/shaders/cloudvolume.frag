@@ -36,9 +36,9 @@
 // DOME_AIR (the rocky planets, cloud_volume.h): no air here. The Sun's
 // light is sunColor through the planet's shell (sunTransmittance, as the
 // ground gets it: reddened, then set behind the limb) times the wrapped
-// cosine of its height (as the ground's Lambert term), the skylight
-// follows it through twilight (skyFraction), and the composite adds the
-// air in front.
+// cosine of its height (as the ground's Lambert term), the sky's and the
+// ground's light come from the dome's scattering (skyLight), and the
+// composite adds the air in front.
 
 uniform mat4 projection;
 uniform vec2 lowSize;          // this target, px
@@ -75,6 +75,19 @@ uniform float skyGain;         // x the Sun
 uniform vec3 groundColor;      // display
 uniform float groundGain;
 uniform float exposure;
+
+#ifdef DOME_AIR
+// The sky's (row 0.25) and the ground's (row 0.75) light on the clouds by
+// the Sun's cosine at the point, -0.35 .. 1 (clouds.c, cloudsky.frag):
+// the colours of the real sky, through twilight.
+uniform sampler2D skyLight;
+vec3 skyLightAt(float mus, float row)
+{
+	float n = float(textureSize(skyLight, 0).x);
+	float u = clamp((mus + 0.35) / 1.35, 0.0, 1.0);
+	return textureLod(skyLight, vec2((u * (n - 1.0) + 0.5) / n, row), 0.0).rgb;
+}
+#endif
 
 uniform int viewSteps;
 uniform int lightSteps;
@@ -114,6 +127,42 @@ uniform float sunAngle;        // the Sun's angular radius
 // The shell is a sphere about the body's centre: its functions work in
 // view axes as well as in world axes.
 #include "world/atmosphere/atmosurface.glsl"
+
+// The Sun's light on a cloud at p (centre-relative), mus its cosine there:
+// through the air as the ground gets it (sunTransmittance), but setting at
+// the planet's limb as seen from the cloud's height, not at its own
+// horizon (from 80 km the Sun is up until ~9 deg below it): the afterglow
+// on the clouds after sunset on the ground, the light grazing in through
+// the dense air low down, red. No cosine of its height, as a surface
+// would have: the march toward the Sun shades the tops and sides of the
+// clouds at a low Sun itself (with it the clouds at dusk were flat grey
+// and the afterglow never showed).
+vec3 cloudSun(vec3 p, float mus)
+{
+	float r = length(p);
+	float sinDip = sqrt(max(1.0 - (fInnerRadius / r) * (fInnerRadius / r), 0.0));
+	float up = mus + sinDip;
+	float horizon = smoothstep(-sunAngle, sunAngle, up);
+	if (horizon <= 0.0)
+		return vec3(0.0);
+	vec3 T = vec3(1.0);
+	if (hasAtmosphere > 0.5) {
+		float tSun = shellIntersection(p, sunDir, fOuterRadius).y;
+		float tau = atmoOptic(p, p + sunDir * max(tSun, 0.0), 1.0 / fScaleHeight, 1.0 / (fOuterRadius - fInnerRadius));
+		T = exp(-(K_R * C_R + K_M) * max(tau - atmoTauZenith, 0.0) * (4.0 * PI) * SUN_EXTINCTION);
+	}
+	return T * horizon;
+}
+
+// The planets' clouds' shading (the gas giants keep theirs), toward real
+// cumulus: lit tops, grey bases, shaded folds, not evenly lit puffs.
+// - The Sun's ray is read PLANET_SUN_DEPTH x as deep: the short march
+//   and the map understate it, and it is what shades the folds and bases.
+// - Much-scattered light keeps PLANET_SHADOW_HUE of the albedo's warmth:
+//   the shadows go to the sky's grey-blue, not brown.
+// - The sky's light is cut harder under cloud above (occlusion below).
+const float PLANET_SUN_DEPTH = 2.5;
+const float PLANET_SHADOW_HUE = 0.3;
 #endif
 
 vec3 gD;          // the view ray
@@ -514,10 +563,7 @@ void marchPixel()
 		}
 
 #ifdef DOME_AIR
-		// Times the sun's height there (wrapped a little): a deck's tops are
-		// lit as the ground under them, dimming toward the terminator.
-		vec3 sunE = sunColor * sunTransmittance(camUp * gRc + pv, sunDir, sunAngle)
-		          * clamp((mus + wrap) / (1.0 + wrap), 0.0, 1.0);
+		vec3 sunE = sunColor * cloudSun(camUp * gRc + pv, mus);
 #else
 		float tauAir = airColumn * exp(-max(a, 0.0) / airScaleHeight) * airMass(mus);
 		vec3 sunE = sunlight(mus, wrap) * exp(-tauAir) * deckShade(a);
@@ -533,16 +579,24 @@ void marchPixel()
 			vec3 qEnd = pv + sunDir * lightSpan();
 			tauL += 0.4 * cloudShadowTau(qEnd, length(qEnd + camUp * gRc) - radius, mus);
 		}
+#ifdef DOME_AIR
+		tauL *= PLANET_SUN_DEPTH;
+#endif
 		// Each scattering order picks up the albedo's hue once more (its
 		// colour, not its darkness): deep, much scattered light (the
 		// shadows) comes out warmer and richer.
 		vec3 hue = alb / max(max(alb.r, alb.g), max(alb.b, 1e-4));
+#ifdef DOME_AIR
+		vec3 orderHue = mix(vec3(1.0), hue, PLANET_SHADOW_HUE);
+#else
+		vec3 orderHue = hue;
+#endif
 		vec3 Ls = vec3(0.0), bounce = vec3(1.0);
 		float ka = 1.0, kb = 1.0, kc = 1.0;
 		for (int o = 0; o < 3; o++) {
 			float ph = mix(hg(cosT, 0.6 * kc), hg(cosT, -0.25 * kc), 0.25);
 			Ls += bounce * (kb * ph * exp(-ka * tauL));
-			bounce *= hue;
+			bounce *= orderHue;
 			ka *= 0.5;
 			kb *= multiScatter;
 			kc *= 0.5;
@@ -556,10 +610,12 @@ void marchPixel()
 		vec3 albU;
 		float tauU = densityV(pv + upS * 400.0, a + 400.0, foot, false, albU) * 600.0
 		           + densityV(pv + upS * 1600.0, a + 1600.0, foot, false, albU) * 1800.0;
-		float occ = mix(0.35, 1.0, exp(-0.5 * tauU));
 #ifdef DOME_AIR
-		vec3 amb = (skyLin * (0.4 + 0.6 * hs) * occ + groundLin * (1.0 - hs)) * ambient * skyFraction(mus) + NIGHT_FLOOR;
+		float occ = mix(0.2, 1.0, exp(-tauU));
+		vec3 amb = (skyLightAt(mus, 0.25) * skyGain * (0.4 + 0.6 * hs) * occ
+		          + skyLightAt(mus, 0.75) * groundGain * (1.0 - hs)) * ambient + NIGHT_FLOOR;
 #else
+		float occ = mix(0.35, 1.0, exp(-0.5 * tauU));
 		vec3 amb = (skyLin * (0.4 + 0.6 * hs) * occ + groundLin * (1.0 - hs)) * ambient * sunlight(mus, 2.0 * wrap);
 #endif
 		// x2: thick cloud reflects about like a sunlit Lambert surface

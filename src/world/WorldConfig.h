@@ -365,6 +365,17 @@
 #define CLOUD_VOL_REBAKE_BLEND      0.05
 #define CLOUD_VOL_SCALE             0.7
 #define CLOUD_VOL_DENSITY           1.2
+/* The planet clouds' sky and ground light (clouds.c, cloudsky.frag): a
+   table of CLOUD_SKY_LUT_SIZE Sun heights, made from the dome's scattering;
+   the ground under the clouds bounces CLOUD_GROUND_ALBEDO of its light
+   (sea and land together, linear). */
+#define CLOUD_SKY_LUT_SIZE          64
+/* x the table's sky and ground light on the clouds: the dome scatters
+   once, so its sky is darker and bluer than the real one. */
+#define CLOUD_SKY_GAIN              1.8
+#define CLOUD_GROUND_ALBEDO_R       0.11
+#define CLOUD_GROUND_ALBEDO_G       0.11
+#define CLOUD_GROUND_ALBEDO_B       0.10
 
 /* ---- Nebula (nebula.c, nebula*.glsl/frag) --------------------------------
    One density function in nebula units n = (p - sun) / NEBULA_RADIUS_M,

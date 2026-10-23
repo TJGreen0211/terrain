@@ -144,9 +144,9 @@ typedef struct CloudVolumeScene {
 	double reach;          /* m: how far the march reaches (0: CloudVolume_Reach) */
 	int flashCount;
 	CloudVolumeFlash flashes[CLOUDVOL_MAX_FLASHES];
-	/* A planet (above): the air* and terminator settings are then unused
-	   (wrap wraps the Sun's cosine), skyColor / groundColor are linear, the
-	   layer's albedo is albedo, and mapCenter / East / North only place the
+	/* A planet (above): the air*, terminator and wrap settings are then
+	   unused, skyColor / groundColor too (the sky and ground light come
+	   from skyLight, times skyGain / groundGain), the layer's albedo is albedo, and mapCenter / East / North only place the
 	   shadow map (no extent; reach 0: no limit). */
 	int domeAir;
 	GLuint weatherCube;    /* body-fixed: r cover, g how high the clouds build (0..1 of
@@ -157,6 +157,9 @@ typedef struct CloudVolumeScene {
 	float albedo[3];       /* linear */
 	float sunColor[3];     /* the Sun's light on the clouds (linear, before the air) */
 	float sunAngle;        /* its angular radius (rad): it sets behind the limb */
+	GLuint skyLight;       /* the sky's (row 0) and the ground's (row 1) light on the
+	                          clouds by the Sun's cosine at the point, -0.35 .. 1
+	                          (linear, sunColor's units: clouds.c, cloudsky.frag) */
 	/* Sets atmosurface.glsl's uniforms on the program in use (the march's
 	   and the composite's), shell centred on the reference sphere's. */
 	void (*airUniforms)(GLuint program);

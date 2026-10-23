@@ -66,7 +66,7 @@ const char *Clouds_StyleName(int style)
 /* terrain_gen.c's ocean map stores wind speed / WIND_MAX_MS. */
 #define WIND_MAP_MAX_MS 20.0f
 
-static GLuint mapProgram, cubeProgram;
+static GLuint mapProgram, cubeProgram, skyProgram;
 #define MAX_DETAIL_OCTAVES 12
 static GLuint mapFBO, emptyVAO, noiseTex;
 static int mapW, mapH;
@@ -117,6 +117,7 @@ void Clouds_Init(void)
 {
 	Shader_Create(&mapProgram, "world/clouds/cloudmap.vert", "world/clouds/cloudmap.frag");
 	Shader_Create(&cubeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudweather.frag");
+	Shader_Create(&skyProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudsky.frag");
 
 	mapW = CLOUD_MAP_WIDTH;
 	mapH = CLOUD_MAP_WIDTH / 2;
@@ -600,6 +601,60 @@ static void volumeAir(GLuint program)
 	Atmosphere_SetExtinction(program, (float)volScene.radius, Atmosphere_Params());
 }
 
+/* The clouds' sky and ground light by Sun height (cloudsky.frag), for the
+   scene sc at layer altitude alt. Made every frame: 2 x 64 texels of 48
+   short rays each, so the atmosphere's settings apply as they are edited. */
+static GLuint skyTex, skyFBO;
+
+static void updateSkyLight(CloudVolumeScene *sc, float alt)
+{
+	const int n = CLOUD_SKY_LUT_SIZE;
+	if (!skyTex) {
+		glGenTextures(1, &skyTex);
+		glBindTexture(GL_TEXTURE_2D, skyTex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, n, 2, 0, GL_RGBA, GL_FLOAT, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glGenFramebuffers(1, &skyFBO);
+		glBindFramebuffer(GL_FRAMEBUFFER, skyFBO);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, skyTex, 0);
+	}
+
+	GLint fbo, vp[4];
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+	glGetIntegerv(GL_VIEWPORT, vp);
+	GLboolean depth = glIsEnabled(GL_DEPTH_TEST), blend = glIsEnabled(GL_BLEND);
+	GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_FRAMEBUFFER, skyFBO);
+	glViewport(0, 0, n, 2);
+
+	GLuint p = skyProgram;
+	glUseProgram(p);
+	volumeAir(p);
+	glUniform1f(glGetUniformLocation(p, "lutSize"), (float)n);
+	glUniform1f(glGetUniformLocation(p, "layerAlt"), alt);
+	glUniform3f(glGetUniformLocation(p, "sunColor"), sc->sunColor[0], sc->sunColor[1], sc->sunColor[2]);
+	glUniform1f(glGetUniformLocation(p, "sunAngle"), sc->sunAngle);
+	glUniform3f(glGetUniformLocation(p, "groundAlbedo"), (float)CLOUD_GROUND_ALBEDO_R,
+	            (float)CLOUD_GROUND_ALBEDO_G, (float)CLOUD_GROUND_ALBEDO_B);
+	glBindVertexArray(emptyVAO);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glBindVertexArray(0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
+	glViewport(vp[0], vp[1], vp[2], vp[3]);
+	if (depth) glEnable(GL_DEPTH_TEST);
+	if (blend) glEnable(GL_BLEND);
+	if (scissor) glEnable(GL_SCISSOR_TEST);
+	sc->skyLight = skyTex;
+}
+
 void Clouds_PrepareVolume(const FrameContext *f, int body)
 {
 	CloudVolumeScene *sc = &volScene;
@@ -647,21 +702,20 @@ void Clouds_PrepareVolume(const FrameContext *f, int body)
 	L->erosion = 0.35f + 0.5f * c->detail;
 
 	/* The light: the Sun through the dome's air (quad.frag's sunlight on a
-	   Lambert surface), its skylight, and light bounced off the ground. */
+	   Lambert surface), its sky's light and the light bounced off the
+	   ground, both from the dome's scattering (updateSkyLight). */
 	sc->airUniforms = volumeAir;
 	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, f->cam);
 	sc->sunDir = dnormal(toSun);
 	sc->sunAngle = (float)SUN_ANGULAR_RADIUS_RAD;
-	sc->wrap = 0.1f;
 	sc->sunColor[0] = (float)(1.0 * 1.15 / M_PI);
 	sc->sunColor[1] = (float)(0.97 * 1.15 / M_PI);
 	sc->sunColor[2] = (float)(0.90 * 1.15 / M_PI);
 	sc->airScaleHeight = 1.0;
-	sc->skyColor[0] = 0.10f; sc->skyColor[1] = 0.12f; sc->skyColor[2] = 0.16f;
-	sc->skyGain = 1.0f;
-	sc->groundColor[0] = 0.08f; sc->groundColor[1] = 0.075f; sc->groundColor[2] = 0.07f;
-	sc->groundGain = 1.0f;
+	sc->skyGain = (float)CLOUD_SKY_GAIN;
+	sc->groundGain = (float)CLOUD_SKY_GAIN;
 	sc->exposure = 1.0f;
+	updateSkyLight(sc, c->altitude);
 
 	CloudVolume_UpdateShadow(f, sc);
 }

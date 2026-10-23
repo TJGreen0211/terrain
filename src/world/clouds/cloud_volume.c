@@ -27,6 +27,7 @@
 #define UNIT_PLUME   8
 #define UNIT_CUBE    9
 #define UNIT_EXPECT  10
+#define UNIT_SKY     11
 
 /* The planets' far-field table (cloudshape.glsl): EXPECT_N steps of cover
    and of the height profile, EXPECT_FILL of the fill (0..EXPECT_FILL_MAX). */
@@ -756,13 +757,17 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 		glUniform1f(glGetUniformLocation(p, "weatherMaxLod"), (float)log2((double)(s->weatherCubeSize > 1 ? s->weatherCubeSize : 1)));
 		uniform3d(p, "mapOrigin", dscalarvec3(s->mapCenter, s->radius));
 		uniform3f(p, "cloudAlbedo", s->albedo);
+		glActiveTexture(GL_TEXTURE0 + UNIT_SKY);
+		glBindTexture(GL_TEXTURE_2D, s->skyLight);
+		glUniform1i(glGetUniformLocation(p, "skyLight"), UNIT_SKY);
+		glActiveTexture(GL_TEXTURE0);
 	}
 }
 
 /* Unbinds the textures setShapeUniforms bound. */
 static void unbindShapeTextures(void)
 {
-	for (int u = UNIT_EXPECT; u >= 0; u--) {
+	for (int u = UNIT_SKY; u >= 0; u--) {
 		glActiveTexture(GL_TEXTURE0 + u);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);
