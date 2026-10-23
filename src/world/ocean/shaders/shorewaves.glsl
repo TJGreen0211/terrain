@@ -108,12 +108,16 @@ struct ShoreWave {
 	float turbid;   // sand stirred up in the surf 0..1
 };
 
-// The waves at x metres out (x >= 0), at d, of exposure strength (0 lee
-// shore .. 1 open ocean coast), seen at footprint footM (m per pixel or
-// mesh cell).
+// The waves at x metres out, at d, of exposure strength (0 lee shore .. 1
+// open ocean coast), seen at footprint footM (m per pixel or mesh cell).
+// Inland (x < 0, water.vert's shell vertices just over the coast) reads as
+// the coastline, where the bore has run out to nothing: the shoaling root
+// below went NaN there and took every shell triangle touching the vertex
+// with it, a sawtooth of missing water along the shore.
 ShoreWave shoreWaves(float x, vec3 d, float strength, float footM)
 {
 	ShoreWave w = ShoreWave(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	x = max(x, 0.0);
 	float s = shoreScale();
 	float Z = SHORE_ZONE_M * s;
 	if (x >= Z || strength <= 0.0)
