@@ -48,6 +48,12 @@
 static struct sphere planet;
 static struct quadCube qc;
 
+/* Camera speed relative to the focus body (App_Update, shown in the Camera
+   tab), smoothed over a few frames. */
+static double camSpeed;
+static dvec3 camSpeedLastRel;
+static int camSpeedLastFocus = -1;
+
 static GLuint initQuadCube(int divisions) {
 	GLuint vao;
 	QuadCube_Create(divisions, &qc);
@@ -99,8 +105,24 @@ static GLuint initSphere() {
 	return vao;
 }
 
+/* Speed relative to the focus body, so its orbit and the floating origin
+   do not count. A focus switch restarts the sample (the camera jumps). */
+static void updateCamSpeed(double dt)
+{
+	int focus = Bodies_Params()->focusBody;
+	dvec3 rel = dsubvec3(Camera_Position(), Bodies_Get(focus)->position);
+	if (focus == camSpeedLastFocus && dt > 0.0) {
+		double v = dlengthvec3(dsubvec3(rel, camSpeedLastRel)) / dt;
+		camSpeed += (v - camSpeed) * (1.0 - exp(-dt / 0.25));
+	} else {
+		camSpeed = 0.0;
+	}
+	camSpeedLastRel = rel;
+	camSpeedLastFocus = focus;
+}
+
 /* The Camera tab of the debug panel: altitude above the focus body's
-   sea-level sphere. */
+   sea-level sphere, and speed relative to it. */
 static void cameraPanel(struct nk_context *ctx)
 {
 	const Body *focus = Bodies_Get(Bodies_Params()->focusBody);
@@ -111,6 +133,10 @@ static void cameraPanel(struct nk_context *ctx)
 		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f m", alt);
 	else
 		nk_labelf(ctx, NK_TEXT_LEFT, "Altitude: %.1f km", alt / 1000.0);
+	if (camSpeed < 1e3)
+		nk_labelf(ctx, NK_TEXT_LEFT, "Speed: %.1f m/s", camSpeed);
+	else
+		nk_labelf(ctx, NK_TEXT_LEFT, "Speed: %.1f km/s", camSpeed / 1000.0);
 }
 
 /* Tone map tab: the engine's settings, then the gains of the passes still
@@ -425,6 +451,7 @@ void App_Update(App *app)
 
 	/* This frame's floating origin (render.c). */
 	app->cam = Camera_Position();
+	updateCamSpeed(deltaTime);
 
 	/* The active planet (solar_system.c): the terrain planet drawn in full,
 	   the largest on screen. One never seen up close bakes in the
