@@ -57,6 +57,11 @@ uniform sampler2D weatherMap;  // r top cover, g middle cover, b towering, a she
 uniform sampler2D colorMap;    // rgb albedo (display), a walls
 uniform sampler3D shapeNoise;
 uniform sampler3D detailNoise;
+// The shape noise's fixed-depth reads as 2D (cloud_volume.c): r, g: shape r
+// at z 0.37, 0.61; b, a: shape g at z 0.5, 0.81. And the walls' wander:
+// r = shape r, g = shape r at p.yzx + 0.37.
+uniform sampler2D shapeSlices;
+uniform sampler3D wanderNoise;
 
 float remap(float v, float lo, float hi, float nlo, float nhi)
 {
@@ -101,7 +106,7 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 	// of height and ~10 across.
 	float ws = layerScale[layerCount - 1];
 	vec3 wq = vec3(xy / (ws * 10.0), a / (ws * 3.0));
-	vec2 wv = vec2(textureLod(shapeNoise, wq, 0.0).r, textureLod(shapeNoise, wq.yzx + 0.37, 0.0).r) - 0.5;
+	vec2 wv = textureLod(wanderNoise, wq, 0.0).rg - 0.5;
 	vec2 uvw = uv + wv * (1.6 * ws / mapExtent);
 	vec4 w = textureLod(weatherMap, uvw, 0.0);
 	vec4 cw = textureLod(colorMap, uvw, 0.0);
@@ -120,7 +125,7 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		// Broad regions of thick cloud and wide valleys (~5 shape periods,
 		// swept east-west), so the shape noise's tiling never shows.
 		vec2 big = vec2(xy.x / (layerSweep[i] * 1.6), xy.y) / (sc * 5.3) + vec2(0.31, 0.77) * float(i);
-		float broad = textureLod(shapeNoise, vec3(big, 0.37), 0.0).r;
+		float broad = textureLod(shapeSlices, big, 0.0).r;
 		float cover = clamp((i == 0 ? w.r : w.g) * layerCoverage[i] + (broad - 0.67) * 1.6, 0.0, 1.0);
 		cover = max(cover, cw.a);
 		// The carpet: low billows over the layer's lowest part, in patches
@@ -128,8 +133,8 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		// across, swept with the wind.
 		float carpet = 0.0, mapCover = cover;
 		if (layerCarpet[i] > 0.0) {
-			vec3 cq = vec3(xy.x / (layerSweep[i] * 2.0), xy.y, 0.0) / (sc * 3.0) + vec3(0.17, 0.41, 0.61);
-			float pat = smoothstep(0.3, 0.75, textureLod(shapeNoise, cq, 0.0).r);
+			vec2 cq = vec2(xy.x / (layerSweep[i] * 2.0), xy.y) / (sc * 3.0) + vec2(0.17, 0.41);
+			float pat = smoothstep(0.3, 0.75, textureLod(shapeSlices, cq, 0.0).g);
 			// Flat-topped: its top varies little, and ends over a short span.
 			float cTop = 0.25 + 0.06 * pat + 0.08 * (broad - 0.67);
 			carpet = 1.0 - smoothstep(cTop - 0.06, cTop, hf);
@@ -187,8 +192,8 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		// cone); a circle profile makes it a dome. Walls go to the top.
 		// Cells several times wider than the layer is tall, so the domes
 		// are broad (narrow ones read as spires).
-		float cell = 1.0 - mix(textureLod(shapeNoise, vec3(np.xy * 0.1, 0.5), 0.0).g,
-		                       textureLod(shapeNoise, vec3(np.yx * 0.043 + 0.13, 0.81), 0.0).g, 0.45);
+		float cell = 1.0 - mix(textureLod(shapeSlices, np.xy * 0.1, 0.0).b,
+		                       textureLod(shapeSlices, np.yx * 0.043 + 0.13, 0.0).a, 0.45);
 		float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
 		float topF = clamp(mix(0.45, 1.0, w.b) * (0.5 + 0.6 * dome), 0.2, 1.0);
 		topF = max(topF, cw.a * (0.85 + 0.15 * dome));

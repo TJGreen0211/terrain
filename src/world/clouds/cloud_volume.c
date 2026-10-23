@@ -22,12 +22,21 @@
 #define UNIT_DETAIL  3
 #define UNIT_DEPTH   4
 #define UNIT_SHADOW  5
+#define UNIT_SLICES  6
+#define UNIT_WANDER  7
 
 /* Shadow map: samples along each texel's ray through the shell. */
 #define SHADOW_STEPS 24
 
 static GLuint marchProgram, resolveProgram, compositeProgram, shadowProgram, emptyVAO;
 static GLuint shapeTex, detailTex;
+/* Reads of the shape noise the density makes at a fixed depth, as 2D
+   textures (a trilinear read at depth z is a bilinear read of the two
+   layers round z, blended): r, g: shape r at z 0.37 (broad regions), 0.61
+   (carpet); b, a: shape g at 0.5, 0.81 (dome cells). 16 bits, so they
+   match the 3D reads to rounding. And the walls' wander, two reads in
+   one: r = shape r, g = shape r at p.yzx + 0.37 (resampled). */
+static GLuint slicesTex, wanderTex;
 static GLuint weatherTex, colorTex, mapFBO;
 /* Low-resolution targets: this frame's march, and two accumulated
    histories (ping-pong), each colour (premultiplied radiance, alpha) and
@@ -194,6 +203,68 @@ static GLuint newNoise3D(int n, const unsigned char *data)
 	return tex;
 }
 
+/* Trilinear read of channel c of an n^3 RGBA8 volume at u (texture
+   coordinates, repeating), as GL does it, in [0, 1]. */
+static float sample3D(const unsigned char *data, int n, int c, float ux, float uy, float uz)
+{
+	float sx = ux * n - 0.5f, sy = uy * n - 0.5f, sz = uz * n - 0.5f;
+	int x0 = (int)floorf(sx), y0 = (int)floorf(sy), z0 = (int)floorf(sz);
+	float fx = sx - x0, fy = sy - y0, fz = sz - z0;
+	float v = 0.0f;
+	for (int k = 0; k < 8; k++) {
+		int dx = k & 1, dy = (k >> 1) & 1, dz = (k >> 2) & 1;
+		int x = wrapi(x0 + dx, n), y = wrapi(y0 + dy, n), z = wrapi(z0 + dz, n);
+		float w = (dx ? fx : 1.0f - fx) * (dy ? fy : 1.0f - fy) * (dz ? fz : 1.0f - fz);
+		v += w * data[(((size_t)z * n + y) * n + x) * 4 + c];
+	}
+	return v / 255.0f;
+}
+
+/* The shape noise's fixed-depth slices and the wander volume (above). */
+static void buildShapeExtras(const unsigned char *data, int n)
+{
+	static const float sliceZ[4] = { 0.37f, 0.61f, 0.5f, 0.81f };
+	static const int sliceC[4] = { 0, 0, 1, 1 };
+	unsigned short *sl = malloc((size_t)n * n * 4 * sizeof *sl);
+	for (int y = 0; y < n; y++)
+		for (int x = 0; x < n; x++)
+			for (int k = 0; k < 4; k++) {
+				float v = sample3D(data, n, sliceC[k], (x + 0.5f) / n, (y + 0.5f) / n, sliceZ[k]);
+				sl[((size_t)y * n + x) * 4 + k] = (unsigned short)(clampf(v, 0.0f, 1.0f) * 65535.0f + 0.5f);
+			}
+	glGenTextures(1, &slicesTex);
+	glBindTexture(GL_TEXTURE_2D, slicesTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, n, n, 0, GL_RGBA, GL_UNSIGNED_SHORT, sl);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	free(sl);
+
+	unsigned char *wd = malloc((size_t)n * n * n * 2);
+	int z;
+#pragma omp parallel for schedule(dynamic)
+	for (z = 0; z < n; z++)
+		for (int y = 0; y < n; y++)
+			for (int x = 0; x < n; x++) {
+				float ux = (x + 0.5f) / n, uy = (y + 0.5f) / n, uz = (z + 0.5f) / n;
+				unsigned char *t = wd + (((size_t)z * n + y) * n + x) * 2;
+				t[0] = data[(((size_t)z * n + y) * n + x) * 4];
+				t[1] = byte01(sample3D(data, n, 0, uy + 0.37f, uz + 0.37f, ux + 0.37f));
+			}
+	glGenTextures(1, &wanderTex);
+	glBindTexture(GL_TEXTURE_3D, wanderTex);
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_RG8, n, n, n, 0, GL_RG, GL_UNSIGNED_BYTE, wd);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+	glBindTexture(GL_TEXTURE_3D, 0);
+	free(wd);
+}
+
 static void buildNoise(void)
 {
 	int n = NOISE_SHAPE_N;
@@ -223,6 +294,7 @@ static void buildNoise(void)
 				t[3] = byte01(worleyFbm(ux, uy, uz, 16, 51u));
 			}
 	shapeTex = newNoise3D(n, data);
+	buildShapeExtras(data, n);
 	free(data);
 
 	n = NOISE_DETAIL_N;
@@ -525,6 +597,12 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glActiveTexture(GL_TEXTURE0 + UNIT_DETAIL);
 	glBindTexture(GL_TEXTURE_3D, detailTex);
 	glUniform1i(glGetUniformLocation(p, "detailNoise"), UNIT_DETAIL);
+	glActiveTexture(GL_TEXTURE0 + UNIT_SLICES);
+	glBindTexture(GL_TEXTURE_2D, slicesTex);
+	glUniform1i(glGetUniformLocation(p, "shapeSlices"), UNIT_SLICES);
+	glActiveTexture(GL_TEXTURE0 + UNIT_WANDER);
+	glBindTexture(GL_TEXTURE_3D, wanderTex);
+	glUniform1i(glGetUniformLocation(p, "wanderNoise"), UNIT_WANDER);
 }
 
 static int sceneReady(const CloudVolumeScene *s)
@@ -573,7 +651,7 @@ void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1i(glGetUniformLocation(p, "steps"), SHADOW_STEPS);
 	drawFullScreen();
 
-	for (int u = UNIT_DETAIL; u >= 0; u--) {
+	for (int u = UNIT_WANDER; u >= 0; u--) {
 		glActiveTexture(GL_TEXTURE0 + u);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);
@@ -831,7 +909,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glDepthMask(GL_TRUE);
 	if (cull)
 		glEnable(GL_CULL_FACE);
-	for (int u = UNIT_SHADOW; u >= 0; u--) {
+	for (int u = UNIT_WANDER; u >= 0; u--) {
 		glActiveTexture(GL_TEXTURE0 + u);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);
