@@ -140,6 +140,14 @@ float densityV(vec3 pv, float a, float foot, bool detail, out vec3 alb)
 	return density(camToMap + viewToBody * pv, a, foot, detail, alb);
 }
 
+// The same with the erosion, and base: without it (one call for the test
+// and the detail).
+float densityBaseV(vec3 pv, float a, float foot, out vec3 alb, out float base)
+{
+	gCalls++;
+	return densityCore(camToMap + viewToBody * pv, a, foot, true, alb, base);
+}
+
 // How far the short march toward the Sun goes (m).
 float lightSpan()
 {
@@ -450,11 +458,11 @@ void marchPixel()
 		if (sm > 1e-7)
 			Sm = mistLight(pv, a, mus, deckLin, skyLin);
 		vec3 alb;
-		// Cheap test first; the detail only where there is cloud.
-		float sigma = 0.0;
-		if (densityV(pv, a, foot, false, alb) > 0.0) {
-			sigma = densityV(pv, a, foot, true, alb);
-		}
+		// The detail only where there is cloud without it.
+		float base;
+		float sigma = densityBaseV(pv, a, foot, alb, base);
+		if (base <= 0.0)
+			sigma = 0.0;
 		float fr = reachFade(t);
 		if (sigma <= 0.0) {
 			if (sm <= 1e-7)

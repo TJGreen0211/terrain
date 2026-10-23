@@ -98,6 +98,15 @@
 #define GAS_ICE_AU_OUTER          15.0
 #define GAS_SHELL_FRACTION_MIN    0.012
 #define GAS_SHELL_FRACTION_MAX    0.03
+/* Lightning seen from outside (gas_giant.c): the glow a flash spreads
+   through the cloud over (radius, m; the debug panel's starting value).
+   Real ones seen from orbit spread ~100-500 km; larger here, so they read
+   as lit storm cells from orbit, not as stars. */
+#define GAS_FLASH_SIZE_M          800.0e3
+/* The aurora's curtains (gasgiant.glsl): their tops above the cloud tops,
+   in radii (Jupiter's real ones reach ~0.005; taller here, so they stand
+   off the limb from orbit). The stand-in quad grows to fit them. */
+#define GAS_AURORA_HEIGHT_RADII   0.02
 /* Inside a gas giant (world/gasgiant/gas_interior.c, docs/gas-giant-
    interior.md). Altitudes are above the cloud tops (the stand-in sphere).
    The haze over them falls off exponentially; the glow shell
@@ -161,10 +170,11 @@
 /* Flight near a terrain planet (Earth, rocky, dwarf): the same, with the
    altitude above the highest ground within about that altitude around the
    nadir (sea level for planets not drawn in full). Full speed from
-   TERRAIN_FLIGHT_FULL_SPEED_ALT_RADII of the planet's radius up; the
-   minimum is walking pace at the default slider speed. */
+   TERRAIN_FLIGHT_FULL_SPEED_ALT_RADII of the planet's radius up (or that
+   deep below the ground); the minimum is ~40 m/s at the default slider
+   speed, so the camera never stalls at the surface. */
 #define TERRAIN_FLIGHT_FULL_SPEED_ALT_RADII 1.0
-#define TERRAIN_FLIGHT_MIN_SPEED_SCALE      1.0e-6
+#define TERRAIN_FLIGHT_MIN_SPEED_SCALE      1.0e-5
 #define TERRAIN_FLIGHT_GROUND_CAP_M         100.0
 /* Rocky planets: atmosphere shell as a fraction of the radius (Earth's look
    is ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M), times a random factor. */

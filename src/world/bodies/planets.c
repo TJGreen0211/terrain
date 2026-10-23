@@ -109,7 +109,9 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody, int g
 	double atmoThick = gas ? pi->gas.shellFraction
 	                 : pi->atmo.shellHeight > 0.0f ? pi->atmo.shellHeight / R : 0.0;
 	int rings = pi->hasRings;
-	double extent = R * fmax(1.0 + atmoThick, rings ? RING_OUTER * 1.02 : 1.0);
+	/* A gas giant's aurora curtains may stand taller than its haze. */
+	double air = gas ? fmax(atmoThick, GAS_AURORA_HEIGHT_RADII) : atmoThick;
+	double extent = R * fmax(1.0 + air, rings ? RING_OUTER * 1.02 : 1.0);
 	/* Close up (in or near the air or the rings) the silhouette cone gets
 	   too wide for a billboard: cover the whole screen instead. */
 	int fullScreen = !isDot && d < 1.5 * extent;

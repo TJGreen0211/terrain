@@ -68,13 +68,16 @@ void Input_CharCallback(GLFWwindow* window, unsigned int codepoint) {
 	if (ui.chr) ui.chr(window, codepoint);
 }
 
-/* The wheel scrolls the debug panel while over it, zooms the camera otherwise. */
+/* The wheel scrolls the debug panel while over it, zooms the camera otherwise.
+   Nuklear scrolls its active window wherever the cursor is, so the wheel is
+   only forwarded while over the panel. */
 void Input_ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
 	double mx, my;
-	if (ui.scroll) ui.scroll(window, xoffset, yoffset);
 	glfwGetCursorPos(window, &mx, &my);
-	if (uiWantsMouse(mx, my))
+	if (uiWantsMouse(mx, my)) {
+		if (ui.scroll) ui.scroll(window, xoffset, yoffset);
 		return;
+	}
 	Camera_ProcessScroll((float)yoffset);
 }
 

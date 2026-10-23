@@ -10,7 +10,7 @@
 struct nk_context;
 
 /* The cap choices the debug tab offers; 0 = uncapped. */
-#define FRAME_LIMITER_DEFAULT_FPS 120
+#define FRAME_LIMITER_DEFAULT_FPS 45
 
 typedef struct FrameLimiterParams {
 	int fps;   /* 30, 60, 90, 120, or 0 (uncapped) */

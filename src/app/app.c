@@ -346,7 +346,9 @@ static double terrainSpeedScale(dvec3 cam)
 			double cap = fmax(d - b->radius, TERRAIN_FLIGHT_GROUND_CAP_M) / b->radius;
 			ground = TerrainDraw_GroundRadius(b, dscalarvec3(rel, 1.0 / d), cap);
 		}
-		scale = fmin(scale, fmax((d - ground) / full, TERRAIN_FLIGHT_MIN_SPEED_SCALE));
+		/* Distance to the surface from either side: under the ground (a
+		   debugging clip through the planet) speed builds up again. */
+		scale = fmin(scale, fmax(fabs(d - ground) / full, TERRAIN_FLIGHT_MIN_SPEED_SCALE));
 	}
 	return scale;
 }

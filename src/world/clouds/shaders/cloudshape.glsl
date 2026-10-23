@@ -66,10 +66,28 @@ float remap(float v, float lo, float hi, float nlo, float nhi)
 // Cloud extinction (1/m) at rel (body axes, m from the map's centre on the
 // reference sphere), altitude a; foot: a pixel there (m), for the noise
 // mips; detail: with the edge erosion. alb: the albedo there (linear).
-float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
+// base: the extinction without the erosion (what detail = false returns),
+// so a march can test for cloud and erode it in one call.
+//
+// It reads as little as it can where there is no cloud: nothing between
+// the layers, and no dome cells above the highest top a dome could have
+// (unless a sheet, streak or the carpet is there). Each shortcut returns
+// exactly what the full path would.
+float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out float base)
 {
 	alb = vec3(0.0);
+	base = 0.0;
 	if (a <= shellLo || a >= shellHi)
+		return 0.0;
+	bool inLayer = false;
+	for (int i = 0; i < MAX_LAYERS; i++) {
+		if (i >= layerCount)
+			break;
+		float hf = (a - layerBase[i]) / (layerTop[i] - layerBase[i]);
+		if (hf > 0.0 && hf < 1.0)
+			inLayer = true;
+	}
+	if (!inLayer)
 		return 0.0;
 	// xy: in the map's frame, for the map; the noise is read in its own.
 	vec2 uv = vec2(dot(rel, mapEast), dot(rel, mapNorth)) / mapExtent + 0.5;
@@ -125,26 +143,6 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		vec3 np = vec3((xy.x + (a - layerBase[i]) * lean) / layerSweep[i], xy.y, a / layerStretch[i]) / sc
 		        + float(i) * vec3(0.37, 0.71, 0.13);
 		float lodS = log2(max(foot / (sc / 128.0), 1.0));
-		// Rounded tops, as high as the map's towering,
-		// raised and lowered by broad cells (domes and valleys).
-		// The cell noise falls off linearly from each cell's centre (a
-		// cone); a circle profile makes it a dome. Walls go to the top.
-		// Cells several times wider than the layer is tall, so the domes
-		// are broad (narrow ones read as spires).
-		float cell = 1.0 - mix(textureLod(shapeNoise, vec3(np.xy * 0.1, 0.5), 0.0).g,
-		                       textureLod(shapeNoise, vec3(np.yx * 0.043 + 0.13, 0.81), 0.0).g, 0.45);
-		float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
-		float topF = clamp(mix(0.45, 1.0, w.b) * (0.5 + 0.6 * dome), 0.2, 1.0);
-		topF = max(topF, cw.a * (0.85 + 0.15 * dome));
-		float hc = hf / topF;   // up the cloud, 0 at the base, 1 at its top
-		// Anvil: where the wind shears, the top spreads and flattens and
-		// the trunk below narrows; with the lean, the top overhangs.
-		float anv = layerAnvil[i] * abs(shear);
-		float cov = clamp(cover + anv * (0.4 * smoothstep(0.55, 0.9, hc) - 0.15 * (1.0 - hc)), 0.0, 1.0);
-		// Thinning toward the top: masses round off and their sides slope.
-		cov *= 1.0 - 0.45 * smoothstep(0.35, 1.0, hc);
-		float prof = 1.0 - smoothstep(topF * mix(0.55, 0.9, anv), topF, hf);
-		prof = max(prof, carpet);
 		// Shelves: thin sheets at two levels, tilted a little by the
 		// broad noise, in long swept patches near the clouds.
 		float sheet = 0.0;
@@ -178,6 +176,31 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 				streak = layerStreaks[i] * env * smoothstep(0.76, 0.9, n);
 			}
 		}
+		// Above the highest top a dome could have (dome = 1 below), with
+		// no carpet, sheet or streak here: no cloud, whatever the cells.
+		float topMax = max(clamp(mix(0.45, 1.0, w.b) * 1.1, 0.2, 1.0), cw.a);
+		if (carpet <= 0.0 && hf >= topMax && sheet <= 0.0 && streak <= 0.0)
+			continue;
+		// Rounded tops, as high as the map's towering,
+		// raised and lowered by broad cells (domes and valleys).
+		// The cell noise falls off linearly from each cell's centre (a
+		// cone); a circle profile makes it a dome. Walls go to the top.
+		// Cells several times wider than the layer is tall, so the domes
+		// are broad (narrow ones read as spires).
+		float cell = 1.0 - mix(textureLod(shapeNoise, vec3(np.xy * 0.1, 0.5), 0.0).g,
+		                       textureLod(shapeNoise, vec3(np.yx * 0.043 + 0.13, 0.81), 0.0).g, 0.45);
+		float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
+		float topF = clamp(mix(0.45, 1.0, w.b) * (0.5 + 0.6 * dome), 0.2, 1.0);
+		topF = max(topF, cw.a * (0.85 + 0.15 * dome));
+		float hc = hf / topF;   // up the cloud, 0 at the base, 1 at its top
+		// Anvil: where the wind shears, the top spreads and flattens and
+		// the trunk below narrows; with the lean, the top overhangs.
+		float anv = layerAnvil[i] * abs(shear);
+		float cov = clamp(cover + anv * (0.4 * smoothstep(0.55, 0.9, hc) - 0.15 * (1.0 - hc)), 0.0, 1.0);
+		// Thinning toward the top: masses round off and their sides slope.
+		cov *= 1.0 - 0.45 * smoothstep(0.35, 1.0, hc);
+		float prof = 1.0 - smoothstep(topF * mix(0.55, 0.9, anv), topF, hf);
+		prof = max(prof, carpet);
 		if (prof <= 0.0 && sheet <= 0.0 && streak <= 0.0)
 			continue;
 		vec4 sn = textureLod(shapeNoise, np, lodS);
@@ -203,6 +226,9 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		d = max(max(d, sheet), streak);
 		if (d <= 0.0)
 			continue;
+		float dBase = d * layerDensity[i] * edge;
+		if (dBase > 0.0)
+			base += dBase;
 		if (detail && layerErosion[i] > 0.0) {
 			float lodD = log2(max(foot / (sc * detailScale / 32.0), 1.0));
 			// Swept: stretched along the wind and squashed in height,
@@ -226,4 +252,10 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 	if (total > 0.0)
 		alb = albSum / total;
 	return total;
+}
+
+float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
+{
+	float base;
+	return densityCore(rel, a, foot, detail, alb, base);
 }

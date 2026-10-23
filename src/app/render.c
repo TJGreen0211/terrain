@@ -19,6 +19,7 @@
 #include "world/bodies/sun.h"
 #include "world/clouds/clouds.h"
 #include "world/clouds/cloud_volume.h"
+#include "world/gasgiant/gas_giant.h"
 #include "world/gasgiant/gas_interior.h"
 #include "world/ocean/water_draw.h"
 #include "world/rings/rings.h"
@@ -139,6 +140,7 @@ void Render_Frame(App *app)
 	frame.viewportH = Window_Height();
 	frame.lightPos = lightPosition;
 	frame.time = App_Time();
+	GasGiant_SetTime(frame.time);
 
 	BodyDraw_SunMarker(app->quadCubeVAO, app->quadCubeVerts, app->sunNoiseTex, sun, &frame);
 

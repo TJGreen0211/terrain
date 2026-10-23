@@ -34,7 +34,28 @@ static GasGiantParams g_params = {
 	1.0f,                     /* rim */
 	1.0f,                     /* glow */
 	1.05f,                    /* exposure */
+	3.0f,                     /* lightning */
+	4.0f,                     /* flash */
+	(float)GAS_FLASH_SIZE_M,  /* flashSize */
+	0,                        /* flashHold */
+	0.45f,                    /* aurora */
+	0.35f,                    /* auroraDay */
+	0.3f,                     /* auroraSpeed */
+	{ 0.35f, 1.0f, 0.55f },   /* auroraLow */
+	{ 0.58f, 0.32f, 1.0f },   /* auroraMid */
+	{ 1.0f, 0.3f, 0.82f },    /* auroraHigh */
+	0.6f,                     /* auroraGreen */
+	0.4f,                     /* auroraLean */
+	90.0f,                    /* auroraCycle */
+	0,                        /* auroraAlways */
 };
+
+static double g_time;
+
+void GasGiant_SetTime(double sceneTime)
+{
+	g_time = sceneTime;
+}
 
 GasGiantParams *GasGiant_Params(void)
 {
@@ -373,6 +394,59 @@ static void generateStyle(GasGiantStyle *s, unsigned int seed, double aAU, int f
 	}
 	/* Near white, a touch of the zone colour. */
 	mix3(s->zone, (float[3]){ 1.0f, 0.99f, 0.96f }, 0.8, s->highColor);
+
+	/* Lightning: its own stream. Jovian belts storm the most, ice giants
+	   rarely. */
+	Rng lr = rngFor(seed, 8);
+	switch (family) {
+	case GASGIANT_JOVIAN:    s->lightning = frange(&lr, 1.0, 1.5); break;
+	case GASGIANT_SATURNIAN: s->lightning = frange(&lr, 0.4, 0.8); break;
+	case GASGIANT_ICE:       s->lightning = frange(&lr, 0.15, 0.35); break;
+	default:                 s->lightning = frange(&lr, 0.3, 1.2); break;
+	}
+
+	/* Aurora: its own stream. Jupiter's field is ~10 degrees off the spin
+	   axis, Saturn's hardly at all; Uranus and Neptune's ~50-60 and well
+	   off the centre. */
+	Rng ar = rngFor(seed, 7);
+	s->auroraLon = frange(&ar, -180.0, 180.0);
+	switch (family) {
+	case GASGIANT_JOVIAN:
+		s->aurora = frange(&ar, 0.9, 1.1);
+		s->auroraTilt = frange(&ar, 8.0, 12.0);
+		s->auroraShift = frange(&ar, 0.0, 3.0);
+		s->auroraColat = frange(&ar, 14.0, 18.0);
+		s->auroraWidth = frange(&ar, 2.5, 4.0);
+		break;
+	case GASGIANT_SATURNIAN:
+		s->aurora = frange(&ar, 0.7, 0.9);
+		s->auroraTilt = frange(&ar, 0.0, 1.0);
+		s->auroraShift = frange(&ar, 0.0, 1.0);
+		s->auroraColat = frange(&ar, 14.0, 18.0);
+		s->auroraWidth = frange(&ar, 2.0, 3.5);
+		break;
+	case GASGIANT_ICE:
+		s->aurora = frange(&ar, 0.6, 0.8);
+		s->auroraTilt = frange(&ar, 45.0, 60.0);
+		s->auroraShift = frange(&ar, 8.0, 18.0);
+		s->auroraColat = frange(&ar, 15.0, 22.0);
+		s->auroraWidth = frange(&ar, 3.0, 5.0);
+		break;
+	default:
+		s->aurora = frange(&ar, 0.6, 1.1);
+		s->auroraTilt = frange(&ar, 0.0, 40.0);
+		s->auroraShift = frange(&ar, 0.0, 8.0);
+		s->auroraColat = frange(&ar, 12.0, 22.0);
+		s->auroraWidth = frange(&ar, 2.5, 4.5);
+		break;
+	}
+	/* How often it is active (drawn after the rest, so those stay put). */
+	switch (family) {
+	case GASGIANT_JOVIAN:    s->auroraActive = frange(&ar, 0.5, 0.7); break;
+	case GASGIANT_SATURNIAN: s->auroraActive = frange(&ar, 0.3, 0.5); break;
+	case GASGIANT_ICE:       s->auroraActive = frange(&ar, 0.15, 0.35); break;
+	default:                 s->auroraActive = frange(&ar, 0.15, 0.6); break;
+	}
 }
 
 void GasGiant_Generate(GasGiantStyle *s, unsigned int seed, double aAU)
@@ -542,6 +616,163 @@ static void uploadProfile(GasGiantStyle *s)
 	}
 	glTexImage1D(GL_TEXTURE_1D, 0, GL_RGBA16F, PROFILE_N, 0, GL_RGBA, GL_FLOAT, prof);
 	glGenerateMipmap(GL_TEXTURE_1D);
+
+	/* The turbulence weight, coarser, for placing the flashes. */
+	const int per = PROFILE_N / GASGIANT_TURB_N;
+	for (int k = 0; k < GASGIANT_TURB_N; k++) {
+		float sum = 0.0f;
+		for (int i = 0; i < per; i++)
+			sum += prof[(k * per + i) * 4 + 3];
+		s->turb[k] = sum / (float)per;
+	}
+}
+
+/* ---- Aurora activity ---- */
+
+/* How strongly s's aurora shows now (0..1): a slow noise on the scene
+   clock (spells of about auroraCycle s) above a threshold set by the
+   share of the time it is active, faded over the threshold's edges, and
+   some episodes weaker than others. Nothing is stored: every giant has
+   its own spells, and bench runs repeat. */
+static double auroraActivity(const GasGiantStyle *s)
+{
+	const GasGiantParams *g = &g_params;
+	if (g->auroraAlways)
+		return 1.0;
+	double p = clamp01(s->auroraActive);
+	if (p <= 0.0)
+		return 0.0;
+	double x = g_time / fmax(g->auroraCycle, 1.0);
+	unsigned int seed = s->seed ^ 0xA0A0u;
+	double n = 0.75 * noise1(seed, x) + 0.25 * noise1(seed + 7u, x * 2.7 + 13.0);
+	/* The noise gathers toward the middle: its share above th is about
+	   p when th is set from p this way. */
+	double th = 0.5 + 0.7 * (0.5 - p);
+	double on = smoothstep(th - 0.06, th + 0.06, n);
+	double strength = 0.55 + 0.45 * noise1(seed + 19u, x * 0.6 + 5.0);
+	return on * strength;
+}
+
+/* ---- Lightning ---- */
+
+/* Each flash slot's timeline is cut into periods; a hash of (seed, slot,
+   period) says whether the slot fires in it, when and where. Nothing is
+   stored, so every giant in view storms on its own and runs repeat. */
+#define FLASH_PERIOD 2.0   /* s, jittered per slot */
+#define FLASH_LIFE   1.0   /* s, at most */
+
+typedef struct FlashCell {
+	double start, life;    /* within the period, s */
+	int strokes;
+	double gap[4];         /* each stroke after the cell starts, s */
+	double weight[4];
+	float dir[3];          /* body-fixed, unit */
+} FlashCell;
+
+/* The profile's turbulence weight at latitude lat (rad). */
+static double turbAt(const GasGiantStyle *s, double lat)
+{
+	int k = (int)((lat / M_PI + 0.5) * GASGIANT_TURB_N);
+	k = k < 0 ? 0 : k >= GASGIANT_TURB_N ? GASGIANT_TURB_N - 1 : k;
+	return s->turb[k];
+}
+
+/* Where a cell storms: mostly the churning belts (a candidate latitude
+   kept with the turbulence weight squared as its chance), some at the
+   storms' edges, some in the polar cyclones' ring. */
+static void flashPlace(const GasGiantStyle *s, Rng *r, float dir[3])
+{
+	double lat = 0.0, lon = range(r, -M_PI, M_PI), u = rnd(r);
+	if (u < 0.2 && s->stormCount > 0) {
+		const GasGiantStorm *t = &s->storms[(int)(rnd(r) * s->stormCount) % s->stormCount];
+		double a = range(r, 0.0, 2.0 * M_PI), d = t->size * range(r, 0.6, 1.2);
+		lat = t->lat + sin(a) * d / fmax(t->aspect, 1.0);
+		lon = t->lon + cos(a) * d;
+	} else if (u < 0.3 && s->polarCount >= 0) {
+		lat = sgn(r) * (s->polarLat + range(r, -3.0, 3.0)) * M_PI / 180.0;
+	} else {
+		for (int tries = 0; tries < 4; tries++) {
+			lat = asin(range(r, -1.0, 1.0));
+			double w = turbAt(s, lat);
+			if (rnd(r) < w * w)
+				break;
+		}
+	}
+	double cl = cos(lat);
+	dir[0] = (float)(cl * cos(lon));
+	dir[1] = (float)(cl * sin(lon));
+	dir[2] = (float)sin(lat);
+}
+
+/* Slot's cell for period k, if it fires: 2-4 strokes, then a dim
+   afterglow. rate: cells per second over the whole giant. */
+static int flashCell(const GasGiantStyle *s, int slot, long long k, double period, double rate, FlashCell *c)
+{
+	Rng r = rngFor(s->seed * 0x9E3779B1u ^ (unsigned int)k, 8000 + slot);
+	if (rnd(&r) >= rate * period / GASGIANT_MAX_FLASHES)
+		return 0;
+	c->life = range(&r, 0.5, FLASH_LIFE);
+	c->start = range(&r, 0.0, period - c->life);
+	c->strokes = 2 + (int)(rnd(&r) * 3.0);
+	double at = 0.0, w = 1.0;
+	for (int i = 0; i < c->strokes; i++) {
+		c->gap[i] = at;
+		c->weight[i] = w;
+		at += range(&r, 0.06, 0.22);
+		w *= range(&r, 0.5, 0.9);
+	}
+	flashPlace(s, &r, c->dir);
+	return 1;
+}
+
+static double flashEnvelope(const FlashCell *c, double age)
+{
+	if (age < 0.0 || age > c->life)
+		return 0.0;
+	double e = 0.15 * exp(-age / 0.25);
+	for (int i = 0; i < c->strokes; i++)
+		if (age >= c->gap[i])
+			e += c->weight[i] * exp(-(age - c->gap[i]) / 0.05);
+	/* Out by the end of its life. */
+	return e * (1.0 - smoothstep(0.8 * c->life, c->life, age));
+}
+
+/* This frame's flashes on s: their directions and sizes (radii), and
+   brightness. Returns how many. */
+static int flashesNow(const GasGiantStyle *s, double radius, float dir[][4], float gain[])
+{
+	const GasGiantParams *g = &g_params;
+	double rate = g->lightning * s->lightning;
+	int n = 0;
+	if (rate <= 0.0 && !g->flashHold)
+		return 0;
+	for (int slot = 0; slot < GASGIANT_MAX_FLASHES; slot++) {
+		/* Jittered per slot, so the slots don't fire in step. */
+		double period = FLASH_PERIOD * (0.8 + 0.4 * hash1(s->seed ^ 0x7Fu, slot));
+		double t = g_time + period * hash1(s->seed ^ 0x3Bu, slot);
+		long long k = (long long)floor(t / period);
+		FlashCell c;
+		double e;
+		if (g->flashHold) {
+			/* Steady, placed by slot, for tuning. */
+			Rng r = rngFor(s->seed, 8000 + slot);
+			flashPlace(s, &r, c.dir);
+			e = 1.0;
+		} else {
+			if (!flashCell(s, slot, k, period, rate, &c))
+				continue;
+			e = flashEnvelope(&c, t - k * period - c.start);
+			if (e <= 1e-3)
+				continue;
+		}
+		dir[n][0] = c.dir[0];
+		dir[n][1] = c.dir[1];
+		dir[n][2] = c.dir[2];
+		dir[n][3] = (float)(g->flashSize / radius);
+		gain[n] = (float)(e * g->flash);
+		n++;
+	}
+	return n;
 }
 
 /* ---- Noise texture ---- */
@@ -703,7 +934,36 @@ void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s, double radius, double
 	glUniform4fv(glGetUniformLocation(shader, "gasStormColor"), GASGIANT_MAX_STORMS, &look[0][0]);
 	glUniform1fv(glGetUniformLocation(shader, "gasStormSpin"), GASGIANT_MAX_STORMS, spin);
 
+	float flashDir[GASGIANT_MAX_FLASHES][4] = { { 0.0f } }, flashGain[GASGIANT_MAX_FLASHES] = { 0.0f };
+	int nf = flashesNow(s, radius, flashDir, flashGain);
+	glUniform1i(glGetUniformLocation(shader, "gasFlashCount"), nf);
+	glUniform4fv(glGetUniformLocation(shader, "gasFlash"), GASGIANT_MAX_FLASHES, &flashDir[0][0]);
+	glUniform1fv(glGetUniformLocation(shader, "gasFlashGain"), GASGIANT_MAX_FLASHES, flashGain);
+
 	const GasGiantParams *g = &g_params;
+	/* Aurora: the magnetic poles in body-fixed axes (the south one on the
+	   far meridian), and the shimmer's phase (kept small for floats). */
+	{
+		double lon = s->auroraLon * M_PI / 180.0;
+		double cn = (s->auroraTilt + s->auroraShift) * M_PI / 180.0;
+		double cs = (s->auroraTilt - s->auroraShift) * M_PI / 180.0;
+		float poles[2][3] = {
+			{ (float)(sin(cn) * cos(lon)), (float)(sin(cn) * sin(lon)), (float)cos(cn) },
+			{ (float)(-sin(cs) * cos(lon)), (float)(-sin(cs) * sin(lon)), (float)-cos(cs) },
+		};
+		glUniform1f(glGetUniformLocation(shader, "gasAurora"), (float)(s->aurora * g->aurora * auroraActivity(s)));
+		glUniform3fv(glGetUniformLocation(shader, "gasAuroraPole"), 2, &poles[0][0]);
+		glUniform2f(glGetUniformLocation(shader, "gasAuroraOval"),
+		            (float)(s->auroraColat * M_PI / 180.0), (float)(fmax(s->auroraWidth, 0.1) * M_PI / 180.0));
+		glUniform1f(glGetUniformLocation(shader, "gasAuroraDay"), g->auroraDay);
+		glUniform1f(glGetUniformLocation(shader, "gasAuroraPhase"), (float)fmod(g_time * g->auroraSpeed, 4096.0));
+		glUniform1f(glGetUniformLocation(shader, "gasAuroraGreen"), g->auroraGreen);
+		glUniform1f(glGetUniformLocation(shader, "gasAuroraHeight"), (float)GAS_AURORA_HEIGHT_RADII);
+		glUniform1f(glGetUniformLocation(shader, "gasAuroraLean"), g->auroraLean);
+		uniform3(shader, "gasAuroraLow", g->auroraLow);
+		uniform3(shader, "gasAuroraMid", g->auroraMid);
+		uniform3(shader, "gasAuroraHigh", g->auroraHigh);
+	}
 	glUniform1f(glGetUniformLocation(shader, "gasLimbK"), g->limbK);
 	glUniform1f(glGetUniformLocation(shader, "gasWrap"), g->wrap);
 	uniform3(shader, "gasTerminator", g->terminator);
@@ -821,6 +1081,20 @@ void GasGiant_DebugPanel(struct nk_context *ctx)
 		DebugGUI_Slider(ctx, "Shell (radii)", &s->shellFraction, 0.0f, 0.1f, 0.001f, "%.3f");
 		colorRow(ctx, "Haze colour", s->hazeColor);
 
+		DebugGUI_Group(ctx, "Night side");
+		DebugGUI_Slider(ctx, "Lightning", &s->lightning, 0.0f, 3.0f, 0.01f, "%.2f");
+		DebugGUI_Slider(ctx, "Aurora", &s->aurora, 0.0f, 3.0f, 0.01f, "%.2f");
+		DebugGUI_Slider(ctx, "Magnetic tilt (deg)", &s->auroraTilt, 0.0f, 90.0f, 0.5f, "%.1f");
+		DebugGUI_Slider(ctx, "Tilt toward (deg)", &s->auroraLon, -180.0f, 180.0f, 1.0f, "%.0f");
+		DebugGUI_Slider(ctx, "Off-centre (deg)", &s->auroraShift, -30.0f, 30.0f, 0.5f, "%.1f");
+		DebugGUI_Slider(ctx, "Oval radius (deg)", &s->auroraColat, 3.0f, 45.0f, 0.1f, "%.1f");
+		DebugGUI_Slider(ctx, "Oval width (deg)", &s->auroraWidth, 0.3f, 15.0f, 0.1f, "%.1f");
+		DebugGUI_Slider(ctx, "Aurora active (share)", &s->auroraActive, 0.0f, 1.0f, 0.01f, "%.2f");
+		DebugGUI_RowLayout(ctx);
+		nk_label(ctx, "Aurora now", NK_TEXT_LEFT);
+		nk_label(ctx, "", NK_TEXT_LEFT);
+		nk_labelf(ctx, NK_TEXT_RIGHT, "%.2f", auroraActivity(s));
+
 		/* The dot colour follows the bands. */
 		GasGiant_MeanColor(s, b->color);
 	} else {
@@ -836,6 +1110,26 @@ void GasGiant_DebugPanel(struct nk_context *ctx)
 	DebugGUI_Slider(ctx, "Haze rim", &g->rim, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Limb glow", &g->glow, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Exposure", &g->exposure, 0.3f, 3.0f, 0.01f, "%.2f");
+
+	DebugGUI_Group(ctx, "Night side (all giants)");
+	DebugGUI_Slider(ctx, "Lightning (per s)", &g->lightning, 0.0f, 20.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Flash brightness", &g->flash, 0.0f, 30.0f, 0.1f, "%.1f");
+	float km = g->flashSize * 1e-3f;
+	DebugGUI_Slider(ctx, "Flash size (km)", &km, 20.0f, 2000.0f, 5.0f, "%.0f");
+	g->flashSize = km * 1e3f;
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	nk_checkbox_label(ctx, "Hold flashes (steady, for tuning)", &g->flashHold);
+	DebugGUI_Slider(ctx, "Aurora brightness", &g->aurora, 0.0f, 10.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Aurora by day", &g->auroraDay, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Aurora shimmer", &g->auroraSpeed, 0.0f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Aurora green", &g->auroraGreen, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Curtain lean (widths)", &g->auroraLean, 0.0f, 5.0f, 0.05f, "%.2f");
+	DebugGUI_Slider(ctx, "Aurora spells (s)", &g->auroraCycle, 5.0f, 600.0f, 1.0f, "%.0f");
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	nk_checkbox_label(ctx, "Aurora always on (for tuning)", &g->auroraAlways);
+	colorRow(ctx, "Aurora low (edge)", g->auroraLow);
+	colorRow(ctx, "Aurora mid", g->auroraMid);
+	colorRow(ctx, "Aurora high", g->auroraHigh);
 
 	GasInterior_DebugPanel(ctx);
 }

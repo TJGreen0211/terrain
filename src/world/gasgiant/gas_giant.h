@@ -15,11 +15,18 @@
    through the haze (limb darkening, wrap light at the terminator, a
    forward-scattering veil and a glow beyond the limb). A sparse layer of
    high clouds sits above, in a few latitude bands, and casts soft shadows
-   on the deck. */
+   on the deck. On the night side, lightning flashes glow under the cloud
+   tops: storm cells that flicker a few times, placed where the bands churn
+   (on the scene clock, from the style's seed, so nothing is stored). An
+   aurora rings each magnetic pole (tilted from the spin axis, far over
+   on ice giants): violet and magenta, a green hint at its sharp edge,
+   folded and rayed by noise that drifts on the scene clock. */
 
-#define GASGIANT_MAX_STORMS 10
-#define GASGIANT_MAX_POLAR  8
-#define GASGIANT_MAX_HIGH   4
+#define GASGIANT_MAX_STORMS  10
+#define GASGIANT_MAX_POLAR   8
+#define GASGIANT_MAX_HIGH    4
+#define GASGIANT_MAX_FLASHES 8
+#define GASGIANT_TURB_N      64   /* the turbulence table's latitude bins */
 
 typedef enum GasGiantFamily {
 	GASGIANT_JOVIAN,       /* cream zones, rust and umber belts, a red spot */
@@ -73,11 +80,25 @@ typedef struct GasGiantStyle {
 	float highColor[3];    /* display */
 	int highCount;         /* latitude bands they gather in */
 	float highBand[GASGIANT_MAX_HIGH][3];   /* lat (deg), half-width (deg), strength */
+	/* Night side. */
+	float lightning;       /* storm activity, x the shared rate (0 = none) */
+	/* Aurora: an oval round each magnetic pole. The north magnetic pole is
+	   auroraTilt + auroraShift from the spin pole toward auroraLon, the
+	   south one auroraTilt - auroraShift the other way (shift: an
+	   off-centre field, so the ovals aren't opposite each other). */
+	float aurora;          /* strength (0 = none) */
+	float auroraTilt;      /* deg */
+	float auroraLon;       /* deg */
+	float auroraShift;     /* deg */
+	float auroraColat;     /* deg from the magnetic pole: the oval's radius */
+	float auroraWidth;     /* deg: its bright edge's width */
+	float auroraActive;    /* share of the time it shows (it fades in and out) */
 
 	/* Built from the fields above; keep these last (the rebuild check
 	   hashes everything before profileTex). */
 	GLuint profileTex;     /* RGBA: band colour, turbulence weight */
 	unsigned int profileHash;
+	float turb[GASGIANT_TURB_N];   /* the profile's turbulence weight, south to north */
 } GasGiantStyle;
 
 /* Startup (GL up): builds the shared noise texture. */
@@ -92,8 +113,26 @@ typedef struct GasGiantParams {
 	float rim;             /* forward-scatter strength of the haze */
 	float glow;            /* glow beyond the limb */
 	float exposure;
+	float lightning;       /* flashes per second over a whole giant (x its style's) */
+	float flash;           /* their brightness, x full sunlight on the cloud tops */
+	float flashSize;       /* m: the glow's radius */
+	int flashHold;         /* 1: every slot lit and steady (for tuning the look) */
+	float aurora;          /* brightness, x full sunlight on the cloud tops */
+	float auroraDay;       /* how much of it shows on the day side */
+	float auroraSpeed;     /* shimmer: noise cells per second */
+	float auroraLow[3];    /* display colours: the bottom edge (green), */
+	float auroraMid[3];    /* the bulk (violet) */
+	float auroraHigh[3];   /* and the upper glow (magenta) */
+	float auroraGreen;     /* how much of the low colour the curtains' feet take */
+	float auroraLean;      /* how far poleward the curtains' tops lean, oval widths */
+	float auroraCycle;     /* s: the typical spell of activity or quiet */
+	int auroraAlways;      /* 1: every aurora at full strength (for tuning the look) */
 } GasGiantParams;
 GasGiantParams *GasGiant_Params(void);
+
+/* Once a frame: the scene clock (s; real time, so a flash lasts a moment
+   at any time speed, and bench runs repeat). */
+void GasGiant_SetTime(double sceneTime);
 
 /* A new style from seed. aAU: the orbit (farther out: likelier ice
    giant). Frees nothing: call GasGiant_Free on a style that was bound. */

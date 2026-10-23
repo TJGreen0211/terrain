@@ -16,6 +16,20 @@
 // less toward the limb, and cast soft shadows on the deck, offset away
 // from the Sun by their height.
 //
+// Lightning (night side): flashes glow under the cloud tops, spread by the
+// cloud, brighter where it is thick; white-blue at the core, the cloud's
+// tint at the edge. Placed and timed on the CPU (gas_giant.c).
+//
+// Aurora: round each magnetic pole, above the haze, four thin strands one
+// behind another toward the pole. Each wanders on its own (so they cross,
+// merge, kink and part), lights up and fades along its length, and splits
+// into wisps by noise stretched along it. Sharp on the equatorward side
+// (the curtains' feet), feathered poleward, all drifting on the scene
+// clock. They are curtains in a thin glowing layer above the cloud tops,
+// leaning poleward with height, green at their feet and magenta at the
+// top: marched through on the disc (gasGiantSurface) and beyond the limb
+// (gasAuroraBeyond, with the glow), where they stand off the edge.
+//
 // Light: Minnaert limb darkening, wrap light past the terminator tinted
 // warm, a forward-scattering haze veil, and a glow beyond the limb.
 // Colours are lit in linear (displayToLinear) and tone mapped back, so
@@ -27,6 +41,7 @@ const float GAS_PI = 3.14159265;
 #define GAS_MAX_STORMS 10   // GASGIANT_MAX_STORMS
 #define GAS_MAX_POLAR  8    // GASGIANT_MAX_POLAR
 #define GAS_MAX_HIGH   4    // GASGIANT_MAX_HIGH
+#define GAS_MAX_FLASHES 8   // GASGIANT_MAX_FLASHES
 
 uniform int gasOn;
 uniform sampler1D gasProfile;   // RGB band colour (display), A turbulence weight
@@ -52,6 +67,20 @@ uniform float gasHighHeight;    // their altitude, radii
 uniform vec3 gasHighColor;      // display
 uniform int gasHighCount;
 uniform vec3 gasHighBand[GAS_MAX_HIGH];   // lat, half-width (rad), strength
+uniform int gasFlashCount;
+uniform vec4 gasFlash[GAS_MAX_FLASHES];      // body-fixed direction (unit), glow radius (radii)
+uniform float gasFlashGain[GAS_MAX_FLASHES]; // x full sunlight
+uniform float gasAurora;        // brightness (0 = none), x full sunlight
+uniform vec3 gasAuroraPole[2];  // magnetic poles, body-fixed (unit)
+uniform vec2 gasAuroraOval;     // the oval's radius from its pole, its edge's width (rad)
+uniform float gasAuroraDay;     // share left on the day side
+uniform float gasAuroraHeight;  // the curtains' top above the cloud tops, radii
+uniform float gasAuroraLean;    // how far poleward their tops lean, oval widths
+uniform float gasAuroraPhase;   // shimmer, noise cells (scene clock)
+uniform float gasAuroraGreen;   // share of the low colour at the edge
+uniform vec3 gasAuroraLow;      // display colours: edge (green), bulk (violet), upper (magenta)
+uniform vec3 gasAuroraMid;
+uniform vec3 gasAuroraHigh;
 uniform float gasLimbK;
 uniform float gasWrap;
 uniform vec3 gasTerminator;
@@ -71,6 +100,33 @@ const float GAS_NOISE_PERIOD = 32.0;   // lattice cells per tile (gas_giant.c)
 vec4 gasNoise4(vec3 p)
 {
 	return textureLod(gasNoiseTex, p / GAS_NOISE_PERIOD, 0.0);
+}
+
+// The same, smooth between texels (the texel position eased, so one fetch
+// is C1): for low frequencies drawn large, where plain trilinear shows
+// as facets.
+vec4 gasNoise4Smooth(vec3 p)
+{
+	vec3 t = p * (float(textureSize(gasNoiseTex, 0).x) / GAS_NOISE_PERIOD) + 0.5;
+	vec3 i = floor(t), f = t - i;
+	f = f * f * (3.0 - 2.0 * f);
+	return textureLod(gasNoiseTex, (i + f - 0.5) / float(textureSize(gasNoiseTex, 0).x), 0.0);
+}
+
+// gasFbm4 with gasNoise4Smooth.
+vec4 gasFbm4Smooth(vec3 p, int octaves, float fp)
+{
+	vec4 s = vec4(0.0);
+	float a = 0.5, total = 0.0;
+	for (int k = 0; k < octaves; k++) {
+		float keep = 1.0 - smoothstep(0.25, 0.6, fp);
+		s += a * mix(vec4(0.5), gasNoise4Smooth(p), keep);
+		total += a;
+		p = p * 2.03 + vec3(1.7, 9.2, 3.1);
+		fp *= 2.03;
+		a *= 0.5;
+	}
+	return s / total;
 }
 
 // FBM of the four noises, each in [0, 1]. fp: one pixel in noise units at
@@ -324,12 +380,181 @@ GasCloud gasCloudField(vec3 nb, float foot)
 	return c;
 }
 
+// The flashes' light at nb (linear), under cloud c with linear albedo alb.
+// pixelR: one pixel there, radii: a glow is never narrower than ~2.5
+// pixels, so far off it reads as a flicker, not a shimmering point.
+vec3 gasLightning(vec3 nb, GasCloud c, vec3 alb, float pixelR)
+{
+	vec3 E = vec3(0.0);
+	// Thick cloud glows; gaps hardly: the light picks out the cloud.
+	float thick = mix(0.1, 1.8, smoothstep(0.25, 0.85, c.h));
+	vec3 tint = alb / max(max(alb.r, alb.g), max(alb.b, 1e-4));
+	for (int i = 0; i < GAS_MAX_FLASHES; i++) {
+		if (i >= gasFlashCount)
+			break;
+		vec3 f = gasFlash[i].xyz;
+		float r = max(gasFlash[i].w, 2.5 * pixelR);
+		vec3 dv = nb - f;
+		if (dot(dv, dv) > 144.0 * r * r)
+			continue;
+		// Spread twice as far east-west, along the bands; the halo ends
+		// smoothly by x = 6 (no visible edge on the dark night side).
+		vec3 east = normalize(cross(vec3(0.0, 0.0, 1.0), f) + vec3(1e-6, 0.0, 0.0));
+		vec3 north = cross(f, east);
+		float x = length(vec2(dot(dv, east) * 0.5, dot(dv, north))) / r;
+		if (x > 6.0)
+			continue;
+		float core = exp(-3.0 * x * x);
+		float glow = 0.6 * core + 0.4 * exp(-1.5 * x) * (1.0 - smoothstep(3.0, 6.0, x));
+		vec3 col = mix(tint * 0.9, vec3(0.75, 0.85, 1.0), core);
+		E += gasFlashGain[i] * glow * thick * col;
+	}
+	return E;
+}
+
+// The aurora's strands over body-fixed direction nb (unit), shifted
+// equatorward by lean widths (the curtains lean poleward with height, so
+// higher up the pattern sits farther toward the pole): their colour times
+// brightness, linear, before the layer's height profile and gain. pixelR:
+// one pixel there, radii (detail finer than a pixel fades to its mean).
+vec3 gasAuroraStrands(vec3 nb, float lean, float pixelR)
+{
+	vec3 E = vec3(0.0);
+	float th0 = gasAuroraOval.x, w = gasAuroraOval.y;
+	for (int k = 0; k < 2; k++) {
+		vec3 p = gasAuroraPole[k];
+		float th = acos(clamp(dot(nb, p), -1.0, 1.0)) + lean * w;
+		// Equatorward of the oval: nothing (its folds and edge end within
+		// ~3 widths). Poleward the tail and cap glow reach the pole.
+		if (th > th0 + 4.0 * w)
+			continue;
+		// Position on the plane round the magnetic pole, 1 at the oval: the
+		// noise is read there (not by angle alone, which would pinch into
+		// a pinwheel at the pole), so round the oval it has no seam.
+		vec3 a = normalize(cross(p, abs(p.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)));
+		vec3 b = cross(p, a);
+		float ring = max(sin(th0), 0.05);   // radii per radian round the oval
+		vec2 cs = vec2(dot(nb, a), dot(nb, b)) / ring;
+		float side = 37.0 * float(k);        // the other hemisphere's own noise
+		float d0 = (th0 - th) / w;           // widths poleward of the oval
+
+		// Slow noise: each strand's wander (one channel each), and where
+		// each one is lit (so the arcs break and fade in and out). The
+		// wander also depends on d0 itself, so a strand's course can kink,
+		// fold back and swirl instead of running as a clean ring.
+		// Read through a gentle warp: at these low frequencies the value
+		// noise's lattice otherwise shows as a polygonal outline.
+		const float SLOW = 1.5, FAST = 30.0;
+		float fpS = SLOW * pixelR / ring;
+		vec2 wp = gasFbm4Smooth(vec3(cs * 0.8, side + 5.0 + 0.05 * gasAuroraPhase), 2, 0.8 * pixelR / ring).xy - 0.5;
+		vec2 cw = cs + wp * 0.4;
+		vec4 wander = gasFbm4Smooth(vec3(cw * SLOW, 0.35 * d0 + 0.12 * gasAuroraPhase + side), 3, fpS);
+		vec4 lit = gasFbm4Smooth(vec3(cw * SLOW * 1.7, 0.2 * gasAuroraPhase + side + 13.0), 3, fpS * 1.7);
+		// Filaments: noise stretched along the strands (slow round the
+		// oval, fast across it), so each strand splits into wisps.
+		float fpF = max(3.0 * pixelR / ring, 5.0 * pixelR / w);
+		vec4 fil = gasFbm4Smooth(vec3(cs * 3.0, d0 * 5.0 + 0.3 * gasAuroraPhase + side + 29.0), 3, fpF);
+		// Faint rays across, by angle (they only show near the strands,
+		// well before the angle pinches at the pole).
+		vec2 dir = normalize(cs + vec2(1e-6, 0.0));
+		float ray = gasFbm4(vec3(dir * FAST, gasAuroraPhase + 0.5 * d0 + side), 3, FAST * pixelR / ring).y;
+		float rays = mix(0.9, 1.1, smoothstep(0.3, 0.75, ray));
+
+		vec3 mid = displayToLinear(gasAuroraMid), high = displayToLinear(gasAuroraHigh);
+		float pxW = pixelR / w;               // one pixel, in widths
+		// Strands: thin arcs one behind another toward the pole, each
+		// wandering on its own, so they cross, merge and part.
+		for (int i = 0; i < 4; i++) {
+			float off = 0.7 * float(i) + (wander[i] - 0.5) * 3.2;
+			float sw = max(mix(0.15, 0.5, lit[(i + 2) & 3]), 1.5 * pxW);
+			float x = (d0 - off) / sw;
+			// Feathered poleward.
+			float line = x < 0.0 ? exp(-2.5 * x * x) : exp(-0.3 * x * x);
+			float on = smoothstep(0.35, 0.7, lit[i]);
+			float streak = mix(0.12, 1.3, smoothstep(0.35, 0.85, fil[i]));
+			float amt = line * on * streak * (1.0 - 0.18 * float(i));
+			vec3 col = mix(mid, high, clamp(0.25 * float(i) + 0.6 * (fil[(i + 1) & 3] - 0.5), 0.0, 1.0));
+			E += col * amt * rays;
+		}
+		// A faint veil tying the strands together, and a fainter one over
+		// the cap (on the black night side anything more fills it).
+		E += mid * 0.025 * exp(-pow((d0 - 1.4) / 1.6, 2.0)) * (0.4 + lit.x);
+		E += mid * 0.01 * smoothstep(2.0, 5.0, d0);
+	}
+	return E;
+}
+
+// How much the aurora shows at body-fixed direction u (Sun direction sunB):
+// full on the night side, gasAuroraDay by day, none from inside the shell.
+float gasAuroraShow(vec3 u, vec3 sunB)
+{
+	return mix(1.0, gasAuroraDay, smoothstep(-0.1, 0.2, dot(u, sunB))) * (1.0 - gasInside);
+}
+
+// The aurora's light (linear) along the ray q0 + dq s, s in [s0, s1] (body
+// axes, radii): a thin emitting layer from the cloud tops up to
+// gasAuroraHeight. Its curtains lean poleward with height (gasAuroraLean
+// widths at the top), are brightest just above their feet, and colour
+// with height: a green hint at the bottom, violet, magenta at the top.
+// The density is scaled so a column straight down gives the strands' own
+// brightness; seen edge-on the path through it is long and they glow.
+vec3 gasAuroraMarch(vec3 q0, vec3 dq, float s0, float s1, vec3 sunB, float pixelR)
+{
+	// Steps by the path's length through the layer (4 straight down, up to
+	// 16 edge-on), jittered per pixel: even steps through the leaning
+	// curtains show as stair-stepped slices.
+	float H = gasAuroraHeight;
+	int N = int(clamp(ceil((s1 - s0) / H * 4.0), 4.0, 16.0));
+	float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+	vec3 low = displayToLinear(gasAuroraLow), mid = displayToLinear(gasAuroraMid);
+	vec3 high = displayToLinear(gasAuroraHigh);
+	const vec3 LUM = vec3(0.3, 0.5, 0.2);
+	float lowL = max(dot(low, LUM), 1e-3), highL = max(dot(high, LUM), 1e-3);
+	float ds = (s1 - s0) / float(N);
+	vec3 E = vec3(0.0);
+	for (int i = 0; i < N; i++) {
+		vec3 q = q0 + dq * (s0 + (float(i) + jit) * ds);
+		float r = length(q);
+		float hgt = (r - 1.0) / H;
+		if (hgt < 0.0 || hgt > 1.0)
+			continue;
+		// Sharp feet, fading upward (its integral over the height ~0.23).
+		float vp = smoothstep(0.0, 0.05, hgt) * exp(-4.0 * hgt) * (1.0 - smoothstep(0.75, 1.0, hgt));
+		vec3 u = q / r;
+		vec3 S = gasAuroraStrands(u, hgt * gasAuroraLean, pixelR);
+		float I = dot(S, LUM);
+		S = mix(S, low * (I / lowL), gasAuroraGreen * (1.0 - smoothstep(0.03, 0.2, hgt)));
+		S = mix(S, high * (I / highL), 0.6 * smoothstep(0.35, 1.0, hgt));
+		E += S * vp * gasAuroraShow(u, sunB);
+	}
+	E *= ds / (0.23 * H);
+	// Edge-on the path is many times the layer's height: compress so it
+	// glows instead of clipping.
+	float L = dot(E, LUM);
+	return E * gasAurora / (1.0 + 0.35 * L * gasAurora);
+}
+
+// The aurora on a ray that misses the sphere: ob, db the ray's origin and
+// direction in body axes (radii, db unit), passing the centre at h radii
+// (its closest approach at distance front). Linear; 0 if it misses the
+// layer.
+vec3 gasAuroraBeyond(vec3 ob, vec3 db, float h, float front, vec3 sunB, float pixelR)
+{
+	float R = 1.0 + gasAuroraHeight;
+	if (gasAurora <= 0.0 || gasInside >= 1.0 || h >= R)
+		return vec3(0.0);
+	float half_ = sqrt(R * R - h * h);
+	// A ray grazing the sphere (an edge pixel) ends where it meets it.
+	float s1 = h < 1.0 ? front - sqrt(1.0 - h * h) : front + half_;
+	return gasAuroraMarch(ob, db, max(front - half_, 0.0), s1, sunB, pixelR);
+}
+
 // n, d, sunV: unit surface normal, view ray and Sun direction (view axes);
-// nb, sunB: the normal and Sun direction in body-fixed axes (pole = +Z).
-// pixelR: one pixel at the body, radii. sunVis: sunlight left after the
-// ring's shadow. hitM: the camera's distance to this point (m). Returns
-// the display colour.
-vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR, float sunVis, float hitM)
+// nb, sunB: the normal and Sun direction in body-fixed axes (pole = +Z);
+// db: the view ray in body axes. pixelR: one pixel at the body, radii.
+// sunVis: sunlight left after the ring's shadow. hitM: the camera's
+// distance to this point (m). Returns the display colour.
+vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 db, vec3 sunB, float pixelR, float sunVis, float hitM)
 {
 	// Under the interior's cloud layers, as far as they reach: there the
 	// deck is the deep layer below them (darker, no high clouds); beyond,
@@ -374,6 +599,13 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 	float limb = pow(max(wrapL, 1e-4), gasLimbK - 1.0) * pow(max(muL, 0.02), gasLimbK - 1.0);
 	vec3 sun = gasSunlight(mu0, gasWrap) * limb * sunVis;
 	vec3 surface = alb * (sun * shade * (1.0 - 0.6 * hiShadow) + gasAmbient * haze);
+	// Lightning, under the haze veil: lost in daylight, and from inside
+	// the shell the interior's own flashes take over.
+	if (gasFlashCount > 0) {
+		float night = (1.0 - smoothstep(-0.1, 0.15, mu0)) * (1.0 - gasInside);
+		if (night > 0.0)
+			surface += gasLightning(nb, c, alb, pixelR) * night;
+	}
 
 	// Haze veil: thicker toward the limb, lit with a wider wrap and a
 	// forward-scattering rim when the Sun is behind the planet.
@@ -394,6 +626,15 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 		vec3 hiAlb = displayToLinear(gasHighColor) * (0.82 + 0.36 * h);
 		vec3 hiLit = hiAlb * (gasSunlight(mu0, gasWrap) * limbH * sunVis * selfSh + gasAmbient * haze);
 		lin = mix(lin, mix(hiLit, inScatter, veil * 0.4), clamp(hi, 0.0, 1.0));
+	}
+
+	// Aurora, above the haze and the high clouds: the layer between the
+	// camera and this point, back from it to the layer's top.
+	if (gasAurora > 0.0 && gasInside < 1.0) {
+		float b = dot(nb, db);
+		float R = 1.0 + gasAuroraHeight;
+		float sTop = b + sqrt(max(b * b + R * R - 1.0, 0.0));
+		lin += gasAuroraMarch(nb, -db, 0.0, sTop, sunB, pixelR);
 	}
 	return toneMap(lin * gasExposure);
 }

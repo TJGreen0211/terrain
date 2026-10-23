@@ -188,7 +188,7 @@ void main()
 			// One pixel at the hit point, not at the centre's distance
 			// (they differ a lot up close).
 			float pixHit = pixelR * tS / length(o);
-			lit = gasGiantSurface(n, d, sunView, viewToBody * n, viewToBody * sunView, pixHit, sunVis, radius * tS);
+			lit = gasGiantSurface(n, d, sunView, viewToBody * n, viewToBody * d, viewToBody * sunView, pixHit, sunVis, radius * tS);
 		} else {
 			vec3 albedo = color;
 			if (mottle > 0.0) {
@@ -223,6 +223,21 @@ void main()
 		} else {
 			float day = clamp(dot(limbDir, sunView) + 0.4, 0.0, 1.0);
 			glow = vec4(fromDisplay(atmoColor * 0.9), exp(-4.0 * x) * (1.0 - x) * day);
+		}
+	}
+	// A gas giant's aurora curtains beyond the limb join the glow. They are
+	// emission, which straight alpha can't simply add: they take a little
+	// alpha (dimming what's behind them slightly) and carry their light
+	// over it.
+	if (glowPass != 1 && gasOn == 1 && cover < 1.0 && front > 0.0) {
+		vec3 A = gasAuroraBeyond(viewToBody * o, viewToBody * d, h, front, viewToBody * sunView,
+		                         pixelR * front / length(o));
+		float aL = dot(A, vec3(0.3, 0.5, 0.2));
+		if (aL > 1e-5) {
+			float aA = 1.0 - exp(-0.25 * aL);
+			vec3 pre = glow.rgb * glow.a + A;
+			glow.a = glow.a + (1.0 - glow.a) * aA;
+			glow.rgb = pre / glow.a;
 		}
 	}
 	if (glowPass == 2) {
