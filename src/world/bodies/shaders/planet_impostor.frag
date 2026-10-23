@@ -31,6 +31,10 @@ uniform sampler1D ringProfile;   // Rings_BindStandIn
 uniform float ringSunAngle;
 uniform float pixelR;       // one pixel at the body, in body radii
 uniform int dotMode;
+// 0: everything; 1: all but the glow beyond the limb; 2: that glow alone.
+// The body whose rings the full passes draw splits in two around them
+// (planets.c), so its glow lies over the sheet behind it.
+uniform int glowPass;
 uniform float dotFlux;      // dot: total light (summed over pixels)
 uniform float dotSigma;     // dot: gaussian width, px
 // The cloud layer (Clouds_BindStandIn), once the planet is baked: the same
@@ -209,20 +213,33 @@ void main()
 		col = vec4(lit, cover);
 		depthT = tS;
 	}
-	// Glow beyond the limb, through the shell.
-	if (cover < 1.0 && atmoThick > 0.0 && front > 0.0 && h < 1.0 + atmoThick) {
+	// Glow beyond the limb, through the shell (straight alpha).
+	vec4 glow = vec4(0.0);
+	if (glowPass != 1 && cover < 1.0 && atmoThick > 0.0 && front > 0.0 && h < 1.0 + atmoThick) {
 		float x = max(h - 1.0, 0.0) / atmoThick;
 		vec3 limbDir = normalize(cross(d, c));
 		if (gasOn == 1) {
-			vec4 g = gasGiantGlow(x, limbDir, d, sunView);
-			col.rgb = mix(g.rgb, col.rgb, col.a);
-			col.a = max(col.a, g.a);
+			glow = gasGiantGlow(x, limbDir, d, sunView);
 		} else {
 			float day = clamp(dot(limbDir, sunView) + 0.4, 0.0, 1.0);
-			float glow = exp(-4.0 * x) * (1.0 - x) * day;
-			col.rgb = mix(fromDisplay(atmoColor * 0.9), col.rgb, col.a);
-			col.a = max(col.a, glow);
+			glow = vec4(fromDisplay(atmoColor * 0.9), exp(-4.0 * x) * (1.0 - x) * day);
 		}
+	}
+	if (glowPass == 2) {
+		// Over the scene so far, rings included: under the sphere's own
+		// coverage and under the sheet where it crosses in front.
+		float a = glow.a * (1.0 - cover);
+		if (ringOn == 1 && abs(ringDn) > 1e-6 && tR > 0.0 && tR < front && r01 > 0.0 && r01 < 1.0)
+			a *= exp(-textureGrad(ringProfile, r01, r01dx, r01dy).a / abs(ringDn));
+		if (a < 0.003)
+			discard;
+		FragColor = vec4(max(glow.rgb, 0.0), clamp(a, 0.0, 1.0));
+		gl_FragDepth = depthOf(radius * (cover > 0.0 ? tS : front) * d);
+		return;
+	}
+	if (glow.a > 0.0) {
+		col.rgb = mix(glow.rgb, col.rgb, col.a);
+		col.a = max(col.a, glow.a);
 		if (depthT < 0.0)
 			depthT = front;
 	}
@@ -235,8 +252,14 @@ void main()
 			vec4 ring = ringShade(prof, -d, sunView, ringNormalView,
 			                      ringPlanetShadow(pR, sunView, 1.0, ringSunAngle));
 			vec3 rc = toneMap(ring.rgb);
-			// "Over", premultiplied, back to straight alpha.
-			vec3 pre = rc * ring.a + col.rgb * col.a * (1.0 - ring.a);
+			// "Over", premultiplied, back to straight alpha; behind the
+			// glow (only off the sphere) the glow goes over the ring.
+			vec3 pre;
+			if (cover <= 0.0 && tR > front) {
+				pre = col.rgb * col.a + rc * ring.a * (1.0 - col.a);
+			} else {
+				pre = rc * ring.a + col.rgb * col.a * (1.0 - ring.a);
+			}
 			col.a = ring.a + col.a * (1.0 - ring.a);
 			col.rgb = pre / max(col.a, 1e-4);
 			if (ring.a > 0.1)

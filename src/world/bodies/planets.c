@@ -89,8 +89,9 @@ static double lambertPhase(double a)
 	return (sin(a) + (M_PI - a) * cos(a)) / M_PI;
 }
 
-/* One body; dots: 0 = disc pass (skips dots), 1 = dot pass (skips discs). */
-static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
+/* One body; dots: 0 = disc pass (skips dots), 1 = dot pass (skips discs).
+   glowPass: as planet_impostor.frag's (0 all, 1 no glow, 2 glow only). */
+static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody, int glowPass)
 {
 	const Body *b = Bodies_Get(id);
 	const PlanetInfo *pi = SolarSystem_Info(id);
@@ -162,6 +163,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 		Rings_BindStandIn(shader, pi->ringSeed);
 	}
 	glUniform1i(glGetUniformLocation(shader, "dotMode"), isDot);
+	glUniform1i(glGetUniformLocation(shader, "glowPass"), glowPass);
 	Clouds_BindStandIn(shader, id);
 	/* Pixel size in body radii at the body (edge anti-aliasing). */
 	glUniform1f(glGetUniformLocation(shader, "pixelR"), (float)(d / pixelsPerRadian() / R));
@@ -183,7 +185,8 @@ static int drawnInFull(int id, int fullBody, int moonFull)
 	return id == fullBody || (id == BODY_MOON && moonFull);
 }
 
-void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, int ringBody)
+/* Program, per-frame uniforms and the billboard, for a pass. */
+static void beginPass(mat4 proj)
 {
 	glUseProgram(shader);
 	glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, &proj.m[0][0]);
@@ -191,8 +194,12 @@ void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, i
 	glGetIntegerv(GL_VIEWPORT, viewport);
 	glUniform2f(glGetUniformLocation(shader, "viewportSize"), (float)viewport[2], (float)viewport[3]);
 	glUniform1f(glGetUniformLocation(shader, "hdrGain"), hdrGain);
-
 	glBindVertexArray(quadVAO);
+}
+
+void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, int ringBody)
+{
+	beginPass(proj);
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_GREATER);   /* reversed-Z */
@@ -204,15 +211,34 @@ void Planets_Draw(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, i
 	glDepthMask(GL_TRUE);
 	for (int i = 0; i < BODY_COUNT; i++)
 		if (Bodies_Get(i)->kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
-			drawBody(i, view, cam, 0, ringBody);
+			drawBody(i, view, cam, 0, ringBody, i == ringBody);
 
 	/* Dots: additive light, depth-tested only. */
 	glBlendFunc(GL_ONE, GL_ONE);
 	glDepthMask(GL_FALSE);
 	for (int i = 0; i < BODY_COUNT; i++)
 		if (Bodies_Get(i)->kind != BODY_KIND_STAR && !drawnInFull(i, fullBody, moonFull))
-			drawBody(i, view, cam, 1, ringBody);
+			drawBody(i, view, cam, 1, ringBody, 0);
 
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+	glEnable(GL_CULL_FACE);
+	glBindVertexArray(0);
+}
+
+void Planets_DrawRingGlow(mat4 proj, mat4 view, dvec3 cam, int fullBody, int moonFull, int ringBody)
+{
+	if (ringBody < 0 || Bodies_Get(ringBody)->kind == BODY_KIND_STAR || drawnInFull(ringBody, fullBody, moonFull))
+		return;
+	beginPass(proj);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_GEQUAL);    /* reversed-Z; equal at the sphere's own edge */
+	glDepthMask(GL_FALSE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	drawBody(ringBody, view, cam, 0, ringBody, 2);
+	glDepthFunc(GL_GREATER);
 	glDepthMask(GL_TRUE);
 	glDisable(GL_BLEND);
 	glEnable(GL_CULL_FACE);

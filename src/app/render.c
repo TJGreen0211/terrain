@@ -308,6 +308,7 @@ void Render_Frame(App *app)
 		Rings_DrawRocks(sunProj, sunView);
 		Rings_DrawSheet(sunProj, sunView);
 		Rings_DrawDust(sunProj, sunView);
+		Planets_DrawRingGlow(sunProj, sunView, cam, planetFull ? activeId : -1, moonFull, ringId);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		Prof_End(PROF_RINGS);
 	}
