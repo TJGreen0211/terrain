@@ -7,6 +7,13 @@ to before the cloud work. See "Step 1 as built" at the end for where it
 stands and what is open. Design written 2026-10-21, revised the same day
 after the procedural solar system landed (see `notes/solar-system-5.md`).
 
+Update 2026-10-22: a first pass of the volume (steps 2-3: raymarch at
+reduced resolution, temporal accumulation) exists as a shared module,
+`world/clouds/cloud_volume.c`, built for the gas giants' interior first
+(`docs/gas-giant-interior.md`, "Stage 2 as built"). It takes layers and a
+local weather map from a provider; rocky planets are not hooked up yet,
+and the slab below is unchanged.
+
 Goal: cloud layers on every planet with an atmosphere (Earth and the
 generated rocky and dwarf planets) that look right from the surface up to
 orbit, with one set of quality knobs that can be changed at runtime so
@@ -16,15 +23,23 @@ faster GPUs. Nothing is Earth-specific: every scale is per planet.
 The approach follows the "raymarched cloud shell at reduced resolution,
 accumulated over frames" line of work from Horizon Zero Dawn [1, 2] and
 Frostbite [3, 4], adapted to this project's planet scale, floating origin
-and OpenGL 4.1 target. Numbers in brackets refer to the references at the
+and OpenGL 4.x renderer. Numbers in brackets refer to the references at the
 end.
 
 ## Constraints that shape the design
 
-- **OpenGL 4.1 core** (`src/Window.c`, kept for macOS). No compute
-  shaders, no image load/store, no SSBOs. Every pass, including noise
-  generation, is a fragment shader writing to an FBO; 3D textures are
-  filled one slice at a time with `glFramebufferTextureLayer`.
+- **OpenGL version.** The app creates a 4.1 core context
+  (`engine/platform/window.c`) and every shader is `#version 410`. That
+  dates from when the project also ran on macOS, which is no longer a
+  target: it is Windows only now, and its drivers (the Iris Xe included)
+  support 4.6. Raising the context to 4.6 would allow compute shaders,
+  image load/store and SSBOs, which would simplify the noise and weather
+  bakes and the temporal accumulation. Until that is done, every pass,
+  including noise generation, is a fragment shader writing to an FBO, and
+  3D textures are filled one slice at a time with
+  `glFramebufferTextureLayer`. (The glad loader already exposes the newer
+  entry points as extensions; `GL_ARB_clip_control` is used that way for
+  reversed-Z.)
 - **Planets are full size.** A cumulus layer of ~1.5–8 km is ~0.1% of
   Earth's radius. From the ground a horizontal ray crosses hundreds of km
   of layer; from orbit one pixel covers several km. No single march
@@ -46,10 +61,11 @@ end.
   state lives in globals that `saveActive` / `loadActive` swap
   (`src/SolarSystem.c`). Everything else is a stand-in
   (`src/Planets.c`, `shaders/planet_impostor.frag`).
-- **The scene is LDR.** The main target is RGBA8 holding tone-mapped,
-  gamma-encoded colour: every lit shader applies the ACES curve itself,
-  the atmosphere dome then adds on top. Clouds tone-map their own output
-  and blend in display space, like the water.
+- **The scene is HDR** (since 2026-10-22, `docs/hdr.md`). The main target
+  is RGBA16F linear radiance, tone-mapped once at the resolve. The
+  atmosphere dome is still authored in display values and converted with
+  `sceneFromDisplay`; clouds write linear radiance and add the dome's air
+  in front of themselves the same way.
 - **Existing atmosphere.** The O'Neill single-scattering dome [5]
   (`src/Atmosphere.c`, `src/shaders/atmosphere.frag`) is additive and ends
   its rays at scene depth. Clouds have to occlude it and be fogged by it.
