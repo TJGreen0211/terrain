@@ -15,6 +15,7 @@
 #include "engine/gfx/scene_target.h"
 #include "engine/gfx/texture.h"
 #include "engine/gfx/tone_map.h"
+#include "engine/platform/frame_limiter.h"
 #include "engine/platform/input.h"
 #include "engine/platform/window.h"
 #include "world/WorldConfig.h"
@@ -128,6 +129,7 @@ static void toneMapPanel(struct nk_context *ctx)
 /* The debug panel's tabs, in order (below its built-in Performance tab). */
 static void addDebugPanels(void)
 {
+	DebugGUI_AddPanel("Frame rate", FrameLimiter_DebugPanel, NULL);
 	DebugGUI_AddPanel("Solar system", SolarSystem_DebugPanel, NULL);
 	DebugGUI_AddPanel("Camera", cameraPanel, NULL);
 	DebugGUI_AddPanel("Tone map", toneMapPanel, NULL);
@@ -189,8 +191,9 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 		*exitCode = -1;
 		return 0;
 	}
-	if (Bench_Active())
-		glfwSwapInterval(0);   /* no vsync: frames run as fast as they can */
+	/* Vsync off; the limiter paces normal runs, bench runs are uncapped
+	   (main.c skips the wait). */
+	FrameLimiter_Init();
 	/* cube.exe --bake-sky <name>: bake the nebula sky's faces and exit. */
 	if (Nebula_BakeRequested()) {
 		*exitCode = Nebula_RunBake();
@@ -405,5 +408,6 @@ void App_Destroy(App *app)
 	(void)app;
 	Bench_Finalize();
 	DebugGUI_Shutdown();
+	FrameLimiter_Shutdown();
 	glfwTerminate();
 }

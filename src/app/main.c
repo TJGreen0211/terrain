@@ -2,6 +2,7 @@
 #include "app/app.h"
 #include "app/bench.h"
 #include "app/render.h"
+#include "engine/platform/frame_limiter.h"
 /* stb_image_write lives here; bench.c uses it for its PNG captures. */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -32,6 +33,8 @@ int main(int argc, char *argv[])
 			glfwSetWindowShouldClose(app.window, GL_TRUE);
 
 		glfwPollEvents();
+		if (!Bench_Active())
+			FrameLimiter_Wait();
 		glfwSwapBuffers(app.window);
 	}
 	App_Destroy(&app);
