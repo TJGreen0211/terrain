@@ -153,6 +153,14 @@
    never below GAS_FLIGHT_MIN_SPEED_SCALE of it. */
 #define GAS_FLIGHT_FULL_SPEED_ALT_M  2.0e7
 #define GAS_FLIGHT_MIN_SPEED_SCALE   2.0e-4
+/* Flight near a terrain planet (Earth, rocky, dwarf): the same, with the
+   altitude above the highest ground within about that altitude around the
+   nadir (sea level for planets not drawn in full). Full speed from
+   TERRAIN_FLIGHT_FULL_SPEED_ALT_RADII of the planet's radius up; the
+   minimum is walking pace at the default slider speed. */
+#define TERRAIN_FLIGHT_FULL_SPEED_ALT_RADII 1.0
+#define TERRAIN_FLIGHT_MIN_SPEED_SCALE      1.0e-6
+#define TERRAIN_FLIGHT_GROUND_CAP_M         100.0
 /* Rocky planets: atmosphere shell as a fraction of the radius (Earth's look
    is ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M), times a random factor. */
 #define ROCKY_SHELL_FRACTION      (ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M)

@@ -37,8 +37,10 @@ int TerrainDraw_FootprintAllLand(const double dir[3], double capAngle, double ma
    horizon; farthest = the horizon plus as far as its peaks can peek over. */
 void TerrainDraw_ViewRange(const Body *planet, dvec3 cam, double *nearest, double *farthest);
 
-/* Radius (m) of Earth's highest terrain within capAngle of a world
-   direction, detail noise included (bench.c's 'poff ground'). */
+/* Radius (m) of the active planet's highest terrain within capAngle of a
+   world direction, detail noise included, never below its seas' surface. */
+double TerrainDraw_GroundRadius(const Body *planet, dvec3 worldDir, double capAngle);
+/* The same for Earth (bench.c's 'poff ground'). */
 double Earth_GroundRadius(dvec3 worldDir, double capAngle);
 
 /* Uniform + texture-unit recipe for the quadtree body passes (binds the

@@ -106,16 +106,24 @@ void TerrainDraw_ViewRange(const Body *planet, dvec3 cam, double *nearest, doubl
 	*farthest = sqrt(fmax(d * d - R * R, 0.0)) + sqrt(fmax(top * top - R * R, 0.0));
 }
 
-double Earth_GroundRadius(dvec3 worldDir, double capAngle)
+double TerrainDraw_GroundRadius(const Body *planet, dvec3 worldDir, double capAngle)
 {
-	const Body *earth = Bodies_Get(BODY_EARTH);
 	double w[3] = { worldDir.x, worldDir.y, worldDir.z }, dl[3];
-	const double (*m)[4] = earth->rotation.m;
+	const double (*m)[4] = planet->rotation.m;
 	for (int j = 0; j < 3; j++)
 		dl[j] = m[0][j] * w[0] + m[1][j] * w[1] + m[2][j] * w[2];
 	float lo, hi;
 	TerrainGen_HeightRange(dl, capAngle, -HUGE_VAL, &lo, &hi);   /* finest mip */
-	return earth->radius * (1.0 + fmax(reliefOf(hi), 0.0)) + TerrainDetail_Amplitude(earth->radius);
+	/* Seas: the ground is never below the water surface. */
+	double relief = reliefOf(hi);
+	if (SolarSystem_HasWater(SolarSystem_ActiveBody()))
+		relief = fmax(relief, 0.0);
+	return planet->radius * (1.0 + relief) + TerrainDetail_Amplitude(planet->radius);
+}
+
+double Earth_GroundRadius(dvec3 worldDir, double capAngle)
+{
+	return TerrainDraw_GroundRadius(Bodies_Get(BODY_EARTH), worldDir, capAngle);
 }
 
 /* QuadTree_ReliefFn for the active planet's land + seafloor (quad.vert, depth.vert):

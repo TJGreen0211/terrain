@@ -322,6 +322,34 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	return 1;
 }
 
+/* Flight speed factor near the terrain planets (Earth, rocky, dwarf):
+   scales with the altitude above the lowest one's ground, like the gas
+   giants' (WorldConfig.h TERRAIN_FLIGHT_*). Only the active planet has its
+   height field loaded; the others use sea level. */
+static double terrainSpeedScale(dvec3 cam)
+{
+	double scale = 1.0;
+	int active = SolarSystem_ActiveBody();
+	for (int i = 0; i < BODY_COUNT; i++) {
+		PlanetType t = SolarSystem_Info(i)->type;
+		if (t != PLANET_EARTHLIKE && t != PLANET_ROCKY && t != PLANET_DWARF)
+			continue;
+		const Body *b = Bodies_Get(i);
+		dvec3 rel = dsubvec3(cam, b->position);
+		double d = dlengthvec3(rel);
+		double full = TERRAIN_FLIGHT_FULL_SPEED_ALT_RADII * b->radius;
+		if (d - b->radius >= full || d <= 0.0)
+			continue;
+		double ground = b->radius;
+		if (i == active) {
+			double cap = fmax(d - b->radius, TERRAIN_FLIGHT_GROUND_CAP_M) / b->radius;
+			ground = TerrainDraw_GroundRadius(b, dscalarvec3(rel, 1.0 / d), cap);
+		}
+		scale = fmin(scale, fmax((d - ground) / full, TERRAIN_FLIGHT_MIN_SPEED_SCALE));
+	}
+	return scale;
+}
+
 void App_Update(App *app)
 {
 	/* H: re-roll the active planet's terrain seed and re-bake it; the
@@ -381,13 +409,15 @@ void App_Update(App *app)
 	Bench_UpdateCamera();
 
 	/* Near a gas giant: slower flight among its clouds, and never below
-	   the floor under them (gas_interior.c). */
+	   the floor under them (gas_interior.c). Near a terrain planet: slower
+	   flight close to its ground. */
 	{
 		double alt;
 		int giant = GasInterior_Body(Camera_Position(), &alt);
 		if (giant >= 0)
 			Camera_KeepOutside(Bodies_Get(giant)->position, GasInterior_FloorRadius(giant));
-		Camera_SetSpeedScale(giant >= 0 ? GasInterior_SpeedScale(alt) : 1.0);
+		Camera_SetSpeedScale(fmin(giant >= 0 ? GasInterior_SpeedScale(alt) : 1.0,
+		                          terrainSpeedScale(Camera_Position())));
 	}
 
 	/* This frame's floating origin (render.c). */
