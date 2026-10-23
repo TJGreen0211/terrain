@@ -465,6 +465,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	top->ridges = 0.0f;
 	top->stretch = 1.0f;
 	top->streaks = 0.3f;
+	top->broad = 1.6f;
 	mid->base = (float)(GAS_CLOUD_MID_BASE_H * H);
 	mid->top = (float)(GAS_CLOUD_MID_TOP_H * H);
 	mid->density = 1.0f / 250.0f;
@@ -481,6 +482,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	mid->carpet = 0.9f;
 	mid->plume = 1.0f;
 	mid->streaks = 0.4f;
+	mid->broad = 1.6f;
 	/* The deck under them: the walls' feet sink into it. */
 	sc->deckOn = 1;
 	sc->deckAlt = (float)(GAS_CLOUD_DECK_H * H);

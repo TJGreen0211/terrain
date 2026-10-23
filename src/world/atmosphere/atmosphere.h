@@ -42,7 +42,7 @@ GLuint Atmosphere_Program(void);
 // The in-scatter along each view ray stops at the visible surface, read from
 // the scene's depth (Atmosphere_SetSceneDepth), so terrain standing above sea
 // level is not fogged by air behind it. It is added times (1 - the target's
-// alpha): the cloud cover Clouds_Draw leaves there (0 without clouds).
+// alpha): the cloud cover Clouds_DrawVolume leaves there (0 without clouds).
 void Atmosphere_DrawDome(mat4 proj, mat4 view, mat4 modelmat,
                         float fInner, const atmosphereParams *atmo, vec4 lightPosition);
 
@@ -56,7 +56,7 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
 // shellHeight <= 0 switches extinction off.
 void Atmosphere_SetExtinction(GLuint shader, float fInner, const atmosphereParams *atmo);
 
-/* Gain on the in-scatter the dome (and the cloud slab) add, which is still
+/* Gain on the in-scatter the dome (and the clouds) add, which is still
    authored as a display value and converted to linear (docs/hdr.md). */
 float *Atmosphere_HdrGain(void);
 

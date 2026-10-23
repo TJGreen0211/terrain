@@ -20,8 +20,30 @@ uniform float ringSunAngle;   // sun angular radius: shadow penumbra width
 // The sheet fades out between these camera distances, where the instanced
 // rocks and dust take over (atmosphere.frag applies the same fade).
 uniform vec2 ringFade;
+// The two parts (Rings_DrawSheet): behindShell 1 keeps only the sheet seen
+// through the shell of radius shellRadius round the planet (the clouds
+// cover it after), 0 the rest. shellRadius 0: no shell.
+uniform float shellRadius;
+uniform int behindShell;
 
 #include "ringshade.glsl"
+
+// Whether the view ray crosses the shell before reaching fragPos. The
+// rays' closest approach to the centre, not b^2 - c, which loses the
+// shell to cancellation at planet distances.
+bool behindTheShell()
+{
+	if (shellRadius <= 0.0)
+		return false;
+	float dist = length(fragPos);
+	vec3 dir = fragPos / dist;
+	float b = dot(ringCenter, dir);
+	float h = shellRadius * shellRadius - dot(ringCenter - dir * b, ringCenter - dir * b);
+	if (h < 0.0)
+		return false;
+	float t0 = b - sqrt(h), t1 = b + sqrt(h);
+	return t1 > 0.0 && t0 < dist;
+}
 
 void main()
 {
@@ -31,7 +53,7 @@ void main()
 	// pixel's radial footprint, so ringlets finer than a pixel average out
 	// instead of aliasing at distance or at grazing angles.
 	vec4 prof = texture(ringProfile, r01);
-	if (r01 <= 0.0 || r01 >= 1.0 || prof.a < 1e-4)
+	if (r01 <= 0.0 || r01 >= 1.0 || prof.a < 1e-4 || behindTheShell() != (behindShell != 0))
 		discard;
 
 	vec3 V = normalize(-fragPos);

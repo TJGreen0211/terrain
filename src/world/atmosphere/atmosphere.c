@@ -43,8 +43,8 @@ void Atmosphere_SetSceneDepth(GLuint depthTex, int samples, float nearPlane)
 }
 
 static atmosphereParams g_atmosphere = ATMOSPHERE_DEFAULTS;
-/* Scale on the dome's in-scatter (also the air clouds.frag adds in front
-   of a cloud), converted from display values. Not per planet. docs/hdr.md. */
+/* Scale on the dome's in-scatter (also the air the clouds add in front of
+   themselves, cloudcomposite.frag), converted from display values. Not per planet. docs/hdr.md. */
 static float hdrGain = 1.0f;
 
 float *Atmosphere_HdrGain(void) { return &hdrGain; }
@@ -144,9 +144,9 @@ void Atmosphere_DrawDome(mat4 proj, mat4 view, mat4 modelmat,
 		return;
 	}
 
-	/* Additive, times (1 - destination alpha): the cloud slab leaves its
-	   cover there and has already added the air in front of itself
-	   (clouds.frag); elsewhere the alpha is 0 (main.c clears it). */
+	/* Additive, times (1 - destination alpha): the clouds leave their
+	   cover there and have already added the air in front of themselves
+	   (cloudcomposite.frag); elsewhere the alpha is 0 (render.c clears it). */
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 

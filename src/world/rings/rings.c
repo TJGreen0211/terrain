@@ -632,11 +632,13 @@ static void endTranslucent(void)
 	glDisable(GL_BLEND);
 }
 
-void Rings_DrawSheet(mat4 proj, mat4 view)
+void Rings_DrawSheet(mat4 proj, mat4 view, float shell, int behind)
 {
-	if (!g_ring.enabled)
+	if (!g_ring.enabled || (behind && shell <= 0.0f))
 		return;
 	useRingProgram(g_ring.sheetShader, proj, view);
+	glUniform1f(glGetUniformLocation(g_ring.sheetShader, "shellRadius"), shell);
+	glUniform1i(glGetUniformLocation(g_ring.sheetShader, "behindShell"), behind);
 	beginTranslucent();
 	glBindVertexArray(g_ring.emptyVAO);
 	glDrawArrays(GL_TRIANGLES, 0, 6);

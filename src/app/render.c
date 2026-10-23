@@ -104,6 +104,7 @@ void Render_Frame(App *app)
 	mat4 model;
 
 	ToneMap_Update();
+	CloudVolume_BeginFrame();
 
 	/* Full passes for the active planet and the Moon only while they are
 	   more than a few pixels across; Planets_Draw stands in otherwise.
@@ -266,6 +267,14 @@ void Render_Frame(App *app)
 	Planets_Draw(sunProj, sunView, cam, planetFull ? activeId : -1, moonFull, ringId);
 	Prof_End(PROF_STANDINS);
 
+	//The cloud layer's weather cube and shadow map, before the planet and
+	//water (they shade with the cube) and the clouds themselves.
+	if (planetFull) {
+		Prof_Begin(PROF_CLOUDS);
+		Clouds_PrepareVolume(&frame, activeId);
+		Prof_End(PROF_CLOUDS);
+	}
+
 	//Quadtree planet: LOD sphere built from six instanced face grids,
 	//centred camera-relative (the walk runs with the camera at the origin).
 	glPolygonMode(GL_FRONT_AND_BACK, Input_Wireframe() ? GL_LINE : GL_FILL);
@@ -284,31 +293,38 @@ void Render_Frame(App *app)
 	}
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	//Clouds: the layer as a slab over the planet (clouds.c), blended over
-	//the land and water, before the rings (which must draw over it).
-	//From here on the scene's alpha holds the cloud cover the dome and
-	//the sun's glow scale their light by: cleared to 0 here (every
-	//frame: the glow always reads it), written only by the clouds (the
-	//rings mask it off).
+	//Clouds: the planet's cloud layer (clouds.c, drawn by the shared cloud
+	//volume), over the land and water and the ring sheet behind them,
+	//before the rest of the rings. Its weather cube and shadow map were made before the
+	//planet (timed as "Clouds"); the volume times its own passes. From here
+	//on the scene's alpha holds the cloud cover the dome and the sun's glow
+	//scale their light by: cleared to 0 here (every frame: the glow always
+	//reads it), written only by the clouds (the rings mask it off).
 	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	if (planetFull) {
-		Prof_Begin(PROF_CLOUDS);
-		Clouds_Draw(sunProj, sunView, cam, activeId);
-		Prof_End(PROF_CLOUDS);
+	//The ring sheet seen through the cloud layer goes under the clouds
+	//(they cover it as anything behind them, with soft edges); the rest
+	//over them, below. (Untimed: a section times one stretch a frame.)
+	float cloudShell = planetFull && ringId == activeId ? Clouds_ShellRadius() : 0.0f;
+	if (ringId >= 0 && cloudShell > 0.0f) {
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+		Rings_DrawSheet(sunProj, sunView, cloudShell, 1);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	}
+	if (planetFull)
+		Clouds_DrawVolume(&frame);
 
-	//Rings: opaque close-up rocks, then the analytic sheet and the dust
-	//(premultiplied, depth-tested, no depth write). Before the
-	//atmosphere dome, which takes the sheet's coverage out of its glow.
-	//Whichever body they ring, stand-in or not.
+	//Rings: opaque close-up rocks, then the analytic sheet (the part not
+	//behind the clouds) and the dust (premultiplied, depth-tested, no
+	//depth write). Before the atmosphere dome, which takes the sheet's
+	//coverage out of its glow. Whichever body they ring, stand-in or not.
 	if (ringId >= 0) {
 		Prof_Begin(PROF_RINGS);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   /* the cloud cover (above) */
 		Rings_DrawRocks(sunProj, sunView);
-		Rings_DrawSheet(sunProj, sunView);
+		Rings_DrawSheet(sunProj, sunView, cloudShell, 0);
 		Rings_DrawDust(sunProj, sunView);
 		Planets_DrawRingGlow(sunProj, sunView, cam, planetFull ? activeId : -1, moonFull, ringId);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);

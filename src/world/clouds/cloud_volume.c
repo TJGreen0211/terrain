@@ -25,11 +25,21 @@
 #define UNIT_SLICES  6
 #define UNIT_WANDER  7
 #define UNIT_PLUME   8
+#define UNIT_CUBE    9
+#define UNIT_EXPECT  10
+
+/* The planets' far-field table (cloudshape.glsl): EXPECT_N steps of cover
+   and of the height profile, EXPECT_FILL of the fill (0..EXPECT_FILL_MAX). */
+#define EXPECT_N        32
+#define EXPECT_FILL     8
+#define EXPECT_FILL_MAX 0.6f
 
 /* Shadow map: samples along each texel's ray through the shell. */
 #define SHADOW_STEPS 24
 
 static GLuint marchProgram, resolveProgram, compositeProgram, shadowProgram, plumeProgram, emptyVAO;
+/* The march, shadow map and composite for a planet (cloud_volume.h). */
+static GLuint marchDomeProgram, shadowDomeProgram, compositeDomeProgram;
 static GLuint shapeTex, detailTex;
 /* Reads of the shape noise the density makes at a fixed depth, as 2D
    textures (a trilinear read at depth z is a bilinear read of the two
@@ -38,6 +48,9 @@ static GLuint shapeTex, detailTex;
    match the 3D reads to rounding. And the walls' wander, two reads in
    one: r = shape r, g = shape r at p.yzx + 0.37 (resampled). */
 static GLuint slicesTex, wanderTex;
+/* The planets' far field: a planet's cloud density averaged over the shape
+   noise, for each cover, height profile and fill (cloudshape.glsl). */
+static GLuint expectTex;
 static GLuint weatherTex, colorTex, mapFBO;
 /* Storm cells (the provider's third output, mipmapped for the plume
    pass's widening reads), and the plumes made from them: r strength, g
@@ -58,8 +71,8 @@ static int mapValid, mapBody = -1;
 static dvec3 mapCenterB;
 static GLint savedFBO, savedViewport[4];
 
-/* Last frame, for the reprojection. */
-static int prevValid, prevBody = -1;
+/* Last frame, for the reprojection; drawn: a scene was drawn this frame. */
+static int prevValid, prevBody = -1, drawn;
 static dvec3 prevCamB;
 static float prevViewToBody[9];
 static unsigned int frameCount;
@@ -107,6 +120,8 @@ void CloudVolume_ParseArgs(int argc, char *argv[])
 			statsToLog = 1;
 		} else if (strcmp(argv[i], "--cloud-block") == 0 && i + 1 < argc) {
 			g_params.temporalBlock = atoi(argv[++i]);
+		} else if (strcmp(argv[i], "--cloud-volume") == 0 && i + 1 < argc) {
+			g_params.enabled = atoi(argv[++i]) != 0;
 		}
 }
 
@@ -273,6 +288,47 @@ static void buildShapeExtras(const unsigned char *data, int n)
 	free(wd);
 }
 
+/* The planets' far-field table from the shape noise: the density
+   cloudshape.glsl's planet path makes, clamp(s' prof - (1 - cov), 0, cov)
+   with s' = fill + (1 - fill) s, averaged over every texel's shape s (as
+   the shader makes it from the noise at full resolution). */
+static void buildExpectTable(const unsigned char *data, int n)
+{
+	enum { BINS = 256 };
+	double hist[BINS] = { 0 };
+	size_t count = (size_t)n * n * n;
+	for (size_t i = 0; i < count; i++) {
+		const unsigned char *t = data + i * 4;
+		float r = t[0] / 255.0f, wfbm = t[1] / 255.0f * 0.625f + t[2] / 255.0f * 0.25f + t[3] / 255.0f * 0.125f;
+		float s = clampf((remapf(r, wfbm - 1.0f, 1.0f, 0.0f, 1.0f) - 0.5f) / 0.45f, 0.0f, 1.0f);
+		int b = (int)(s * (BINS - 1) + 0.5f);
+		hist[b] += 1.0 / (double)count;
+	}
+	float *e = malloc(sizeof(float) * EXPECT_N * EXPECT_N * EXPECT_FILL);
+	for (int fi = 0; fi < EXPECT_FILL; fi++)
+		for (int pi = 0; pi < EXPECT_N; pi++)
+			for (int ci = 0; ci < EXPECT_N; ci++) {
+				double cov = ci / (double)(EXPECT_N - 1), prof = pi / (double)(EXPECT_N - 1);
+				double fill = EXPECT_FILL_MAX * fi / (double)(EXPECT_FILL - 1), sum = 0.0;
+				for (int b = 0; b < BINS; b++) {
+					double s = fill + (1.0 - fill) * b / (double)(BINS - 1);
+					double x = s * prof - (1.0 - cov);
+					sum += hist[b] * (x < 0.0 ? 0.0 : x > cov ? cov : x);
+				}
+				e[((size_t)fi * EXPECT_N + pi) * EXPECT_N + ci] = (float)sum;
+			}
+	glGenTextures(1, &expectTex);
+	glBindTexture(GL_TEXTURE_3D, expectTex);
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, EXPECT_N, EXPECT_N, EXPECT_FILL, 0, GL_RED, GL_FLOAT, e);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_3D, 0);
+	free(e);
+}
+
 static void buildNoise(void)
 {
 	int n = NOISE_SHAPE_N;
@@ -302,6 +358,7 @@ static void buildNoise(void)
 				t[3] = byte01(worleyFbm(ux, uy, uz, 16, 51u));
 			}
 	shapeTex = newNoise3D(n, data);
+	buildExpectTable(data, n);
 	buildShapeExtras(data, n);
 	free(data);
 
@@ -419,6 +476,9 @@ void CloudVolume_Init(void)
 	Shader_Create(&compositeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudcomposite.frag");
 	Shader_Create(&shadowProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudshadow.frag");
 	Shader_Create(&plumeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudplume.frag");
+	Shader_CreateDefines(&marchDomeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudvolume.frag", "#define DOME_AIR\n");
+	Shader_CreateDefines(&shadowDomeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudshadow.frag", "#define DOME_AIR\n");
+	Shader_CreateDefines(&compositeDomeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudcomposite.frag", "#define DOME_AIR\n");
 	glGenVertexArrays(1, &emptyVAO);
 	buildNoise();
 
@@ -435,6 +495,14 @@ void CloudVolume_Init(void)
 	shadowTex = newTex2D(CLOUDVOL_SHADOW_SIZE, CLOUDVOL_SHADOW_SIZE, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR);
 	shadowFBO = newFBO1(shadowTex);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void CloudVolume_BeginFrame(void)
+{
+	shadowValid = 0;
+	if (!drawn)
+		prevValid = 0;
+	drawn = 0;
 }
 
 void CloudVolume_SetSceneDepth(GLuint depthTex, int samples, float nearPlane)
@@ -582,7 +650,7 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	float lb[CLOUDVOL_MAX_LAYERS], lt[CLOUDVOL_MAX_LAYERS], ld[CLOUDVOL_MAX_LAYERS], lc[CLOUDVOL_MAX_LAYERS];
 	float ls[CLOUDVOL_MAX_LAYERS], lsw[CLOUDVOL_MAX_LAYERS], lsh[CLOUDVOL_MAX_LAYERS], le[CLOUDVOL_MAX_LAYERS];
 	float lan[CLOUDVOL_MAX_LAYERS], lsf[CLOUDVOL_MAX_LAYERS], lri[CLOUDVOL_MAX_LAYERS], lst[CLOUDVOL_MAX_LAYERS];
-	float lsk[CLOUDVOL_MAX_LAYERS], lcp[CLOUDVOL_MAX_LAYERS], lpl[CLOUDVOL_MAX_LAYERS];
+	float lsk[CLOUDVOL_MAX_LAYERS], lcp[CLOUDVOL_MAX_LAYERS], lpl[CLOUDVOL_MAX_LAYERS], lbr[CLOUDVOL_MAX_LAYERS];
 	float plumeLo = 1e30f, plumeHi = -1e30f;
 	int plumeLayer = 0;
 	float ltint[CLOUDVOL_MAX_LAYERS * 3];
@@ -606,6 +674,7 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 		lsk[i] = L->streaks;
 		lcp[i] = L->carpet;
 		lpl[i] = on ? L->plume : 0.0f;
+		lbr[i] = L->broad;
 		for (int c = 0; c < 3; c++)
 			ltint[i * 3 + c] = L->tint[c];
 		if (on) {
@@ -636,6 +705,7 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glUniform1fv(glGetUniformLocation(p, "layerStreaks"), CLOUDVOL_MAX_LAYERS, lsk);
 	glUniform1fv(glGetUniformLocation(p, "layerCarpet"), CLOUDVOL_MAX_LAYERS, lcp);
 	glUniform1fv(glGetUniformLocation(p, "layerPlume"), CLOUDVOL_MAX_LAYERS, lpl);
+	glUniform1fv(glGetUniformLocation(p, "layerBroad"), CLOUDVOL_MAX_LAYERS, lbr);
 	glUniform1f(glGetUniformLocation(p, "plumeLo"), plumeLo);
 	glUniform1f(glGetUniformLocation(p, "plumeHi"), plumeHi);
 	glUniform1i(glGetUniformLocation(p, "plumeLayer"), plumeLayer);
@@ -673,21 +743,54 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glActiveTexture(GL_TEXTURE0 + UNIT_PLUME);
 	glBindTexture(GL_TEXTURE_2D, plumeTex);
 	glUniform1i(glGetUniformLocation(p, "plumeMap"), UNIT_PLUME);
+	if (s->domeAir) {
+		glActiveTexture(GL_TEXTURE0 + UNIT_CUBE);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, s->weatherCube);
+		glUniform1i(glGetUniformLocation(p, "weatherCube"), UNIT_CUBE);
+		glActiveTexture(GL_TEXTURE0 + UNIT_EXPECT);
+		glBindTexture(GL_TEXTURE_3D, expectTex);
+		glUniform1i(glGetUniformLocation(p, "expectTable"), UNIT_EXPECT);
+		glUniform3f(glGetUniformLocation(p, "expectSize"), (float)EXPECT_N, (float)EXPECT_N, (float)EXPECT_FILL);
+		glUniform1f(glGetUniformLocation(p, "expectFillMax"), EXPECT_FILL_MAX);
+		glUniform1f(glGetUniformLocation(p, "weatherTexelM"), (float)s->weatherTexelM);
+		glUniform1f(glGetUniformLocation(p, "weatherMaxLod"), (float)log2((double)(s->weatherCubeSize > 1 ? s->weatherCubeSize : 1)));
+		uniform3d(p, "mapOrigin", dscalarvec3(s->mapCenter, s->radius));
+		uniform3f(p, "cloudAlbedo", s->albedo);
+	}
+}
+
+/* Unbinds the textures setShapeUniforms bound. */
+static void unbindShapeTextures(void)
+{
+	for (int u = UNIT_EXPECT; u >= 0; u--) {
+		glActiveTexture(GL_TEXTURE0 + u);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glBindTexture(GL_TEXTURE_3D, 0);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+	}
+}
+
+/* The frame the shapes are read in, on the unit sphere (body axes): the
+   weather map's, or a planet's (cloud_volume.h). */
+static dvec3 frameCenter(const CloudVolumeScene *s)
+{
+	return s->domeAir ? s->mapCenter : mapCenterB;
 }
 
 static int sceneReady(const CloudVolumeScene *s)
 {
-	return g_params.enabled && s->fade > 0.0f && s->layerCount > 0 && mapValid && mapBody == s->body;
+	if (!g_params.enabled || s->fade <= 0.0f || s->layerCount <= 0)
+		return 0;
+	return s->domeAir ? s->weatherCube != 0 : mapValid && mapBody == s->body;
 }
 
 void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s)
 {
-	shadowValid = 0;
 	if (!sceneReady(s) || g_params.shadowExtent <= 0.0f)
 		return;
 	/* Centred under the camera, in the weather map's plane. */
 	dvec3 camB = toBody(s->rotation, dsubvec3(f->cam, s->center));
-	dvec3 mapC = dscalarvec3(mapCenterB, s->radius);
+	dvec3 mapC = dscalarvec3(frameCenter(s), s->radius);
 	dvec3 camToMap = dsubvec3(camB, mapC);
 	shadowCX = camToMap.x * s->mapEast.x + camToMap.y * s->mapEast.y + camToMap.z * s->mapEast.z;
 	shadowCY = camToMap.x * s->mapNorth.x + camToMap.y * s->mapNorth.y + camToMap.z * s->mapNorth.z;
@@ -709,7 +812,7 @@ void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s)
 	glDisable(GL_BLEND);
 	glDisable(GL_CULL_FACE);
 
-	GLuint p = shadowProgram;
+	GLuint p = s->domeAir ? shadowDomeProgram : shadowProgram;
 	glUseProgram(p);
 	setShapeUniforms(p, s, &shadowLo, &shadowHi);
 	uniform3d(p, "mapCenterB", mapC);
@@ -721,11 +824,7 @@ void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1i(glGetUniformLocation(p, "steps"), SHADOW_STEPS);
 	drawFullScreen();
 
-	for (int u = UNIT_PLUME; u >= 0; u--) {
-		glActiveTexture(GL_TEXTURE0 + u);
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glBindTexture(GL_TEXTURE_3D, 0);
-	}
+	unbindShapeTextures();
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);
 	if (depth)
@@ -793,11 +892,10 @@ static void readDebugStats(int w, int h)
 
 void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 {
-	if (!sceneReady(s)) {
-		prevValid = 0;
+	if (!sceneReady(s))
 		return;
-	}
 	frameCount++;
+	drawn = 1;
 
 	GLint fbo, vp[4];
 	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
@@ -823,7 +921,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	dvec3 sunV = toView(f->view, s->sunDir);
 	float v2b[9];
 	viewToBody(f, s->rotation, v2b);
-	dvec3 camToMap = dsubvec3(camB, dscalarvec3(mapCenterB, s->radius));
+	dvec3 camToMap = dsubvec3(camB, dscalarvec3(frameCenter(s), s->radius));
 
 	/* History: same body, and the camera has not jumped (none in the
 	   debug view: it shows this frame's counts). */
@@ -842,8 +940,14 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	GLboolean cull = glIsEnabled(GL_CULL_FACE);
 	glDisable(GL_CULL_FACE);
 
-	GLuint p = marchProgram;
+	GLuint p = s->domeAir ? marchDomeProgram : marchProgram;
 	glUseProgram(p);
+	if (s->domeAir) {
+		uniform3f(p, "sunColor", s->sunColor);
+		glUniform1f(glGetUniformLocation(p, "sunAngle"), s->sunAngle);
+		if (s->airUniforms)
+			s->airUniforms(p);
+	}
 	glUniformMatrix4fv(glGetUniformLocation(p, "projection"), 1, GL_FALSE, &f->proj.m[0][0]);
 	glUniform2f(glGetUniformLocation(p, "lowSize"), (float)w, (float)h);
 	glUniform2f(glGetUniformLocation(p, "fullSize"), (float)vp[2], (float)vp[3]);
@@ -901,7 +1005,8 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 
 	glUniform1i(glGetUniformLocation(p, "viewSteps"), g_params.viewSteps);
 	glUniform1i(glGetUniformLocation(p, "lightSteps"), g_params.lightSteps);
-	double reach = s->reach > 0.0 ? fmin(s->reach, 0.45 * s->mapExtent) : CloudVolume_Reach(camAlt - lo, s->mapExtent);
+	double reach = s->domeAir ? (s->reach > 0.0 ? s->reach : 1e12)
+	             : s->reach > 0.0 ? fmin(s->reach, 0.45 * s->mapExtent) : CloudVolume_Reach(camAlt - lo, s->mapExtent);
 	glUniform1f(glGetUniformLocation(p, "maxDistance"), (float)reach);
 	glUniform1i(glGetUniformLocation(p, "deckOn"), s->deckOn);
 	glUniform1f(glGetUniformLocation(p, "deckAlt"), s->deckAlt);
@@ -963,8 +1068,14 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	Prof_Begin(PROF_CLOUD_COMPOSITE);
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);
-	p = compositeProgram;
+	p = s->domeAir ? compositeDomeProgram : compositeProgram;
 	glUseProgram(p);
+	if (s->domeAir) {
+		uniform3d(p, "camCentre", toView(f->view, dsubvec3(f->cam, s->center)));
+		uniform3d(p, "sunDirV", sunV);
+		if (s->airUniforms)
+			s->airUniforms(p);
+	}
 	glUniformMatrix4fv(glGetUniformLocation(p, "projection"), 1, GL_FALSE, &f->proj.m[0][0]);
 	glUniform2f(glGetUniformLocation(p, "fullSize"), (float)vp[2], (float)vp[3]);
 	glActiveTexture(GL_TEXTURE0 + 0);
@@ -976,26 +1087,35 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1f(glGetUniformLocation(p, "opacity"), s->fade);
 	glUniform1i(glGetUniformLocation(p, "debugView"), debugView);
 	glUniform1f(glGetUniformLocation(p, "debugMax"), debugView == 1 ? (float)g_params.viewSteps : DEBUG_CALLS_MAX);
+	glUniform1i(glGetUniformLocation(p, "depthOnly"), 0);
 	/* Premultiplied, behind anything nearer (the march already stopped
 	   at the scene's depth; this keeps the full-resolution edges); alpha
-	   keeps the slab's cloud cover. */
+	   keeps the cloud cover drawn before, and with the dome's air takes the
+	   clouds' over it (the dome scales its light by it). */
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_GREATER);   /* reversed-Z */
 	glDepthMask(GL_FALSE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, s->domeAir ? GL_TRUE : GL_FALSE);
 	drawFullScreen();
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDisable(GL_BLEND);
+	/* With the dome's air, the clouds' depth where they are all but opaque
+	   (cloudcomposite.frag): the rings drawn after them stay behind them.
+	   The dome's in-scatter then ends there; through a less opaque cloud
+	   that would cut off the air behind it, a step at the threshold (at 0.5
+	   it drew a hard line round every cloud). */
+	if (s->domeAir && !debugView) {
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glDepthMask(GL_TRUE);
+		glUniform1i(glGetUniformLocation(p, "depthOnly"), 1);
+		drawFullScreen();
+	}
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
 	if (cull)
 		glEnable(GL_CULL_FACE);
-	for (int u = UNIT_PLUME; u >= 0; u--) {
-		glActiveTexture(GL_TEXTURE0 + u);
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glBindTexture(GL_TEXTURE_3D, 0);
-	}
+	unbindShapeTextures();
 	Prof_End(PROF_CLOUD_COMPOSITE);
 
 	prevValid = 1;

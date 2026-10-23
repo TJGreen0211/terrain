@@ -64,8 +64,15 @@ void Rings_BindStandIn(GLuint shader, unsigned int seed);
 /* Opaque rocks: draw with the other opaque geometry. */
 void Rings_DrawRocks(mat4 proj, mat4 view);
 /* Translucent passes: after the opaque scene, before the atmosphere dome
-   (which attenuates its own glow behind the sheet). */
-void Rings_DrawSheet(mat4 proj, mat4 view);
+   (which attenuates its own glow behind the sheet).
+
+   The sheet in two parts round a shell about the planet (radius shell, m;
+   the cloud layer's top, which the rings lie outside): behind != 0 draws
+   only where the view ray crosses the shell before reaching the sheet, so
+   the clouds, drawn after it, cover it as they would anything behind them;
+   behind == 0 the rest, after the clouds. shell 0: no shell, all of it in
+   the behind == 0 part. */
+void Rings_DrawSheet(mat4 proj, mat4 view, float shell, int behind);
 void Rings_DrawDust(mat4 proj, mat4 view);
 
 #endif

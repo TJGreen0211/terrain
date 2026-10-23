@@ -310,11 +310,11 @@
 #define ATMOSPHERE_SHELL_HEIGHT_M   (0.0424 * EARTH_RADIUS_M)          /* 270 km */
 #define ATMOSPHERE_SCALE_HEIGHT_M   (0.25 * ATMOSPHERE_SHELL_HEIGHT_M) /* 67.5 km */
 
-/* ---- Clouds (clouds.c, clouds.frag, docs/volumetric-clouds.md) ---------
+/* ---- Clouds (clouds.c, the shared cloud volume, docs/volumetric-clouds.md)
    Earth's cloud layer; every other planet's is generated (solar_system.c)
    from the ranges further down. The debug panel's Clouds section edits the
-   active planet's live. Step 1 shades the layer as one slab at its middle
-   altitude.
+   active planet's live. One volumetric layer over the altitude +- half the
+   thickness, the same clouds from the ground to orbit.
    Weather scale: the largest weather system's wavelength, in planet radii.
    Opacity: optical depth of a full cloud column (thick cumulus ~20-50).
    Flow period: simulation seconds per cycle of the two-phase flow map that
@@ -325,12 +325,12 @@
    landRelief = 0.025 radii (~160 km, terrain_gen.c), so a real 5 km layer
    would sit under every continent. Earth's layer floats at half the land
    relief, so high ground and ranges stand above it. */
-/* Clouds start switched off (work in progress, docs/volumetric-clouds.md);
-   the debug panel's Clouds section turns them on. */
-#define CLOUDS_ENABLED_DEFAULT      0
+/* Clouds start switched on; the debug panel's Clouds section (or
+   --clouds 0) turns them off. */
+#define CLOUDS_ENABLED_DEFAULT      1
 #define CLOUD_EARTH_ALTITUDE_M      (0.0125 * EARTH_RADIUS_M)   /* 80 km */
 #define CLOUD_EARTH_THICKNESS_M     (0.005 * EARTH_RADIUS_M)    /* 32 km */
-#define CLOUD_EARTH_COVERAGE        0.6
+#define CLOUD_EARTH_COVERAGE        0.5
 #define CLOUD_EARTH_CLIMATE_WEIGHT  0.8
 #define CLOUD_EARTH_OPACITY         40.0
 #define CLOUD_EARTH_WEATHER_SCALE   0.3
@@ -341,9 +341,9 @@
 #define CLOUD_MAP_WIDTH             1024
 #define CLOUD_MAP_STEP_S            3600.0
 #define CLOUD_MAP_BUILDS_PER_FRAME  2
-/* Slab detail below the map: octaves (quality knob; each costs two noise
-   lookups per pixel where it is visible) and the finest wavelength (m). */
-#define CLOUD_SLAB_OCTAVES          9
+/* Detail below the weather maps, baked into the weather cube: octaves
+   and the finest wavelength (m). */
+#define CLOUD_DETAIL_OCTAVES        9
 #define CLOUD_DETAIL_MIN_WAVELENGTH_M 200.0
 /* Generated planets: layer altitude as a fraction of the planet's land
    relief (Earth's is 0.5), thickness as a fraction of the altitude.
@@ -356,6 +356,15 @@
 #define CLOUD_GEN_THICKNESS_MIN     0.25
 #define CLOUD_GEN_THICKNESS_MAX     0.6
 #define CLOUD_GEN_MAX_SHELL         0.6
+/* The active planet's weather cube (clouds.c, cloudweather.frag): texels a
+   face side (2048: ~6 km on Earth), re-made as its
+   weather maps cross-fade every CLOUD_VOL_REBAKE_BLEND of a map step. The
+   volume's shapes are CLOUD_VOL_SCALE thicknesses across, its extinction
+   CLOUD_VOL_DENSITY x opacity / thickness. */
+#define CLOUD_CUBE_SIZE             2048
+#define CLOUD_VOL_REBAKE_BLEND      0.05
+#define CLOUD_VOL_SCALE             0.7
+#define CLOUD_VOL_DENSITY           1.2
 
 /* ---- Nebula (nebula.c, nebula*.glsl/frag) --------------------------------
    One density function in nebula units n = (p - sun) / NEBULA_RADIUS_M,

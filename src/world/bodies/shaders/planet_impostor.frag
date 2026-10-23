@@ -38,7 +38,7 @@ uniform int glowPass;
 uniform float dotFlux;      // dot: total light (summed over pixels)
 uniform float dotSigma;     // dot: gaussian width, px
 // The cloud layer (Clouds_BindStandIn), once the planet is baked: the same
-// weather maps the full-detail slab draws, at the map's own resolution.
+// weather maps the full-detail clouds are made from, at the map's own resolution.
 uniform float cloudsOn;
 uniform sampler2D cloudMapA;
 uniform sampler2D cloudMapB;
@@ -64,7 +64,7 @@ vec3 fromDisplay(vec3 d)
 #include "world/gasgiant/gasgiant.glsl"
 
 // Cloud cover over body-fixed direction nb seen at cosine mu: alpha and
-// reflectance, as clouds.frag shades a slab from above (map coverage with
+// reflectance of a plane-parallel cloud seen from above (map coverage with
 // the detail at its mean: it is far below a pixel here).
 vec2 standInCloud(vec3 nb, float mu)
 {
@@ -75,7 +75,7 @@ vec2 standInCloud(vec3 nb, float mu)
 	vec2 w = mix(textureLod(cloudMapA, uv, lod).rg, textureLod(cloudMapB, uv, lod).rg, cloudMapBlend);
 	float cov = smoothstep(-cloudEdge, cloudEdge, w.x - 0.5);
 	float tau = cloudOpacity * w.y;
-	float reflectance = 1.0 - 1.0 / (1.0 + 0.1125 * tau);   // clouds.frag's two-stream slab
+	float reflectance = 1.0 - 1.0 / (1.0 + 0.1125 * tau);   // two-stream (cloudlayer.glsl's cloudDiffuseT)
 	return vec2(cov * (1.0 - exp(-tau / max(mu, 0.1))), reflectance);
 }
 

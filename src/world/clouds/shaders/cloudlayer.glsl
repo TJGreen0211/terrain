@@ -1,23 +1,27 @@
-// The cloud layer as the slab (clouds.frag) and the shadow receivers
-// (quad.frag, water.frag) see it: the weather maps and the layer's shape.
-// Uniforms from clouds.c. Needs PI defined first.
+// The cloud layer as its weather bake (cloudweather.frag) and the shadow
+// receivers (quad.frag, water.frag) see it. Uniforms from clouds.c. Needs
+// PI defined first.
 //
-// Weather map texel: R = coverage field + 0.5 (signed: cloud where it is
-// above 0 once the detail noise is added), G = column thickness (fraction of
-// a full column's optical depth), in the climate map's equirect layout over
-// the body-fixed frame.
+// The weather maps (cloudWeather): texel R = coverage field + 0.5 (signed:
+// cloud where it is above 0 once the detail noise is added), G = column
+// thickness (fraction of a full column's optical depth), in the climate
+// map's equirect layout over the body-fixed frame. The volume's weather
+// cube is made from them (cloudweather.frag: r cover, g build height,
+// b thickness); the receivers read the cube, as the clouds do.
 uniform float cloudsOn;
 uniform sampler2D cloudMapA;      // weather at the previous map time ...
 uniform sampler2D cloudMapB;      // ... and the next
 uniform float cloudMapBlend;      // 0 = A, 1 = B
 uniform float cloudMapMaxLod;
 uniform float cloudTexelAngle;    // map texel at the equator, radians
+uniform samplerCube cloudCube;    // the volume's weather
+uniform float cloudCubeTexelM;    // m: a cube texel at the layer
+uniform float cloudCubeMaxLod;
 uniform mat3 cloudWorldToBody;    // world axes -> body-fixed (map) axes
 uniform float cloudRadius;        // layer middle, m from the planet centre
 uniform float cloudThickness;     // m
 uniform float cloudOpacity;       // optical depth of a full column
 uniform float cloudDetail;        // detail noise's pull on the field
-uniform float cloudEdge;          // half-width of a cloud edge, field units
 uniform float cloudPixAngle;      // radians per screen pixel (view centre)
 
 // Diffuse transmission of a plane-parallel cloud of optical depth tau
@@ -26,17 +30,6 @@ uniform float cloudPixAngle;      // radians per screen pixel (view centre)
 float cloudDiffuseT(float tau)
 {
 	return 1.0 / (1.0 + 0.75 * (1.0 - 0.85) * tau);
-}
-
-// Cloud area fraction from the map's field s (texel R) and the detail noise
-// n (0.5 = its mean, where it has faded below a pixel): the field pushed up
-// or down by the detail, thresholded at 0. aa: the field's change across a
-// pixel, so edges anti-alias instead of shimmering.
-float cloudCover(float s, float n, float aa)
-{
-	float f = s - 0.5 + cloudDetail * (n - 0.5);
-	float w = max(cloudEdge, aa);
-	return smoothstep(-w, w, f);
 }
 
 // Weather (coverage, thickness) at body-fixed direction d, blurred to a
@@ -51,8 +44,9 @@ vec2 cloudWeather(vec3 d, float pixAngle)
 	return mix(textureLod(cloudMapA, uv, lod).rg, textureLod(cloudMapB, uv, lod).rg, cloudMapBlend);
 }
 
-// Path factor 1/mu through the slab for a ray at cosine mu to the vertical,
-// capped by the longest chord through a shell this thick (grazing rays).
+// Path factor 1/mu through the layer for a ray at cosine mu to the
+// vertical, capped by the longest chord through a shell this thick
+// (grazing rays).
 float cloudPathFactor(float mu)
 {
 	float maxChord = 2.0 * sqrt(2.0 * cloudRadius * cloudThickness);
@@ -61,7 +55,8 @@ float cloudPathFactor(float mu)
 
 // Fraction of direct sunlight reaching planet-local p (world axes, m) along
 // unit l through the layer above it, with the diffusely transmitted part let
-// back in. Weather map only (no detail octaves): the layer's mean erosion.
+// back in. The weather cube where the sun ray crosses the layer's middle:
+// the share of sky the shapes fill there and their optical depth.
 // footM: the receiver's pixel footprint (m), to blur the lookup.
 float cloudShadow(vec3 p, vec3 l, float footM)
 {
@@ -76,9 +71,10 @@ float cloudShadow(vec3 p, vec3 l, float footM)
 	float c = (r - cloudRadius) * (r + cloudRadius);
 	vec3 q = p + l * (-b + sqrt(max(b * b - c, 0.0)));
 	vec3 up = normalize(q);
-	vec2 w = cloudWeather(cloudWorldToBody * up, footM / cloudRadius);
-	float cov = cloudCover(w.x, 0.5, 0.0);
-	float tau = cloudOpacity * w.y;
+	float lod = clamp(log2(max(footM / cloudCubeTexelM, 1.0)), 0.0, cloudCubeMaxLod);
+	vec4 w = textureLod(cloudCube, cloudWorldToBody * up, lod);
+	float cov = smoothstep(0.2, 0.75, w.r);
+	float tau = cloudOpacity * mix(0.25, 1.0, w.b);
 	float direct = exp(-tau * cloudPathFactor(dot(up, l)));
 	float through = direct + (1.0 - direct) * cloudDiffuseT(tau);
 	return 1.0 - cov * (1.0 - through);

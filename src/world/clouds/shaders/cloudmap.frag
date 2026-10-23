@@ -51,6 +51,8 @@ float latitudeBelts(float absLatDeg)
 // Domain-warped FBM at planet-local p (m) for one flow phase.
 float shapeNoise(vec3 p, vec3 wind, float tau, vec3 seed, float lambda0, int octaves)
 {
+	if (style == STYLE_CLIMATE)
+		p = cloudCyclones(p, seed);
 	vec3 q = p - wind * tau + seed * lambda0;
 	// Warp by low-frequency noise: swirls and fronts instead of round blobs.
 	vec3 wq = q / (lambda0 * 0.7);

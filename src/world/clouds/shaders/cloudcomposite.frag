@@ -4,6 +4,16 @@
 // the low-resolution target: premultiplied, depth-tested against the
 // scene at the clouds' distance (nothing written), times the provider's
 // hand-off (opacity).
+//
+// DOME_AIR (the rocky planets, cloud_volume.h): the clouds are dimmed by
+// the planet's air between them and the camera and get that air's light
+// (the dome's march over the same stretch, converted as the dome converts
+// it), at the clouds' distance; their alpha goes into the target's, so
+// the dome adds the rest of its column times (1 - alpha). A second,
+// depth-only draw (depthOnly) then writes the clouds' depth where they are
+// all but opaque (0.97: the dome's in-scatter ends there, a step it must
+// not show), so what is drawn after them (the ring rocks and dust; the
+// sheet behind the clouds is drawn before them) stays behind.
 
 uniform mat4 projection;
 uniform vec2 fullSize;
@@ -14,8 +24,30 @@ uniform float opacity;
 // calls) as a heat map, red at debugMax, over everything.
 uniform int debugView;
 uniform float debugMax;
+uniform int depthOnly;
 
 out vec4 FragColor;
+
+#ifdef DOME_AIR
+const float PI = 3.14159265359;
+uniform vec3 camCentre;        // camera - body centre, view axes, m
+uniform vec3 sunDirV;          // toward the Sun, view axes
+uniform float atmoHdrGain;     // Atmosphere_HdrGain
+uniform float E;               // the dome's solar brightness
+uniform float G_M;             // Mie asymmetry
+#include "world/atmosphere/atmosurface.glsl"
+vec2 rayIntersection(vec3 p, vec3 dir, float radius)
+{
+	return shellIntersection(p, dir, radius);
+}
+// (No ring shadow on the air in front of the clouds.)
+float scatterRingT(vec3 p, vec3 l)
+{
+	return 1.0;
+}
+#include "world/atmosphere/atmoscatter.glsl"
+#include "engine/gfx/tonemap.glsl"
+#endif
 
 vec3 heat(float x)
 {
@@ -37,12 +69,24 @@ void main()
 		return;
 	}
 	vec4 c = texture(cloudColor, uv) * opacity;
-	if (c.a < 0.004)
+	if (c.a < (depthOnly != 0 ? 0.97 : 0.004))
 		discard;
 	float dist = texture(cloudDepth, uv).r;
 	vec2 ndc = uv * 2.0 - 1.0;
 	vec3 d = normalize(vec3(ndc.x / projection[0][0], ndc.y / projection[1][1], -1.0));
 	vec4 cc = vec4(d * dist, 1.0) * projection;
 	gl_FragDepth = cc.z / cc.w;
+#ifdef DOME_AIR
+	if (depthOnly == 0 && hasAtmosphere > 0.5) {
+		c.rgb = applyAtmosphere(c.rgb, camCentre, camCentre + d * dist);
+		vec2 e = rayIntersection(camCentre, d, fOuterRadius);
+		e.x = max(e.x, 0.0);
+		e.y = min(e.y, dist);
+		if (e.y > e.x) {
+			vec3 air = inScatter(camCentre, d, e, sunDirV, 1.0 / fScaleHeight, 1.0 / (fOuterRadius - fInnerRadius));
+			c.rgb += sceneFromDisplay(air) * atmoHdrGain * c.a;
+		}
+	}
+#endif
 	FragColor = c;
 }

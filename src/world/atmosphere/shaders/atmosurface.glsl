@@ -1,4 +1,4 @@
-// Atmosphere as seen by lit surfaces (quad.frag, water.frag, clouds.frag):
+// Atmosphere as seen by lit surfaces (quad.frag, water.frag, the clouds):
 // extinction toward the camera, the sun's colour after its path through the
 // air, and the skylight fraction. Needs PI defined first. Uniforms are set
 // by setAtmosphereExtinction (atmosphere.c).

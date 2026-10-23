@@ -42,6 +42,7 @@ uniform float layerStretch[MAX_LAYERS];
 uniform float layerStreaks[MAX_LAYERS];
 uniform float layerCarpet[MAX_LAYERS];
 uniform float layerPlume[MAX_LAYERS];
+uniform float layerBroad[MAX_LAYERS];   // the broad regions' pull on the cover
 uniform vec3 layerTint[MAX_LAYERS];
 uniform float plumeLo, plumeHi;   // m: the band a plume can be in
 uniform int plumeLayer;           // the layer with plumes (when plumeLo is reachable)
@@ -72,6 +73,99 @@ float remap(float v, float lo, float hi, float nlo, float nhi)
 	return nlo + (v - lo) / (hi - lo) * (nhi - nlo);
 }
 
+#ifdef DOME_AIR
+// A planet's one cloud layer (layer 0; cloud_volume.h), the same at every
+// distance. Its weather is a body-fixed cube map (r cover, g how high the
+// clouds build, b optical thickness, a wispiness: away from the weather
+// systems the shapes erode more and stay wispy to the top) and its shapes
+// are the giants':
+// Perlin-Worley noise under a height profile, the tops raised and lowered
+// by broad dome cells, filled solid where the cover is full, thinning
+// toward the top, eroded by the detail noise (wispy low, billowy high).
+// Everything is placed in body coordinates, so the clouds never move as
+// the camera does.
+//
+// Where the noise is finer than a pixel (its mips blur it to its mean) the
+// shapes give way to their density averaged over the noise (expectTable,
+// measured from the noise itself in cloud_volume.c), so a field of small
+// clouds seen from orbit is a veil of the same mean optical depth as the
+// clouds it stands for (not the threshold of a blurred noise, nor more),
+// and the clouds don't change as the camera comes closer. The erosion
+// fades to its mean the same way.
+uniform samplerCube weatherCube;
+uniform float weatherTexelM;      // m: a texel at the reference radius
+uniform float weatherMaxLod;
+uniform vec3 mapOrigin;           // body centre -> rel's origin, body axes, m
+uniform vec3 cloudAlbedo;         // linear
+uniform sampler3D expectTable;    // mean density by (cover, profile, fill / expectFillMax)
+uniform vec3 expectSize;          // its texels on each axis
+uniform float expectFillMax;
+
+float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out float base)
+{
+	alb = cloudAlbedo * layerTint[0];
+	base = 0.0;
+	if (a <= shellLo || a >= shellHi)
+		return 0.0;
+	vec3 p = rel + mapOrigin;
+	float lod = clamp(log2(max(foot / weatherTexelM, 1.0)), 0.0, weatherMaxLod);
+	vec4 w = textureLod(weatherCube, p, lod);
+	float sc = layerScale[0];
+	vec3 np = p / sc;
+	// Cells ~4 shape periods across fray the systems' edges (most where
+	// the cover is half), as stratocumulus cells do; mipped by footprint,
+	// so they are the same pattern from orbit.
+	float lodM = log2(max(foot / (sc * 4.0 / 128.0), 1.0));
+	float cells = textureLod(shapeNoise, np * 0.25 + vec3(0.71, 0.23, 0.47), lodM).g;
+	float cover = clamp(w.r + (cells - 0.5) * 2.4 * w.r * (1.0 - w.r), 0.0, 1.0) * layerCoverage[0];
+	if (cover <= 0.01)
+		return 0.0;
+	float hf = (a - layerBase[0]) / (layerTop[0] - layerBase[0]);
+	// Domes and hollows: cells ~9 shape periods across raise and lower the
+	// tops (a cone per cell, made round).
+	float lodC = log2(max(foot / (sc / 0.11 / 128.0), 1.0));
+	float cell = 1.0 - textureLod(shapeNoise, np * 0.11 + vec3(0.31, 0.57, 0.13), lodC).g;
+	float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
+	float topF = clamp(mix(0.3, 1.0, w.g) * (0.55 + 0.5 * dome), 0.12, 1.0);
+	if (hf >= topF)
+		return 0.0;
+	float hc = hf / topF;   // up the cloud, 0 at the base, 1 at its top
+	float cov = cover * (1.0 - 0.45 * smoothstep(0.35, 1.0, hc));
+	// Flat-ish bases, rounded tops.
+	float prof = smoothstep(0.0, 0.06, hf) * (1.0 - smoothstep(topF * 0.6, topF, hf));
+	// Full cover fills in (no holes through a mass), less up top.
+	float fill = 0.6 * smoothstep(0.45, 1.0, cover) * (1.0 - smoothstep(0.4, 0.8, hc));
+	float lodS = log2(max(foot / (sc / 128.0), 1.0));
+	vec4 sn = textureLod(shapeNoise, np, lodS);
+	float wfbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
+	float shape = clamp((remap(sn.r, wfbm - 1.0, 1.0, 0.0, 1.0) - 0.5) / 0.45, 0.0, 1.0);
+	shape = mix(shape, 1.0, fill);
+	float d = clamp(remap(shape * prof, 1.0 - cov, 1.0, 0.0, 1.0), 0.0, 1.0) * cov;
+	// Far off, its mean over the noise.
+	float far = smoothstep(1.0, 3.0, lodS);
+	if (far > 0.0) {
+		vec3 e = vec3(cov, prof, fill / expectFillMax);
+		float m = textureLod(expectTable, (e * (expectSize - 1.0) + 0.5) / expectSize, 0.0).r;
+		d = mix(d, m, far);
+	}
+	if (d <= 0.0)
+		return 0.0;
+	float dens = layerDensity[0] * mix(0.08, 1.0, w.b);
+	base = d * dens;
+	if (detail && layerErosion[0] > 0.0) {
+		float lodD = log2(max(foot / (sc * detailScale / 32.0), 1.0));
+		vec3 dp = np / detailScale + vec3(sn.g - 0.5, sn.b - 0.5, sn.a - 0.5) * 1.2;
+		vec3 dn = textureLod(detailNoise, dp, lodD).rgb;
+		float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
+		// Wispy (the base's pattern) all the way up away from the systems.
+		float dmod = mix(dfbm, 1.0 - dfbm, clamp(hc * 4.0, 0.0, 1.0) * (1.0 - w.a));
+		dmod = mix(dmod, 0.5, smoothstep(1.0, 3.0, lodD));
+		float er = layerErosion[0] * mix(1.0, 1.2, w.a);
+		d = clamp(remap(d, dmod * er * 0.6, 1.0, 0.0, 1.0), 0.0, 1.0);
+	}
+	return d * dens;
+}
+#else
 // Cloud extinction (1/m) at rel (body axes, m from the map's centre on the
 // reference sphere), altitude a; foot: a pixel there (m), for the noise
 // mips; detail: with the edge erosion. alb: the albedo there (linear).
@@ -155,7 +249,7 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		// swept east-west), so the shape noise's tiling never shows.
 		vec2 big = vec2(xy.x / (layerSweep[i] * 1.6), xy.y) / (sc * 5.3) + vec2(0.31, 0.77) * float(i);
 		float broad = textureLod(shapeSlices, big, 0.0).r;
-		float cover = clamp((i == 0 ? w.r : w.g) * layerCoverage[i] + (broad - 0.67) * 1.6, 0.0, 1.0);
+		float cover = clamp((i == 0 ? w.r : w.g) * layerCoverage[i] + (broad - 0.67) * layerBroad[i], 0.0, 1.0);
 		cover = max(cover, cw.a);
 		// The carpet: low billows over the layer's lowest part, in patches
 		// (thicker and higher in some, thin in others) a few shape periods
@@ -291,6 +385,8 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		alb = albSum / total;
 	return total;
 }
+
+#endif
 
 float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 {

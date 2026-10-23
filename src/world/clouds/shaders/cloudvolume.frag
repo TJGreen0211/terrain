@@ -32,6 +32,13 @@
 //
 // The march ends where the air has hidden everything (optical depth 5) or
 // at the reach, whichever is nearer.
+//
+// DOME_AIR (the rocky planets, cloud_volume.h): no air here. The Sun's
+// light is sunColor through the planet's shell (sunTransmittance, as the
+// ground gets it: reddened, then set behind the limb) times the wrapped
+// cosine of its height (as the ground's Lambert term), the skylight
+// follows it through twilight (skyFraction), and the composite adds the
+// air in front.
 
 uniform mat4 projection;
 uniform vec2 lowSize;          // this target, px
@@ -100,6 +107,14 @@ layout(location = 1) out float OutDepth;
 
 const float PI = 3.14159265;
 const float NONE = 1e9;
+
+#ifdef DOME_AIR
+uniform vec3 sunColor;         // linear
+uniform float sunAngle;        // the Sun's angular radius
+// The shell is a sphere about the body's centre: its functions work in
+// view axes as well as in world axes.
+#include "world/atmosphere/atmosurface.glsl"
+#endif
 
 vec3 gD;          // the view ray
 float gRc, gB;    // camera's distance from the centre; its dot with the ray
@@ -404,15 +419,22 @@ void marchPixel()
 			tDeck = NONE;
 	}
 	t1 = min(min(t1, tDeck), min(tScene, maxDistance));
+#ifndef DOME_AIR
 	t1 = min(t1, airReach(t1));
+#endif
 	if (t1 <= t0 && tDeck >= NONE)
 		return;
 	t1 = max(t1, t0);
 	gInShell = 1;
 
 	float cosT = dot(gD, sunDir);
+#ifdef DOME_AIR
+	vec3 skyLin = skyColor * skyGain;
+	vec3 groundLin = groundColor * groundGain;
+#else
 	vec3 skyLin = displayToLinear(skyColor) * skyGain;
 	vec3 groundLin = displayToLinear(groundColor) * groundGain;
+#endif
 	vec3 airLin = displayToLinear(airAlbedo);
 	vec3 deckLin = displayToLinear(deckColor);
 	float phA = mix(1.0, hg(cosT, 0.6) / hg(0.0, 0.6), airForward);
@@ -420,7 +442,11 @@ void marchPixel()
 	// then the air in the shell, step by step: A0 its in-scatter, A1 the
 	// same times the clouds' transmittance in front of each bit. Ta: the
 	// air's transmittance so far.
+#ifdef DOME_AIR
+	vec4 air0 = vec4(0.0, 0.0, 0.0, 1.0);
+#else
 	vec4 air0 = t0 > 0.0 ? airTo(t0, phA, airLin) : vec4(0.0, 0.0, 0.0, 1.0);
+#endif
 	float Ta = air0.a;
 	vec3 A0 = vec3(0.0), A1 = vec3(0.0);
 
@@ -441,6 +467,9 @@ void marchPixel()
 		float r = sqrt(gRc * gRc + 2.0 * gB * t + t * t);
 		float a = (camAlt * (2.0 * radius + camAlt) + 2.0 * gB * t + t * t) / (r + radius);
 
+#ifdef DOME_AIR
+		const float TaS = 1.0;
+#else
 		// The air over this step; the sample sees it up to its own point.
 		float sa;
 		vec3 Ja = airLight(t, r, a, phA, airLin, sa);
@@ -452,6 +481,7 @@ void marchPixel()
 		A0 += dA;
 		A1 += T * dA;
 		Ta *= extA;
+#endif
 
 		vec3 pv = gD * t;
 		float foot = t * gPixA;
@@ -483,8 +513,15 @@ void marchPixel()
 			continue;
 		}
 
+#ifdef DOME_AIR
+		// Times the sun's height there (wrapped a little): a deck's tops are
+		// lit as the ground under them, dimming toward the terminator.
+		vec3 sunE = sunColor * sunTransmittance(camUp * gRc + pv, sunDir, sunAngle)
+		          * clamp((mus + wrap) / (1.0 + wrap), 0.0, 1.0);
+#else
 		float tauAir = airColumn * exp(-max(a, 0.0) / airScaleHeight) * airMass(mus);
 		vec3 sunE = sunlight(mus, wrap) * exp(-tauAir) * deckShade(a);
+#endif
 
 		// The short march for the cloud nearby; the shadow map for clouds
 		// farther up the Sun's ray, from where the march ends. The map has
@@ -520,7 +557,11 @@ void marchPixel()
 		float tauU = densityV(pv + upS * 400.0, a + 400.0, foot, false, albU) * 600.0
 		           + densityV(pv + upS * 1600.0, a + 1600.0, foot, false, albU) * 1800.0;
 		float occ = mix(0.35, 1.0, exp(-0.5 * tauU));
+#ifdef DOME_AIR
+		vec3 amb = (skyLin * (0.4 + 0.6 * hs) * occ + groundLin * (1.0 - hs)) * ambient * skyFraction(mus) + NIGHT_FLOOR;
+#else
 		vec3 amb = (skyLin * (0.4 + 0.6 * hs) * occ + groundLin * (1.0 - hs)) * ambient * sunlight(mus, 2.0 * wrap);
+#endif
 		// x2: thick cloud reflects about like a sunlit Lambert surface
 		// (what the provider's own deck uses), not half as much.
 		vec3 S = alb * (2.0 * sunE * Ls * pw + amb * hue);

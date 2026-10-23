@@ -46,7 +46,25 @@
    around the camera, CLOUDVOL_SHADOW_SIZE texels a side) shadows the air
    in and under the layers, so sunlight through gaps makes shafts. The
    march uses it; a provider's own air pass can too (CloudVolume_BindShadow
-   with cloudshadowmap.glsl). */
+   with cloudshadowmap.glsl).
+
+   Planets (CloudVolumeScene.domeAir, the rocky planets): one layer over
+   the whole body, the same clouds from the ground to orbit. Its weather is
+   a body-fixed cube map (weatherCube) instead of the local map, and its
+   shapes are placed in body coordinates, so nothing re-centres or swaps
+   with distance (no weather bake here; the map frame only places the
+   shadow map). The air is the O'Neill shell of world/atmosphere instead
+   of the exponential air. The march, shadow map and composite are then
+   compiled with DOME_AIR: the Sun is reddened and set by sunTransmittance
+   as on the ground, the march adds no air, and the composite dims the
+   clouds by the air in front of them, adds that air's light and leaves
+   their cover in the target's alpha, so the dome drawn after them adds
+   the rest of its column times (1 - alpha). The provider sets the shell's
+   uniforms (atmosurface.glsl) with airUniforms.
+
+   One provider draws per frame (the camera is in one place): the history
+   and the shadow map are dropped by CloudVolume_BeginFrame when no scene
+   was drawn last frame. */
 
 #define CLOUDVOL_MAX_LAYERS  2
 #define CLOUDVOL_MAP_SIZE    2048
@@ -70,6 +88,8 @@ typedef struct CloudVolumeLayer {
 	float carpet;          /* cover of low billows filling the layer's lowest part, 0..1 */
 	float plume;           /* anvil plumes streaming downwind from the storm cells, 0..1
 	                          (one layer only: the first with plume > 0) */
+	float broad;           /* pull of the broad regions (~5 shape periods) on the cover:
+	                          thick and clear patches the map does not have */
 } CloudVolumeLayer;
 
 /* A point light in the clouds (lightning). Its light falls off over
@@ -124,6 +144,22 @@ typedef struct CloudVolumeScene {
 	double reach;          /* m: how far the march reaches (0: CloudVolume_Reach) */
 	int flashCount;
 	CloudVolumeFlash flashes[CLOUDVOL_MAX_FLASHES];
+	/* A planet (above): the air* and terminator settings are then unused
+	   (wrap wraps the Sun's cosine), skyColor / groundColor are linear, the
+	   layer's albedo is albedo, and mapCenter / East / North only place the
+	   shadow map (no extent; reach 0: no limit). */
+	int domeAir;
+	GLuint weatherCube;    /* body-fixed: r cover, g how high the clouds build (0..1 of
+	                          the layer), b optical thickness (0..1), a wispiness (1 away
+	                          from weather systems: eroded more); mipmapped */
+	int weatherCubeSize;   /* texels a face side */
+	double weatherTexelM;  /* m: a texel at the reference radius */
+	float albedo[3];       /* linear */
+	float sunColor[3];     /* the Sun's light on the clouds (linear, before the air) */
+	float sunAngle;        /* its angular radius (rad): it sets behind the limb */
+	/* Sets atmosurface.glsl's uniforms on the program in use (the march's
+	   and the composite's), shell centred on the reference sphere's. */
+	void (*airUniforms)(GLuint program);
 } CloudVolumeScene;
 
 /* Quality and look shared by every body (debug panel). */
@@ -147,7 +183,8 @@ CloudVolumeParams *CloudVolume_Params(void);
 
 /* --cloud-debug <n>: start with debugView n and log the march's mean
    steps and density calls per pixel (every DEBUG_STATS_EVERY frames) on
-   stderr. --cloud-block <n>: start with temporalBlock n. */
+   stderr. --cloud-block <n>: start with temporalBlock n. --cloud-volume
+   <0|1>: start with the volume off or on. */
 void CloudVolume_ParseArgs(int argc, char *argv[]);
 
 /* How far the march reaches (m): the Max distance setting, or farther
@@ -161,6 +198,9 @@ double CloudVolume_Reach(double aboveLayers, double mapExtent);
 
 /* Programs, noise volumes and the weather map (GL up). */
 void CloudVolume_Init(void);
+/* Once per frame, before any provider: drops the shadow map, and the
+   history if no scene was drawn last frame. */
+void CloudVolume_BeginFrame(void);
 /* The main pass's depth (render.c, on a resize). */
 void CloudVolume_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
 
@@ -180,8 +220,8 @@ void CloudVolume_EndWeatherBake(int body, dvec3 mapCenter, double mapExtent, dou
 void CloudVolume_Invalidate(void);
 
 /* Rebuilds the shadow map for this frame's scene (before anything reads
-   it: the provider's air pass, then CloudVolume_Draw). Off when disabled
-   or s->fade is 0. */
+   it: the provider's air pass, then CloudVolume_Draw). Nothing when
+   disabled or s->fade is 0 (the map stays off this frame). */
 void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s);
 /* Sets cloudshadowmap.glsl's uniforms on the program in use, with the map
    on texture unit `unit` (csOn = 0 when there is no map this frame). */

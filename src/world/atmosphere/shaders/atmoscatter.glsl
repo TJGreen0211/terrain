@@ -1,6 +1,6 @@
 // The O'Neill single-scattering march (GPU Gems 2 ch. 16; the OpenGLSolar
 // port), shared by the atmosphere dome (atmosphere.frag) and the clouds,
-// which add the air in front of them (clouds.frag). The includer declares
+// which add the air in front of them (cloudcomposite.frag). The includer declares
 // fInnerRadius, fOuterRadius, C_R, K_R, K_M, G_M, E and PI, includes
 // atmodensity.glsl, and defines
 //   vec2 rayIntersection(vec3 p, vec3 dir, float radius)   (near, far)

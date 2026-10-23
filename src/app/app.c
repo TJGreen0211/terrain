@@ -185,6 +185,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	Bench_ParseArgs(argc, argv);
 	Nebula_ParseArgs(argc, argv);
 	CloudVolume_ParseArgs(argc, argv);
+	Clouds_ParseArgs(argc, argv);
 	int benchW = 0, benchH = 0;
 	int benchSize = Bench_FixedWindowSize(&benchW, &benchH);
 	GLFWwindow *window = Window_Create(benchSize ? "Bench" : "Shadows", benchW, benchH);

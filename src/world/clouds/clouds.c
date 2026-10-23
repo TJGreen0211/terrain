@@ -3,12 +3,10 @@
 #include "world/clouds/cloud_volume.h"
 #include "world/bodies/solar_system.h"
 #include "world/atmosphere/atmosphere.h"
-#include "world/rings/rings.h"
 #include "engine/platform/window.h"
 #include "world/WorldConfig.h"
 #include <math.h>
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include "engine/debug/debug_gui.h"
 #include "engine/debug/nk.h"
@@ -32,12 +30,19 @@
 }
 
 static cloudParams g_clouds = CLOUD_DEFAULTS;
-static int g_cloudSlabOctaves = CLOUD_SLAB_OCTAVES;
+static int g_cloudDetailOctaves = CLOUD_DETAIL_OCTAVES;
 static int g_cloudsEnabled = CLOUDS_ENABLED_DEFAULT;
 
 cloudParams * Clouds_Params(void)
 {
 	return &g_clouds;
+}
+
+void Clouds_ParseArgs(int argc, char *argv[])
+{
+	for (int i = 1; i < argc; i++)
+		if (strcmp(argv[i], "--clouds") == 0 && i + 1 < argc)
+			g_cloudsEnabled = atoi(argv[++i]) != 0;
 }
 
 cloudParams Clouds_Defaults(void)
@@ -52,39 +57,34 @@ const char *Clouds_StyleName(int style)
 	return style >= 0 && style < CLOUD_STYLE_COUNT ? names[style] : "?";
 }
 
-/* Texture units. Receivers (quad / water): 0-13 are taken. The slab and
-   the stand-ins have their own programs: 0-2, and the ring profile on 9
-   (Rings_BindReceiver). */
-#define RECEIVER_UNIT_A 14
-#define RECEIVER_UNIT_B 15
-#define SLAB_UNIT_A     0
-#define SLAB_UNIT_B     1
-#define SLAB_UNIT_WIND  2
-#define SLAB_UNIT_NOISE 3
+/* Texture units. Receivers (quad / water): 0-13 are taken. The stand-ins
+   have their own program: 0-1. */
+#define RECEIVER_UNIT   14
 #define MAP_UNIT_NOISE  2
 /* Value-noise lattice (cloudnoise.glsl): texels per side, repeating. */
 #define CLOUD_NOISE_SIZE 256
 /* terrain_gen.c's ocean map stores wind speed / WIND_MAX_MS. */
 #define WIND_MAP_MAX_MS 20.0f
 
-static GLuint mapProgram;
-/* The slab, one program per detail octave count (SLAB_OCTAVES), built when
-   first needed: the count is a compile-time loop bound (clouds.frag). */
-#define MAX_SLAB_OCTAVES 12
-static GLuint slabPrograms[MAX_SLAB_OCTAVES + 1];
+static GLuint mapProgram, cubeProgram;
+#define MAX_DETAIL_OCTAVES 12
 static GLuint mapFBO, emptyVAO, noiseTex;
 static int mapW, mapH;
 static float mapMaxLod;
 
 /* A planet's two newest weather maps: tex[0] at step * CLOUD_MAP_STEP_S,
-   tex[1] one step later, and the settings they were built with. */
+   tex[1] one step later, and the settings they were built with. serial:
+   new with every build (from mapSerial), so the weather cube, made from
+   these, knows when they changed. */
 typedef struct CloudMaps {
 	GLuint tex[2];
 	long long step;
 	int ready;
+	unsigned int serial;
 	cloudParams built;
 } CloudMaps;
 static CloudMaps maps[BODY_COUNT];
+static unsigned int mapSerial;
 static double frameTime;
 
 /* The active planet's state is in the globals; the rest in PlanetInfo. */
@@ -116,6 +116,7 @@ static unsigned long long mix64(unsigned long long z)
 void Clouds_Init(void)
 {
 	Shader_Create(&mapProgram, "world/clouds/cloudmap.vert", "world/clouds/cloudmap.frag");
+	Shader_Create(&cubeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudweather.frag");
 
 	mapW = CLOUD_MAP_WIDTH;
 	mapH = CLOUD_MAP_WIDTH / 2;
@@ -290,6 +291,7 @@ static void updateBody(int body, int *budget)
 		m->tex[1] = t;
 		m->step = k;
 		buildMap(body, m->tex[1], (k + 1) * CLOUD_MAP_STEP_S);
+		m->serial = ++mapSerial;
 		*budget -= 1;
 		return;
 	}
@@ -304,6 +306,7 @@ static void updateBody(int body, int *budget)
 	m->step = k;
 	m->built = *c;
 	m->ready = 1;
+	m->serial = ++mapSerial;
 	*budget -= 2;
 }
 
@@ -339,7 +342,7 @@ void Clouds_Update(double simTime)
 	if (cull) glEnable(GL_CULL_FACE);
 }
 
-/* ---- Uniforms shared by the slab, receivers and stand-ins -------------- */
+/* ---- Uniforms shared by the bake, receivers and stand-ins ---------------- */
 
 static float mapBlend(const CloudMaps *m)
 {
@@ -361,7 +364,8 @@ static void bindMaps(GLuint s, const CloudMaps *m, int unitA, int unitB)
 	glUniform1f(glGetUniformLocation(s, "cloudTexelAngle"), (float)(2.0 * M_PI / mapW));
 }
 
-/* Half-width of a cloud edge in coverage-field units: soft to hard. */
+/* Half-width of a cloud edge in coverage-field units (the stand-ins):
+   soft to hard. */
 static float cloudEdge(const cloudParams *c)
 {
 	return 0.06f + (0.004f - 0.06f) * c->sharpness;
@@ -373,16 +377,178 @@ static float pixelAngle(void)
 	return (float)(2.0 * tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0) / Window_Height());
 }
 
-/* cloudlayer.glsl's uniforms. */
-static void setLayerUniforms(GLuint s, int body, int unitA, int unitB)
+/* ---- The weather cube (cloudweather.frag) ---------------------------------
+   The active planet's weather for the volume, over the whole body: made
+   from its weather maps and their detail noise. Made whole for a new
+   planet or new settings; as the maps move on in time (a new build,
+   CLOUD_VOL_REBAKE_BLEND of their cross-fade) re-made a face a frame, so
+   the cost is spread (a pass moves the weather only that little, so faces
+   a frame apart don't show), the mips at the pass's end. */
+
+static GLuint cubeTex, cubeFBO;
+/* The next face a re-make pass makes (6: no pass). */
+static int cubeFace = 6;
+static int cubeBody = -1;
+static unsigned int cubeSerial;
+static float cubeBlend;
+static int cubeOctaves;
+static cloudParams cubeParams;
+
+/* The first detail octave's wavelength: ~4 map texels at the layer. */
+static double detailLambda0(int body)
+{
+	return 4.0 * 2.0 * M_PI * (Bodies_Get(body)->radius + paramsFor(body)->altitude) / mapW;
+}
+
+/* Detail octaves for body: g_cloudDetailOctaves, fewer where they would go
+   below CLOUD_DETAIL_MIN_WAVELENGTH_M. */
+static int detailOctaves(int body)
+{
+	int want = g_cloudDetailOctaves < 0 ? 0 : (g_cloudDetailOctaves > MAX_DETAIL_OCTAVES ? MAX_DETAIL_OCTAVES : g_cloudDetailOctaves);
+	double lambda0 = detailLambda0(body);
+	int octaves = want > 0 ? 1 : 0;
+	while (octaves < want && lambda0 / pow(2.0, octaves) >= CLOUD_DETAIL_MIN_WAVELENGTH_M)
+		octaves++;
+	return octaves;
+}
+
+/* A cube texel at the centre of a face, m, on a sphere of radius r. */
+static double cubeTexelM(double r)
+{
+	return 2.0 * r / CLOUD_CUBE_SIZE;
+}
+
+static int cubeReady(int body)
+{
+	return cubeTex && cubeBody == body && maps[body].ready;
+}
+
+/* Makes faces f0 .. f1 - 1 (the mips too when f1 is 6). */
+static void bakeCubeFaces(int body, int f0, int f1)
+{
+	const cloudParams *c = paramsFor(body);
+	const CloudMaps *m = &maps[body];
+	int n = CLOUD_CUBE_SIZE;
+	if (!cubeTex) {
+		glGenTextures(1, &cubeTex);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, cubeTex);
+		for (int f = 0; f < 6; f++)
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, GL_RGBA8, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+		glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+		glGenFramebuffers(1, &cubeFBO);
+	}
+
+	GLint fbo, vp[4];
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+	glGetIntegerv(GL_VIEWPORT, vp);
+	GLboolean depth = glIsEnabled(GL_DEPTH_TEST), blend = glIsEnabled(GL_BLEND);
+	GLboolean cull = glIsEnabled(GL_CULL_FACE), scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_FRAMEBUFFER, cubeFBO);
+	glViewport(0, 0, n, n);
+
+	GLuint p = cubeProgram;
+	glUseProgram(p);
+	bindMaps(p, m, 0, 1);
+	double rc = Bodies_Get(body)->radius + c->altitude;
+	glUniform1f(glGetUniformLocation(p, "faceSize"), (float)n);
+	glUniform1f(glGetUniformLocation(p, "texelM"), (float)cubeTexelM(rc));
+	glUniform1f(glGetUniformLocation(p, "cloudRadius"), (float)rc);
+	glUniform1f(glGetUniformLocation(p, "cloudDetail"), c->detail);
+	FlowPhases fl = flowAt(frameTime, c);
+	setFlowUniforms(p, &fl);
+	bindNoise(p, 2);
+	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, genFor(body)->oceanTex);
+	glUniform1i(glGetUniformLocation(p, "cloudWind"), 3);
+	glUniform1f(glGetUniformLocation(p, "windMax"), WIND_MAP_MAX_MS);
+	glUniform1f(glGetUniformLocation(p, "detailLambda0"), (float)detailLambda0(body));
+	glUniform1i(glGetUniformLocation(p, "detailOctaves"), detailOctaves(body));
+	glUniform1i(glGetUniformLocation(p, "cyclonesOn"), c->style == CLOUD_STYLE_CLIMATE);
+	glBindVertexArray(emptyVAO);
+	for (int f = f0; f < f1; f++) {
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, cubeTex, 0);
+		glUniform1i(glGetUniformLocation(p, "face"), f);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+	}
+	glBindVertexArray(0);
+	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	if (f1 >= 6) {
+		glBindTexture(GL_TEXTURE_CUBE_MAP, cubeTex);
+		glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
+	glViewport(vp[0], vp[1], vp[2], vp[3]);
+	if (depth) glEnable(GL_DEPTH_TEST);
+	if (blend) glEnable(GL_BLEND);
+	if (cull) glEnable(GL_CULL_FACE);
+	if (scissor) glEnable(GL_SCISSOR_TEST);
+}
+
+/* Records what the cube is (being) made from. */
+static void setCubeKey(int body)
+{
+	cubeBody = body;
+	cubeSerial = maps[body].serial;
+	cubeBlend = mapBlend(&maps[body]);
+	cubeOctaves = detailOctaves(body);
+	cubeParams = *paramsFor(body);
+}
+
+/* Brings the cube up to date with body's weather (see above). */
+static void updateCube(int body)
 {
 	const CloudMaps *m = &maps[body];
-	glUniform1f(glGetUniformLocation(s, "cloudsOn"), m->ready ? 1.0f : 0.0f);
-	if (!m->ready)
+	if (!cubeTex || cubeBody != body || cubeOctaves != detailOctaves(body)
+	    || memcmp(&cubeParams, paramsFor(body), sizeof cubeParams) != 0) {
+		setCubeKey(body);
+		bakeCubeFaces(body, 0, 6);
+		cubeFace = 6;
+		return;
+	}
+	if (cubeFace >= 6 && (cubeSerial != m->serial || fabsf(mapBlend(m) - cubeBlend) > CLOUD_VOL_REBAKE_BLEND)) {
+		setCubeKey(body);
+		cubeFace = 0;
+	}
+	if (cubeFace < 6) {
+		bakeCubeFaces(body, cubeFace, cubeFace + 1);
+		cubeFace++;
+	}
+}
+
+/* cloudlayer.glsl's uniforms (the receivers' shadow). */
+static void setLayerUniforms(GLuint s, int body, int unit)
+{
+	int on = cubeReady(body);
+	glUniform1f(glGetUniformLocation(s, "cloudsOn"), on ? 1.0f : 0.0f);
+	if (!on)
 		return;
 	const cloudParams *c = paramsFor(body);
 	const Body *b = Bodies_Get(body);
-	bindMaps(s, m, unitA, unitB);
+	glActiveTexture(GL_TEXTURE0 + unit);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, cubeTex);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(glGetUniformLocation(s, "cloudCube"), unit);
+	glUniform1f(glGetUniformLocation(s, "cloudCubeTexelM"), (float)cubeTexelM(b->radius + c->altitude));
+	glUniform1f(glGetUniformLocation(s, "cloudCubeMaxLod"), (float)log2((double)CLOUD_CUBE_SIZE));
 	/* World -> body-fixed: the transpose of the body's rotation (its
 	   columns are the body axes in world coordinates). Column-major upload:
 	   element (row i, column k) at k * 3 + i. */
@@ -394,135 +560,120 @@ static void setLayerUniforms(GLuint s, int body, int unitA, int unitB)
 	glUniform1f(glGetUniformLocation(s, "cloudRadius"), (float)(b->radius + c->altitude));
 	glUniform1f(glGetUniformLocation(s, "cloudThickness"), c->thickness);
 	glUniform1f(glGetUniformLocation(s, "cloudOpacity"), c->opacity);
-	glUniform1f(glGetUniformLocation(s, "cloudDetail"), c->detail);
-	glUniform1f(glGetUniformLocation(s, "cloudEdge"), cloudEdge(c));
 	glUniform1f(glGetUniformLocation(s, "cloudPixAngle"), pixelAngle());
 }
 
 void Clouds_BindReceiver(GLuint shader, int body)
 {
-	setLayerUniforms(shader, body, RECEIVER_UNIT_A, RECEIVER_UNIT_B);
+	setLayerUniforms(shader, body, RECEIVER_UNIT);
 }
 
-/* World vector -> view space (the view matrix's rows are the camera axes). */
-static dvec3 toView(mat4 view, dvec3 w)
+/* ---- The volume over the active planet (cloud_volume.c) -----------------
+   The layer is drawn by the shared cloud volume, from the ground to orbit:
+   one layer over the layer's thickness, its weather the cube above. */
+
+static CloudVolumeScene volScene;
+
+static dvec3 dcross(dvec3 a, dvec3 b)
 {
-	dvec3 v;
-	v.x = view.m[0][0] * w.x + view.m[0][1] * w.y + view.m[0][2] * w.z;
-	v.y = view.m[1][0] * w.x + view.m[1][1] * w.y + view.m[1][2] * w.z;
-	v.z = view.m[2][0] * w.x + view.m[2][1] * w.y + view.m[2][2] * w.z;
-	return v;
+	return (dvec3){ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
 }
 
-/* The first detail octave's wavelength: ~4 map texels at the layer. */
-static double detailLambda0(int body)
+static dvec3 dnormal(dvec3 v)
 {
-	return 4.0 * 2.0 * M_PI * (Bodies_Get(body)->radius + paramsFor(body)->altitude) / mapW;
+	return dscalarvec3(v, 1.0 / dlengthvec3(v));
 }
 
-/* Detail octaves for body: g_cloudSlabOctaves, fewer where they would go
-   below CLOUD_DETAIL_MIN_WAVELENGTH_M. */
-static int slabOctaves(int body)
+/* World -> body-fixed (rotation is body -> world). */
+static dvec3 toBody(dmat4 rot, dvec3 w)
 {
-	int want = g_cloudSlabOctaves < 0 ? 0 : (g_cloudSlabOctaves > MAX_SLAB_OCTAVES ? MAX_SLAB_OCTAVES : g_cloudSlabOctaves);
-	double lambda0 = detailLambda0(body);
-	int octaves = want > 0 ? 1 : 0;
-	while (octaves < want && lambda0 / pow(2.0, octaves) >= CLOUD_DETAIL_MIN_WAVELENGTH_M)
-		octaves++;
-	return octaves;
+	dvec3 r;
+	r.x = rot.m[0][0] * w.x + rot.m[1][0] * w.y + rot.m[2][0] * w.z;
+	r.y = rot.m[0][1] * w.x + rot.m[1][1] * w.y + rot.m[2][1] * w.z;
+	r.z = rot.m[0][2] * w.x + rot.m[1][2] * w.y + rot.m[2][2] * w.z;
+	return r;
 }
 
-static GLuint slabProgram(int octaves)
+/* The dome's uniforms on the volume's programs (cloud_volume.h). */
+static void volumeAir(GLuint program)
 {
-	if (!slabPrograms[octaves]) {
-		char defines[64];
-		snprintf(defines, sizeof defines, "#define SLAB_OCTAVES %d\n", octaves);
-		Shader_CreateDefines(&slabPrograms[octaves], "world/clouds/clouds.vert", "world/clouds/clouds.frag", defines);
-		Rings_AttachReceiver(slabPrograms[octaves]);
-	}
-	return slabPrograms[octaves];
+	Atmosphere_SetExtinction(program, (float)volScene.radius, Atmosphere_Params());
 }
 
-/* Everything the slab program needs; it is bound by the caller. */
-static void setSlabUniforms(GLuint s, mat4 proj, mat4 view, dvec3 cam, int body)
+void Clouds_PrepareVolume(const FrameContext *f, int body)
 {
+	CloudVolumeScene *sc = &volScene;
+	memset(sc, 0, sizeof *sc);
+	sc->body = -1;
+	if (body < 0 || !maps[body].ready)
+		return;
 	const cloudParams *c = paramsFor(body);
-	const Body *b = Bodies_Get(body);
-	double R = b->radius, Rc = R + c->altitude;
-	dvec3 rel = dsubvec3(b->position, cam);
-	double d = dlengthvec3(rel);
-	dvec3 cv = toView(view, rel);
-
-	/* A quad around the layer's silhouette while the planet sits well in
-	   front of the camera; otherwise the plane through its centre would
-	   clip, so the whole screen. */
-	int fullScreen = d < 1.5 * Rc || cv.z > -Rc;
-	glUniform1i(glGetUniformLocation(s, "fullScreen"), fullScreen);
-	glUniform3f(glGetUniformLocation(s, "centerView"), (float)cv.x, (float)cv.y, (float)cv.z);
-	glUniform1f(glGetUniformLocation(s, "halfSize"), fullScreen ? 0.0f : (float)(Rc * d / sqrt(d * d - Rc * Rc)));
-
-	glUniformMatrix4fv(glGetUniformLocation(s, "projection"), 1, GL_FALSE, &proj.m[0][0]);
-	GLint viewport[4];
-	glGetIntegerv(GL_VIEWPORT, viewport);
-	glUniform2f(glGetUniformLocation(s, "viewportSize"), (float)viewport[2], (float)viewport[3]);
-	/* View -> world: column j is camera axis j (row j of the view matrix). */
-	float v2w[9];
-	for (int j = 0; j < 3; j++)
-		for (int k = 0; k < 3; k++)
-			v2w[j * 3 + k] = view.m[j][k];
-	glUniformMatrix3fv(glGetUniformLocation(s, "viewToWorld"), 1, GL_FALSE, v2w);
-	glUniform3f(glGetUniformLocation(s, "camPlanet"), (float)(-rel.x / R), (float)(-rel.y / R), (float)(-rel.z / R));
-	glUniform1f(glGetUniformLocation(s, "planetRadius"), (float)R);
-	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, b->position);
-	toSun = dscalarvec3(toSun, 1.0 / dlengthvec3(toSun));
-	glUniform3f(glGetUniformLocation(s, "sunDir"), (float)toSun.x, (float)toSun.y, (float)toSun.z);
-	glUniform1f(glGetUniformLocation(s, "sunAngle"), (float)SUN_ANGULAR_RADIUS_RAD);
-
-	setLayerUniforms(s, body, SLAB_UNIT_A, SLAB_UNIT_B);
-	FlowPhases f = flowAt(frameTime, c);
-	setFlowUniforms(s, &f);
-
-	glUniform1f(glGetUniformLocation(s, "detailLambda0"), (float)detailLambda0(body));
-	glUniform3f(glGetUniformLocation(s, "cloudColor"), c->color[0], c->color[1], c->color[2]);
-	glActiveTexture(GL_TEXTURE0 + SLAB_UNIT_WIND);
-	glBindTexture(GL_TEXTURE_CUBE_MAP, genFor(body)->oceanTex);
-	glActiveTexture(GL_TEXTURE0);
-	glUniform1i(glGetUniformLocation(s, "cloudWind"), SLAB_UNIT_WIND);
-	bindNoise(s, SLAB_UNIT_NOISE);
-	glUniform1f(glGetUniformLocation(s, "windMax"), WIND_MAP_MAX_MS);
-
-	/* The air (extinction toward the camera, sunlight) and ring shadows. */
-	Atmosphere_SetExtinction(s, (float)R, Atmosphere_Params());
-	Rings_BindReceiver(s);
-}
-
-void Clouds_Draw(mat4 proj, mat4 view, dvec3 cam, int body)
-{
-	if (!maps[body].ready)
+	updateCube(body);
+	if (!CloudVolume_Params()->enabled)
 		return;
 
-	glDisable(GL_CULL_FACE);
-	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_GREATER);   /* reversed-Z */
-	glBindVertexArray(emptyVAO);
+	const Body *b = Bodies_Get(body);
+	double R = b->radius;
+	sc->fade = 1.0f;
+	sc->body = body;
+	sc->center = b->position;
+	sc->radius = R;
+	sc->rotation = b->rotation;
+	/* The frame under the camera (it only places the shadow map). */
+	dvec3 camB = toBody(b->rotation, dsubvec3(f->cam, b->position));
+	dvec3 center = dnormal(camB);
+	dvec3 pole = { 0.0, 0.0, 1.0 };
+	dvec3 east = dcross(pole, center);
+	east = dlengthvec3(east) > 1e-6 ? dnormal(east) : (dvec3){ 1.0, 0.0, 0.0 };
+	sc->mapCenter = center;
+	sc->mapEast = east;
+	sc->mapNorth = dcross(center, east);
 
-	/* Blended over the scene in display space, depth-tested against it
-	   (terrain above the layer, the planet in front of the far side), no
-	   depth writes. The cloud's alpha also lands in the target's alpha
-	   (cleared to 0 before, main.c): the dome adds its in-scatter times
-	   (1 - alpha), the cloud having added the air in front of itself. */
-	GLuint prog = slabProgram(slabOctaves(body));
-	glUseProgram(prog);
-	setSlabUniforms(prog, proj, view, cam, body);
-	glEnable(GL_BLEND);
-	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthMask(GL_FALSE);
-	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-	glDepthMask(GL_TRUE);
-	glDisable(GL_BLEND);
+	sc->domeAir = 1;
+	sc->weatherCube = cubeTex;
+	sc->weatherCubeSize = CLOUD_CUBE_SIZE;
+	sc->weatherTexelM = cubeTexelM(R);
+	memcpy(sc->albedo, c->color, sizeof sc->albedo);
+	sc->layerCount = 1;
+	CloudVolumeLayer *L = &sc->layers[0];
+	L->base = c->altitude - 0.5f * c->thickness;
+	L->top = c->altitude + 0.5f * c->thickness;
+	L->density = (float)(CLOUD_VOL_DENSITY * c->opacity / c->thickness);
+	L->tint[0] = L->tint[1] = L->tint[2] = 1.0f;
+	L->coverage = 1.0f;
+	L->scale = (float)(CLOUD_VOL_SCALE * c->thickness);
+	L->sweep = 1.0f;
+	L->stretch = 1.0f;
+	L->erosion = 0.35f + 0.5f * c->detail;
 
-	glBindVertexArray(0);
-	glEnable(GL_CULL_FACE);
+	/* The light: the Sun through the dome's air (quad.frag's sunlight on a
+	   Lambert surface), its skylight, and light bounced off the ground. */
+	sc->airUniforms = volumeAir;
+	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, f->cam);
+	sc->sunDir = dnormal(toSun);
+	sc->sunAngle = (float)SUN_ANGULAR_RADIUS_RAD;
+	sc->wrap = 0.1f;
+	sc->sunColor[0] = (float)(1.0 * 1.15 / M_PI);
+	sc->sunColor[1] = (float)(0.97 * 1.15 / M_PI);
+	sc->sunColor[2] = (float)(0.90 * 1.15 / M_PI);
+	sc->airScaleHeight = 1.0;
+	sc->skyColor[0] = 0.10f; sc->skyColor[1] = 0.12f; sc->skyColor[2] = 0.16f;
+	sc->skyGain = 1.0f;
+	sc->groundColor[0] = 0.08f; sc->groundColor[1] = 0.075f; sc->groundColor[2] = 0.07f;
+	sc->groundGain = 1.0f;
+	sc->exposure = 1.0f;
+
+	CloudVolume_UpdateShadow(f, sc);
+}
+
+void Clouds_DrawVolume(const FrameContext *f)
+{
+	CloudVolume_Draw(f, &volScene);
+}
+
+float Clouds_ShellRadius(void)
+{
+	return volScene.body >= 0 ? (float)(volScene.radius + volScene.layers[0].top) : 0.0f;
 }
 
 void Clouds_BindStandIn(GLuint shader, int body)
@@ -542,7 +693,7 @@ void Clouds_BindStandIn(GLuint shader, int body)
 /* ---- Debug panel (a tab of the engine/debug/debug_gui.c window) ---- */
 
 /* The active planet's cloud layer (clouds.c). Every change rebuilds its
-   weather maps, so dragging a slider costs a couple of map builds a frame. */
+   weather maps and cube, so dragging a slider costs a few builds a frame. */
 void Clouds_DebugPanel(struct nk_context *ctx)
 {
 	cloudParams *c = &g_clouds;
@@ -574,7 +725,7 @@ void Clouds_DebugPanel(struct nk_context *ctx)
 	DebugGUI_Slider(ctx, "Colour blue", &c->color[2], 0.0f, 1.0f, 0.01f, "%.2f");
 
 	DebugGUI_Group(ctx, "Quality (all planets)");
-	DebugGUI_SliderInt(ctx, "Detail octaves", &g_cloudSlabOctaves, 0, 12);
+	DebugGUI_SliderInt(ctx, "Detail octaves", &g_cloudDetailOctaves, 0, MAX_DETAIL_OCTAVES);
 
 	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
 	if (nk_button_label(ctx, "Reset clouds (Earth)"))

@@ -8,7 +8,7 @@
 
    Shaders are named "<module folder>/<file>", relative to src/: each module
    keeps its shaders in a shaders/ subfolder, which the name leaves out.
-       "world/clouds/clouds.frag" -> src/world/clouds/shaders/clouds.frag
+       "world/clouds/cloudmap.frag" -> src/world/clouds/shaders/cloudmap.frag
        "app/loading.vert"         -> src/app/shaders/loading.vert
    Loaders take shader names and resolve them themselves (shader.c), and
    GLSL #include uses the same names (after trying the includer's folder).

@@ -1,4 +1,4 @@
-// Cloud noise (cloudmap.frag, clouds.frag): value noise from a lattice
+// Cloud noise (cloudmap.frag, cloudweather.frag): value noise from a lattice
 // texture, FBM that fades its octaves out below a footprint, and the
 // two-phase flow map that moves it along the wind.
 //
@@ -7,8 +7,8 @@
 // bilinear fetch gives both z-neighbours and a mix in z finishes the
 // trilinear interpolation (Quilez's 3D noise from a 2D texture). Sampling at
 // the cell corner plus the smoothstep of the position in the cell makes it
-// C1 value noise. A 2D fetch caches far better than a 3D one: the slab takes
-// 18 of these per pixel. Indices wrap before the fraction is added, so large
+// C1 value noise. A 2D fetch caches far better than a 3D one: the weather
+// cube's bake takes ~18 of these per texel. Indices wrap before the fraction is added, so large
 // coordinates (planet metres over a short wavelength) keep their precision.
 
 uniform sampler2D cloudNoiseTex;
@@ -111,6 +111,30 @@ float cloudFlowBlend(float n0, float n1)
 {
 	vec2 w = cloudFlowWeight;
 	return 0.5 + (w.x * (n0 - 0.5) + w.y * (n1 - 0.5)) / max(length(w), 1e-3);
+}
+
+// Cyclones (the climate style; cloudmap.frag, cloudweather.frag): lows in
+// the storm tracks (35-62 degrees) that wind the noise around them into
+// comma-shaped arms, turning opposite ways in the two hemispheres, about
+// half a turn from the edge to the centre. A set per flow phase, placed
+// from its seed, so they come and go with the flow map's cross-fade.
+// p: planet-local (m).
+#define CLOUD_CYCLONES 8
+vec3 cloudCyclones(vec3 p, vec3 seed)
+{
+	vec3 d = normalize(p);
+	for (int k = 0; k < CLOUD_CYCLONES; k++) {
+		vec3 h = fract(sin(vec3(float(k) * 12.9898 + seed.x, float(k) * 78.233 + seed.y,
+		                        float(k) * 37.719 + seed.z)) * 43758.5453);
+		float hemi = h.z < 0.5 ? 1.0 : -1.0;
+		float lat = hemi * radians(mix(35.0, 62.0, h.y)), lon = h.x * 6.28318531;
+		vec3 c = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+		float ang = acos(clamp(dot(d, c), -1.0, 1.0));
+		float size = mix(0.2, 0.35, fract(h.x * 7.31 + h.y));   // radians
+		float th = -hemi * mix(2.5, 4.0, fract(h.y * 5.17)) * exp(-ang / size);
+		p = p * cos(th) + cross(c, p) * sin(th) + c * dot(c, p) * (1.0 - cos(th));
+	}
+	return p;
 }
 
 // East and north at body-fixed direction d (pole = body +Z), and the wind

@@ -12,11 +12,12 @@ typedef enum ProfSection {
 	PROF_STANDINS,   /* planet stand-ins (planets.c): gas giants, far planets */
 	PROF_PLANET,
 	PROF_WATER,
-	PROF_CLOUDS,
+	PROF_CLOUDS,     /* a rocky planet's weather cube (re-made now and then) and cloud shadow map */
 	PROF_RINGS,
 	PROF_ATMOSPHERE,
 	PROF_NEBULA,      /* in-system nebula (nebula.c) */
-	/* Inside a gas giant (gas_interior.c, cloud_volume.c), in frame order: */
+	/* Inside a gas giant (gas_interior.c, cloud_volume.c), in frame order
+	   (the volume's march, accumulate and composite on a rocky planet too): */
 	PROF_CLOUD_WEATHER,   /* the cloud scene and its weather map (re-baked now and then) */
 	PROF_CLOUD_SHADOW,    /* the clouds' shadow map */
 	PROF_GAS_INTERIOR,    /* the haze */
