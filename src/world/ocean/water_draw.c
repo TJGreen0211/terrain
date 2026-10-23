@@ -9,6 +9,8 @@
 #include <math.h>
 
 static GLuint waterProgram;
+/* Radius (m) of the planet WaterDraw_Draw is walking (waterReliefBounds). */
+static double waterRadius;
 
 void WaterDraw_Init(void)
 {
@@ -38,7 +40,7 @@ double Water_Excursion(double radius)
 	     * Water_Params()[1] * (1.0 + Water_Params()[4]);
 }
 
-/* QuadTree_ReliefFn for Earth's water shell (water.vert): sea level, plus
+/* QuadTree_ReliefFn for the active planet's water shell (water.vert): sea level, plus
    waves wherever there is sea. Its own walk, so the thin shell is culled
    and refined on its own instead of inheriting the seafloor's depth range.
    All-land footprints are empty (water.frag discards every fragment). */
@@ -52,7 +54,7 @@ static void waterReliefBounds(const double dir[3], double capAngle, double cell,
 		return;
 	}
 	double shell = Water_Params()[0] - 1.0;
-	double wave = Water_Excursion(Bodies_Get(BODY_EARTH)->radius);
+	double wave = Water_Excursion(waterRadius);
 	*lo = shell - wave;
 	*hi = shell + wave;
 }
@@ -64,6 +66,7 @@ void WaterDraw_Draw(const waves *ocean, const Body *planet, const FrameContext *
                     GLuint skyTex, float atmoInner, int bodyId)
 {
 	float fScale = (float)planet->radius;
+	waterRadius = planet->radius;
 	/* Its own walk and bounds: the thin shell (land footprints culled). */
 	QuadTree_Body waterBody = TerrainDraw_Body(planet, f->cam, waterReliefBounds);
 	waterBody.trianglePx = QT_WATER_TRIANGLE_PX;

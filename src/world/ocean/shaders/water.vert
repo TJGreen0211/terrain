@@ -4,7 +4,7 @@ layout (location = 0) in vec4 vPosition;
 layout (location = 1) in vec3 vNormal;
 layout (location = 2) in vec2 vTexCoords;
 layout (location = 3) in vec3 vTangent;
-// Quadtree patch instance (locations 4-11) + patchDir/patchSphere.
+// Quadtree patch instance (locations 4-12) + patchDir/patchSphere.
 #include "world/terrain/patch.glsl"
 
 uniform mat4 model;
@@ -73,8 +73,10 @@ void main()
 	if(vPosition.w > 0.5) {
 		// Boundary skirt: wall vertices skip the wave displacement and sit
 		// just under sea level, hiding LOD patch-edge cracks under the shell.
+		// Flat water, so a wall glimpsed through a crack shades as calm sea
+		// (water.frag's crest and foam terms read fWave).
 		disp = p * ((oceanOffset - 1.0) - patchSkirt());
-		wave = 1000.0;
+		wave = 0.0;
 	}
 	else {
 		// Mesh spacing here (body radii) from the vertex's distance alone:
