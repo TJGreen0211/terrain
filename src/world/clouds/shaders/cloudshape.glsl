@@ -41,7 +41,10 @@ uniform float layerRidges[MAX_LAYERS];
 uniform float layerStretch[MAX_LAYERS];
 uniform float layerStreaks[MAX_LAYERS];
 uniform float layerCarpet[MAX_LAYERS];
+uniform float layerPlume[MAX_LAYERS];
 uniform vec3 layerTint[MAX_LAYERS];
+uniform float plumeLo, plumeHi;   // m: the band a plume can be in
+uniform int plumeLayer;           // the layer with plumes (when plumeLo is reachable)
 
 uniform float shellLo, shellHi;   // the layers' lowest base, highest top
 uniform vec3 mapEast, mapNorth;   // body axes
@@ -62,6 +65,7 @@ uniform sampler3D detailNoise;
 // r = shape r, g = shape r at p.yzx + 0.37.
 uniform sampler2D shapeSlices;
 uniform sampler3D wanderNoise;
+uniform sampler2D plumeMap;    // anvil plumes (cloudplume.frag): r strength, g how far downwind
 
 float remap(float v, float lo, float hi, float nlo, float nhi)
 {
@@ -112,6 +116,30 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 	vec4 cw = textureLod(colorMap, uvw, 0.0);
 	float shear = w.a * 2.0 - 1.0;
 	vec3 mapAlb = displayToLinear(cw.rgb);
+	// Anvil plume (one layer has them): a flat sheet near the layer's top
+	// where a storm cell's top was carried downwind, sinking a little and
+	// thinning as it goes; out over clear air too (no cover needed). Thin
+	// (semi-transparent, so the erosion carves it) and fibrous: noise long
+	// along the wind, fine across it. Worked out here, once, so the layer
+	// loop carries a single value (a bigger loop costs the whole march).
+	float plume = 0.0;
+	if (a > plumeLo && a < plumeHi) {
+		vec2 pl = textureLod(plumeMap, uvw, 0.0).rg;
+		if (pl.r > 0.0) {
+			float hfP = (a - layerBase[plumeLayer]) / (layerTop[plumeLayer] - layerBase[plumeLayer]);
+			float pc = 0.88 - 0.1 * pl.g;             // its middle (layer heights)
+			float pt = mix(0.07, 0.035, pl.g);        // half its thickness
+			float slab = (1.0 - smoothstep(pc + 0.6 * pt, pc + pt, hfP))
+			           * smoothstep(pc - 1.8 * pt, pc - 0.3 * pt, hfP);
+			plume = 0.35 * layerPlume[plumeLayer] * pl.r * (1.0 - 0.5 * pl.g) * slab;
+			if (plume > 0.0) {
+				float scP = layerScale[plumeLayer];
+				vec3 fq = vec3(xy.x / (scP * 5.0), xy.y / (scP * 0.6), hfP * 4.0) + vec3(0.13, 0.57, 0.31);
+				float fib = textureLod(shapeNoise, fq, log2(max(foot / (scP * 0.6 / 128.0), 1.0))).r;
+				plume *= 1.6 * smoothstep(0.35, 0.8, fib);
+			}
+		}
+	}
 
 	float total = 0.0;
 	vec3 albSum = vec3(0.0);
@@ -121,6 +149,7 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		float hf = (a - layerBase[i]) / (layerTop[i] - layerBase[i]);
 		if (hf <= 0.0 || hf >= 1.0)
 			continue;
+		float plumeI = i == plumeLayer ? plume : 0.0;
 		float sc = layerScale[i];
 		// Broad regions of thick cloud and wide valleys (~5 shape periods,
 		// swept east-west), so the shape noise's tiling never shows.
@@ -140,7 +169,7 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 			carpet = 1.0 - smoothstep(cTop - 0.06, cTop, hf);
 			cover = max(cover, layerCarpet[i] * mix(0.6, 1.0, pat) * carpet);
 		}
-		if (cover <= 0.01)
+		if (cover <= 0.01 && plumeI <= 0.0)
 			continue;
 		// Lean: the shapes slide downwind with height, more (either way)
 		// where the wind shears.
@@ -182,9 +211,9 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 			}
 		}
 		// Above the highest top a dome could have (dome = 1 below), with
-		// no carpet, sheet or streak here: no cloud, whatever the cells.
+		// no carpet, sheet, streak or plume here: no cloud, whatever the cells.
 		float topMax = max(clamp(mix(0.45, 1.0, w.b) * 1.1, 0.2, 1.0), cw.a);
-		if (carpet <= 0.0 && hf >= topMax && sheet <= 0.0 && streak <= 0.0)
+		if (carpet <= 0.0 && hf >= topMax && sheet <= 0.0 && streak <= 0.0 && plumeI <= 0.0)
 			continue;
 		// Rounded tops, as high as the map's towering,
 		// raised and lowered by broad cells (domes and valleys).
@@ -201,12 +230,13 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		// Anvil: where the wind shears, the top spreads and flattens and
 		// the trunk below narrows; with the lean, the top overhangs.
 		float anv = layerAnvil[i] * abs(shear);
-		float cov = clamp(cover + anv * (0.4 * smoothstep(0.55, 0.9, hc) - 0.15 * (1.0 - hc)), 0.0, 1.0);
+		// (Clear air, here only for a plume, gets none.)
+		float cov = cover > 0.01 ? clamp(cover + anv * (0.4 * smoothstep(0.55, 0.9, hc) - 0.15 * (1.0 - hc)), 0.0, 1.0) : 0.0;
 		// Thinning toward the top: masses round off and their sides slope.
 		cov *= 1.0 - 0.45 * smoothstep(0.35, 1.0, hc);
 		float prof = 1.0 - smoothstep(topF * mix(0.55, 0.9, anv), topF, hf);
 		prof = max(prof, carpet);
-		if (prof <= 0.0 && sheet <= 0.0 && streak <= 0.0)
+		if (prof <= 0.0 && sheet <= 0.0 && streak <= 0.0 && plumeI <= 0.0)
 			continue;
 		vec4 sn = textureLod(shapeNoise, np, lodS);
 		float wfbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
@@ -229,6 +259,9 @@ float densityCore(vec3 rel, float a, float foot, bool detail, out vec3 alb, out 
 		// (cov can reach 0 here: the remap would divide by it.)
 		float d = cov > 0.0 ? clamp(remap(shape * prof, 1.0 - cov, 1.0, 0.0, 1.0), 0.0, 1.0) * cov : 0.0;
 		d = max(max(d, sheet), streak);
+		// The plume, ragged with the shape noise (the erosion then sweeps
+		// its edges into streaks along the wind).
+		d = max(d, plumeI * mix(0.55, 1.1, shape));
 		if (d <= 0.0)
 			continue;
 		float dBase = d * layerDensity[i] * edge;

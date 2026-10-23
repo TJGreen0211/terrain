@@ -19,9 +19,13 @@
                 clouds lean with it, spread into anvils and shelves
        colour:  rgb = cloud albedo (display), a = walls: full cover,
                 built to the layer's top (storm eyewalls)
-     The provider bakes it with its own full-screen pass between
+     and an R8 texture of storm cells: where convection punches up to the
+     top (0..1). The provider bakes it with its own full-screen pass between
      CloudVolume_BeginWeatherBake and _EndWeatherBake, and re-bakes when the
-     camera has moved far enough (CloudVolume_NeedsBake).
+     camera has moved far enough (CloudVolume_NeedsBake). _EndWeatherBake
+     then smears the cells downwind (by the sign of the shear) into anvil
+     plumes: the cells' tops sheared off into long flat sheets near the
+     top of a layer, out over clear air (CloudVolumeLayer.plume).
    - The light above the clouds: an exponential atmosphere (optical depth
      of the column at the reference radius, scale height) the Sun shines
      through, its colour and the skylight.
@@ -64,6 +68,8 @@ typedef struct CloudVolumeLayer {
 	float stretch;         /* the shapes' vertical stretch (1: as wide as tall) */
 	float streaks;         /* thin horizontal windswept bands, 0..1 */
 	float carpet;          /* cover of low billows filling the layer's lowest part, 0..1 */
+	float plume;           /* anvil plumes streaming downwind from the storm cells, 0..1
+	                          (one layer only: the first with plume > 0) */
 } CloudVolumeLayer;
 
 /* A point light in the clouds (lightning). Its light falls off over
@@ -162,12 +168,14 @@ void CloudVolume_SetSceneDepth(GLuint depthTex, int samples, float nearPlane);
    the camera's ground point more than an eighth of the map from its
    centre. cameraBody: the camera in body-fixed axes (m). */
 int CloudVolume_NeedsBake(int body, dvec3 cameraBody, double radius, double extent);
-/* Binds the weather map as the render target (both textures, viewport
-   set). The provider draws one full-screen pass writing locations 0
-   (weather) and 1 (colour). End restores the caller's framebuffer and
-   viewport and records which body / centre the map is for. */
+/* Binds the weather map as the render target (all three textures,
+   viewport set). The provider draws one full-screen pass writing
+   locations 0 (weather), 1 (colour) and 2 (storm cells). End builds the
+   plumes (plumeLength m long, over a map mapExtent m wide), restores the
+   caller's framebuffer and viewport and records which body / centre the
+   map is for. */
 void CloudVolume_BeginWeatherBake(void);
-void CloudVolume_EndWeatherBake(int body, dvec3 mapCenter);
+void CloudVolume_EndWeatherBake(int body, dvec3 mapCenter, double mapExtent, double plumeLength);
 /* Drops the map (it no longer matches any provider). */
 void CloudVolume_Invalidate(void);
 

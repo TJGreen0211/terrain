@@ -25,6 +25,8 @@
 // - Colour: the field's albedo, so from inside the clouds wear the colours
 //   seen from space. Its alpha is the storm walls: the collars around the
 //   spinning storms and polar cyclones.
+// - Storm cells (location 2): discrete convective cells in the ranges'
+//   tall parts, whose tops the cloud volume shears off into anvil plumes.
 
 uniform vec3 mapCenter;        // unit, body-fixed
 uniform vec3 mapEast, mapNorth;
@@ -36,6 +38,7 @@ uniform float massifScale;     // m: the cloud ranges' size north-south
 
 layout(location = 0) out vec4 Weather;
 layout(location = 1) out vec4 Colour;
+layout(location = 2) out float Cells;
 
 #include "engine/gfx/tonemap.glsl"
 #include "world/gasgiant/gasgiant.glsl"
@@ -75,6 +78,13 @@ void main()
 	float shear = clamp(grad * 2.5 + (m.y - 0.5) * 6.0, -1.0, 1.0);
 	float wall = clamp(c.wall * 2.5, 0.0, 1.0);
 
+	// Storm cells: convection punching up to the layer's top inside the
+	// tall parts of the ranges, a third of a range across; the cloud
+	// volume carries their tops downwind as anvil plumes.
+	vec4 cn = gasFbm4(qm * 2.4 + vec3(5.1, 2.7, 0.3), 2, fpm * 2.4);
+	float cells = smoothstep(0.66, 0.76, cn.w) * smoothstep(0.55, 0.85, tower);
+
 	Weather = vec4(top, mid, max(tower, wall), 0.5 + 0.5 * shear);
 	Colour = vec4(clamp(c.col, 0.0, 1.0), wall);
+	Cells = cells;
 }

@@ -24,11 +24,12 @@
 #define UNIT_SHADOW  5
 #define UNIT_SLICES  6
 #define UNIT_WANDER  7
+#define UNIT_PLUME   8
 
 /* Shadow map: samples along each texel's ray through the shell. */
 #define SHADOW_STEPS 24
 
-static GLuint marchProgram, resolveProgram, compositeProgram, shadowProgram, emptyVAO;
+static GLuint marchProgram, resolveProgram, compositeProgram, shadowProgram, plumeProgram, emptyVAO;
 static GLuint shapeTex, detailTex;
 /* Reads of the shape noise the density makes at a fixed depth, as 2D
    textures (a trilinear read at depth z is a bilinear read of the two
@@ -38,6 +39,10 @@ static GLuint shapeTex, detailTex;
    one: r = shape r, g = shape r at p.yzx + 0.37 (resampled). */
 static GLuint slicesTex, wanderTex;
 static GLuint weatherTex, colorTex, mapFBO;
+/* Storm cells (the provider's third output, mipmapped for the plume
+   pass's widening reads), and the plumes made from them: r strength, g
+   how far downwind (0 at the cell, 1 at the plume's length). */
+static GLuint cellTex, plumeTex, plumeFBO;
 /* Low-resolution targets: this frame's march, and two accumulated
    histories (ping-pong), each colour (premultiplied radiance, alpha) and
    depth (distance along the ray, m). */
@@ -345,6 +350,19 @@ static GLuint newFBO2(GLuint color, GLuint depth)
 	return fbo;
 }
 
+static GLuint newFBO3(GLuint c0, GLuint c1, GLuint c2)
+{
+	GLuint fbo;
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c0, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, c1, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, c2, 0);
+	GLenum bufs[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+	glDrawBuffers(3, bufs);
+	return fbo;
+}
+
 static GLuint newFBO1(GLuint color)
 {
 	GLuint fbo;
@@ -400,12 +418,20 @@ void CloudVolume_Init(void)
 	Shader_Create(&resolveProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudresolve.frag");
 	Shader_Create(&compositeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudcomposite.frag");
 	Shader_Create(&shadowProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudshadow.frag");
+	Shader_Create(&plumeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudplume.frag");
 	glGenVertexArrays(1, &emptyVAO);
 	buildNoise();
 
 	weatherTex = newTex2D(CLOUDVOL_MAP_SIZE, CLOUDVOL_MAP_SIZE, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
 	colorTex = newTex2D(CLOUDVOL_MAP_SIZE, CLOUDVOL_MAP_SIZE, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
-	mapFBO = newFBO2(weatherTex, colorTex);
+	cellTex = newTex2D(CLOUDVOL_MAP_SIZE, CLOUDVOL_MAP_SIZE, GL_R8, GL_RED, GL_UNSIGNED_BYTE, GL_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, cellTex);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	mapFBO = newFBO3(weatherTex, colorTex, cellTex);
+	plumeTex = newTex2D(CLOUDVOL_MAP_SIZE, CLOUDVOL_MAP_SIZE, GL_RG8, GL_RG, GL_UNSIGNED_BYTE, GL_LINEAR);
+	plumeFBO = newFBO1(plumeTex);
 	shadowTex = newTex2D(CLOUDVOL_SHADOW_SIZE, CLOUDVOL_SHADOW_SIZE, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR);
 	shadowFBO = newFBO1(shadowTex);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -449,8 +475,27 @@ void CloudVolume_BeginWeatherBake(void)
 	glBindVertexArray(emptyVAO);
 }
 
-void CloudVolume_EndWeatherBake(int body, dvec3 mapCenter)
+void CloudVolume_EndWeatherBake(int body, dvec3 mapCenter, double mapExtent, double plumeLength)
 {
+	/* The plumes: the storm cells smeared downwind (cloudplume.frag). */
+	glBindTexture(GL_TEXTURE_2D, cellTex);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glBindFramebuffer(GL_FRAMEBUFFER, plumeFBO);
+	glUseProgram(plumeProgram);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, weatherTex);
+	glUniform1i(glGetUniformLocation(plumeProgram, "weatherMap"), 0);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, cellTex);
+	glUniform1i(glGetUniformLocation(plumeProgram, "cellMap"), 1);
+	glUniform1f(glGetUniformLocation(plumeProgram, "mapSize"), (float)CLOUDVOL_MAP_SIZE);
+	glUniform1f(glGetUniformLocation(plumeProgram, "plumeLength"),
+	            mapExtent > 0.0 ? (float)(plumeLength / mapExtent) : 0.0f);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
 	glBindVertexArray(0);
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)savedFBO);
 	glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
@@ -537,7 +582,9 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	float lb[CLOUDVOL_MAX_LAYERS], lt[CLOUDVOL_MAX_LAYERS], ld[CLOUDVOL_MAX_LAYERS], lc[CLOUDVOL_MAX_LAYERS];
 	float ls[CLOUDVOL_MAX_LAYERS], lsw[CLOUDVOL_MAX_LAYERS], lsh[CLOUDVOL_MAX_LAYERS], le[CLOUDVOL_MAX_LAYERS];
 	float lan[CLOUDVOL_MAX_LAYERS], lsf[CLOUDVOL_MAX_LAYERS], lri[CLOUDVOL_MAX_LAYERS], lst[CLOUDVOL_MAX_LAYERS];
-	float lsk[CLOUDVOL_MAX_LAYERS], lcp[CLOUDVOL_MAX_LAYERS];
+	float lsk[CLOUDVOL_MAX_LAYERS], lcp[CLOUDVOL_MAX_LAYERS], lpl[CLOUDVOL_MAX_LAYERS];
+	float plumeLo = 1e30f, plumeHi = -1e30f;
+	int plumeLayer = 0;
 	float ltint[CLOUDVOL_MAX_LAYERS * 3];
 	*lo = 1e30f;
 	*hi = -1e30f;
@@ -558,11 +605,19 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 		lst[i] = L->stretch > 0.1f ? L->stretch : 1.0f;
 		lsk[i] = L->streaks;
 		lcp[i] = L->carpet;
+		lpl[i] = on ? L->plume : 0.0f;
 		for (int c = 0; c < 3; c++)
 			ltint[i * 3 + c] = L->tint[c];
 		if (on) {
 			*lo = fminf(*lo, L->base);
 			*hi = fmaxf(*hi, L->top);
+			/* Plumes in one layer only (the first that has them);
+			   cloudshape.glsl's sheets lie within 0.7..0.95 of it. */
+			if (L->plume > 0.0f && plumeLo > 1e29f) {
+				plumeLo = L->base + 0.7f * (L->top - L->base);
+				plumeHi = L->base + 0.95f * (L->top - L->base);
+				plumeLayer = i;
+			}
 		}
 	}
 	glUniform1i(glGetUniformLocation(p, "layerCount"), n);
@@ -580,6 +635,10 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glUniform1fv(glGetUniformLocation(p, "layerStretch"), CLOUDVOL_MAX_LAYERS, lst);
 	glUniform1fv(glGetUniformLocation(p, "layerStreaks"), CLOUDVOL_MAX_LAYERS, lsk);
 	glUniform1fv(glGetUniformLocation(p, "layerCarpet"), CLOUDVOL_MAX_LAYERS, lcp);
+	glUniform1fv(glGetUniformLocation(p, "layerPlume"), CLOUDVOL_MAX_LAYERS, lpl);
+	glUniform1f(glGetUniformLocation(p, "plumeLo"), plumeLo);
+	glUniform1f(glGetUniformLocation(p, "plumeHi"), plumeHi);
+	glUniform1i(glGetUniformLocation(p, "plumeLayer"), plumeLayer);
 	glUniform3fv(glGetUniformLocation(p, "layerTint"), CLOUDVOL_MAX_LAYERS, ltint);
 	glUniform1f(glGetUniformLocation(p, "shellLo"), *lo);
 	glUniform1f(glGetUniformLocation(p, "shellHi"), *hi);
@@ -611,6 +670,9 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glActiveTexture(GL_TEXTURE0 + UNIT_WANDER);
 	glBindTexture(GL_TEXTURE_3D, wanderTex);
 	glUniform1i(glGetUniformLocation(p, "wanderNoise"), UNIT_WANDER);
+	glActiveTexture(GL_TEXTURE0 + UNIT_PLUME);
+	glBindTexture(GL_TEXTURE_2D, plumeTex);
+	glUniform1i(glGetUniformLocation(p, "plumeMap"), UNIT_PLUME);
 }
 
 static int sceneReady(const CloudVolumeScene *s)
@@ -659,7 +721,7 @@ void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1i(glGetUniformLocation(p, "steps"), SHADOW_STEPS);
 	drawFullScreen();
 
-	for (int u = UNIT_WANDER; u >= 0; u--) {
+	for (int u = UNIT_PLUME; u >= 0; u--) {
 		glActiveTexture(GL_TEXTURE0 + u);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);
@@ -929,7 +991,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glDepthMask(GL_TRUE);
 	if (cull)
 		glEnable(GL_CULL_FACE);
-	for (int u = UNIT_WANDER; u >= 0; u--) {
+	for (int u = UNIT_PLUME; u >= 0; u--) {
 		glActiveTexture(GL_TEXTURE0 + u);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);

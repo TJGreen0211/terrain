@@ -387,7 +387,7 @@ static void bakeWeather(int id, GasGiantStyle *s, const Body *b, double alt, dou
 	glUniform1f(glGetUniformLocation(bakeProgram, "lumBelt"), (float)luminance(s->belt));
 	glUniform1f(glGetUniformLocation(bakeProgram, "massifScale"), (float)GAS_CLOUD_MASSIF_M);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
-	CloudVolume_EndWeatherBake(id, center);
+	CloudVolume_EndWeatherBake(id, center, extent, GAS_CLOUD_PLUME_M);
 	bakedHash = s->profileHash;
 	bakedBody = id;
 	bakedCenter = center;
@@ -479,6 +479,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	mid->ridges = 0.0f;
 	mid->stretch = 1.0f;
 	mid->carpet = 0.9f;
+	mid->plume = 1.0f;
 	mid->streaks = 0.4f;
 	/* The deck under them: the walls' feet sink into it. */
 	sc->deckOn = 1;

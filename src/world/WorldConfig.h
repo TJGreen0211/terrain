@@ -158,6 +158,9 @@
 /* The cloud ranges in that map: their size north-south (several times
    longer east-west), with canyons of clear air between them. */
 #define GAS_CLOUD_MASSIF_M        150.0e3
+/* How far the storm cells' anvil plumes stream downwind (the cloud
+   volume's plume pass), fading out over that length. */
+#define GAS_CLOUD_PLUME_M         500.0e3
 #define GAS_INTERIOR_FADE_LO_H    4.0
 #define GAS_INTERIOR_FADE_HI_H    8.0
 #define GAS_DECK_MURK_PER_M       5.0e-5
