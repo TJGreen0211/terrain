@@ -101,12 +101,13 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		// The carpet: low billows over the layer's lowest part, in patches
 		// (thicker and higher in some, thin in others) a few shape periods
 		// across, swept with the wind.
-		float carpet = 0.0;
+		float carpet = 0.0, mapCover = cover;
 		if (layerCarpet[i] > 0.0) {
 			vec3 cq = vec3(xy.x / (layerSweep[i] * 2.0), xy.y, 0.0) / (sc * 3.0) + vec3(0.17, 0.41, 0.61);
 			float pat = smoothstep(0.3, 0.75, textureLod(shapeNoise, cq, 0.0).r);
-			float cTop = 0.22 + 0.14 * pat + 0.2 * (broad - 0.67);
-			carpet = 1.0 - smoothstep(cTop - 0.12, cTop, hf);
+			// Flat-topped: its top varies little, and ends over a short span.
+			float cTop = 0.25 + 0.06 * pat + 0.08 * (broad - 0.67);
+			carpet = 1.0 - smoothstep(cTop - 0.06, cTop, hf);
 			cover = max(cover, layerCarpet[i] * mix(0.6, 1.0, pat) * carpet);
 		}
 		if (cover <= 0.01)
@@ -126,7 +127,7 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		float cell = 1.0 - mix(textureLod(shapeNoise, vec3(np.xy * 0.1, 0.5), 0.0).g,
 		                       textureLod(shapeNoise, vec3(np.yx * 0.043 + 0.13, 0.81), 0.0).g, 0.45);
 		float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
-		float topF = clamp(mix(0.45, 1.0, w.b) * (0.55 + 0.5 * dome), 0.2, 1.0);
+		float topF = clamp(mix(0.45, 1.0, w.b) * (0.5 + 0.6 * dome), 0.2, 1.0);
 		topF = max(topF, cw.a * (0.85 + 0.15 * dome));
 		float hc = hf / topF;   // up the cloud, 0 at the base, 1 at its top
 		// Anvil: where the wind shears, the top spreads and flattens and
@@ -205,7 +206,9 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 			float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
 			// Wispy at the base, billowy at the top.
 			float dmod = mix(dfbm, 1.0 - dfbm, clamp(hc * 4.0, 0.0, 1.0));
-			d = clamp(remap(d, dmod * layerErosion[i] * 0.6, 1.0, 0.0, 1.0), 0.0, 1.0);
+			// The carpet (where the map has no cloud) is eroded less: smoother.
+			float er = layerErosion[i] * mix(1.0, 0.45, carpet * (1.0 - smoothstep(0.3, 0.7, mapCover)));
+			d = clamp(remap(d, dmod * er * 0.6, 1.0, 0.0, 1.0), 0.0, 1.0);
 		}
 		d *= layerDensity[i] * edge;
 		if (d <= 0.0)

@@ -427,10 +427,10 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	mid->density = 1.0f / 250.0f;
 	mid->tint[0] = 1.05f; mid->tint[1] = 0.98f; mid->tint[2] = 0.92f;
 	mid->coverage = 1.0f;
-	mid->scale = 30.0e3f;
+	mid->scale = 42.0e3f;
 	mid->sweep = 1.5f;
 	mid->shear = 0.3f;
-	mid->erosion = 0.8f;
+	mid->erosion = 0.7f;
 	mid->anvil = 0.8f;
 	mid->shelf = 0.15f;
 	mid->ridges = 0.0f;
