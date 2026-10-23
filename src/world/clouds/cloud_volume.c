@@ -484,6 +484,11 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glUniform1f(glGetUniformLocation(p, "shellHi"), *hi);
 	uniform3d(p, "mapEast", s->mapEast);
 	uniform3d(p, "mapNorth", s->mapNorth);
+	int ownNoise = dlengthvec3(s->noiseCenter) > 0.5;
+	dvec3 nc = ownNoise ? s->noiseCenter : mapCenterB;
+	uniform3d(p, "noiseShift", dscalarvec3(dsubvec3(mapCenterB, nc), s->radius));
+	uniform3d(p, "noiseEast", ownNoise ? s->noiseEast : s->mapEast);
+	uniform3d(p, "noiseNorth", ownNoise ? s->noiseNorth : s->mapNorth);
 	glUniform1f(glGetUniformLocation(p, "mapExtent"), (float)s->mapExtent);
 	glUniform1f(glGetUniformLocation(p, "detailScale"), g_params.detailScale);
 

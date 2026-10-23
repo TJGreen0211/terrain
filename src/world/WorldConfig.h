@@ -142,6 +142,10 @@
 #define GAS_CLOUD_MAP_EXTENT_M    6.0e6
 #define GAS_CLOUD_MAP_HORIZONS    2.4
 #define GAS_CLOUD_MAP_MAX_RADII   1.2
+/* The clouds' shapes are placed in a frame that stays put while the map
+   re-centres; it moves (the shapes jump) only once the camera is this far
+   from its centre. */
+#define GAS_CLOUD_NOISE_FRAME_M   5.0e6
 /* The cloud ranges in that map: their size north-south (several times
    longer east-west), with canyons of clear air between them. */
 #define GAS_CLOUD_MASSIF_M        150.0e3

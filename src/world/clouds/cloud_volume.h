@@ -83,6 +83,10 @@ typedef struct CloudVolumeScene {
 	   (unit), east and north there, and its width (m). */
 	dvec3 mapCenter, mapEast, mapNorth;
 	double mapExtent;
+	/* The noise's frame, body-fixed, as the map's: the clouds' shapes are
+	   placed in it, so it must stay put while the map re-centres (or they
+	   jump). Zero centre: the map's frame. */
+	dvec3 noiseCenter, noiseEast, noiseNorth;
 	int layerCount;
 	CloudVolumeLayer layers[CLOUDVOL_MAX_LAYERS];
 	/* The light: the Sun through the atmosphere above the clouds. */

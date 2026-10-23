@@ -45,6 +45,11 @@ uniform vec3 layerTint[MAX_LAYERS];
 
 uniform float shellLo, shellHi;   // the layers' lowest base, highest top
 uniform vec3 mapEast, mapNorth;   // body axes
+// The noise's own frame (fixed on the body while the map re-centres under
+// the camera, so the clouds stay put): a point's offset from its centre is
+// its offset from the map's plus noiseShift.
+uniform vec3 noiseShift;          // map centre - noise centre, body axes, m
+uniform vec3 noiseEast, noiseNorth;
 uniform float mapExtent;          // m
 uniform float detailScale;        // detail noise period / shape noise period
 
@@ -66,8 +71,10 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 	alb = vec3(0.0);
 	if (a <= shellLo || a >= shellHi)
 		return 0.0;
-	vec2 xy = vec2(dot(rel, mapEast), dot(rel, mapNorth));
-	vec2 uv = xy / mapExtent + 0.5;
+	// xy: in the map's frame, for the map; the noise is read in its own.
+	vec2 uv = vec2(dot(rel, mapEast), dot(rel, mapNorth)) / mapExtent + 0.5;
+	vec3 reln = rel + noiseShift;
+	vec2 xy = vec2(dot(reln, noiseEast), dot(reln, noiseNorth));
 	float edge = smoothstep(0.0, 0.12, min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y)));
 	if (edge <= 0.0)
 		return 0.0;

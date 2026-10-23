@@ -310,14 +310,15 @@ vec3 deckLight(vec3 pv, float t, vec3 deckLin, vec3 skyLin, vec3 groundLin)
 	vec3 upV = normalize(camUp * gRc + pv);
 	float mus = dot(upV, sunDir);
 	vec3 rel = camToMap + viewToBody * pv;
-	vec2 xy = vec2(dot(rel, mapEast), dot(rel, mapNorth));
+	vec3 reln = rel + noiseShift;
+	vec2 xy = vec2(dot(reln, noiseEast), dot(reln, noiseNorth));
 	float foot = t * gPixA;
 	// The lumps' slope, for a normal: relief 0.15 of their size.
 	float e = max(2.0 * foot, 0.03 * deckScale);
 	float h = deckLumps(xy, foot);
 	float hx = deckLumps(xy + vec2(e, 0.0), foot), hy = deckLumps(xy + vec2(0.0, e), foot);
 	vec3 upB = viewToBody * upV;
-	vec3 eB = normalize(mapEast - upB * dot(mapEast, upB));
+	vec3 eB = normalize(noiseEast - upB * dot(noiseEast, upB));
 	vec3 nB = cross(upB, eB);
 	float k = 0.15 * deckScale / e;
 	vec3 nrm = normalize(upB - (eB * (hx - h) + nB * (hy - h)) * k);

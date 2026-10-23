@@ -25,6 +25,10 @@ static unsigned int bakedHash;
 static int bakedBody = -1;
 static double bakedExtent;
 static dvec3 bakedCenter, bakedEast, bakedNorth;   /* the map's frame, body-fixed */
+/* The clouds' noise frame (body-fixed) and its body: moved only when the
+   camera is GAS_CLOUD_NOISE_FRAME_M from its centre. */
+static int noiseBody = -1;
+static dvec3 noiseCenter, noiseEast, noiseNorth;
 static GLuint sceneDepthTex;
 static int sceneDepthSamples;
 static float sceneNear;
@@ -424,6 +428,16 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	sc->mapEast = bakedEast;
 	sc->mapNorth = bakedNorth;
 	sc->mapExtent = bakedExtent;
+	double nd = acos(fmin(fmax(center.x * noiseCenter.x + center.y * noiseCenter.y + center.z * noiseCenter.z, -1.0), 1.0));
+	if (noiseBody != id || nd * b->radius > GAS_CLOUD_NOISE_FRAME_M) {
+		noiseBody = id;
+		noiseCenter = center;
+		noiseEast = east;
+		noiseNorth = north;
+	}
+	sc->noiseCenter = noiseCenter;
+	sc->noiseEast = noiseEast;
+	sc->noiseNorth = noiseNorth;
 	sc->layerCount = 2;
 
 	/* Layer 0, top: bright ammonia, thin, swept. Layer 1, middle: rust,
