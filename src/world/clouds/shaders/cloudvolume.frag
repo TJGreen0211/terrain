@@ -131,7 +131,7 @@ uniform float sunAngle;        // the Sun's angular radius
 // The Sun's light on a cloud at p (centre-relative), mus its cosine there:
 // through the air as the ground gets it (sunTransmittance), but setting at
 // the planet's limb as seen from the cloud's height, not at its own
-// horizon (from 80 km the Sun is up until ~9 deg below it): the afterglow
+// horizon (from 9 km the Sun is up until ~3 deg below it): the afterglow
 // on the clouds after sunset on the ground, the light grazing in through
 // the dense air low down, red. No cosine of its height, as a surface
 // would have: the march toward the Sun shades the tops and sides of the

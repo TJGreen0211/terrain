@@ -35,8 +35,8 @@ static void surfaceSection(struct nk_context *ctx)
 
 	DebugGUI_Group(ctx, "Relief (fraction of radius)");
 	/* The quadtree's culling bounds follow these live (earthReliefBounds). */
-	DebugGUI_Slider(ctx, "Land relief", &s->landRelief, 0.0f, 0.045f, 0.0005f, "%.4f");
-	DebugGUI_Slider(ctx, "Ocean relief", &s->oceanRelief, 0.0f, 0.03f, 0.0005f, "%.4f");
+	DebugGUI_Slider(ctx, "Land relief", &s->landRelief, 0.0f, 0.01f, 0.00005f, "%.5f");
+	DebugGUI_Slider(ctx, "Ocean relief", &s->oceanRelief, 0.0f, 0.01f, 0.00005f, "%.5f");
 
 	DebugGUI_Group(ctx, "Climate");
 	DebugGUI_Slider(ctx, "Temp offset", &s->tempOffset, -1.0f, 1.0f, 0.01f, "%+.2f");

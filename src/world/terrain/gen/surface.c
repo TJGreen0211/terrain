@@ -167,8 +167,8 @@ PlanetStyle g_planetStyle = {
 	1.0f,    /* hadleyStrength */
 	0.52f,   /* riverThreshold */
 	0.55f,   /* rockSlope */
-	0.025f,  /* landRelief */
-	0.01f,   /* oceanRelief */
+	(float)(EARTH_LAND_RELIEF_M / EARTH_RADIUS_M),    /* landRelief */
+	(float)(EARTH_OCEAN_RELIEF_M / EARTH_RADIUS_M),   /* oceanRelief */
 };
 
 /* sRGB transfer function -> linear, componentwise over n floats. */

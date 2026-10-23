@@ -257,6 +257,20 @@
 #define QT_SKIRT_RANGE_FACTOR     1.5
 #define QT_SKIRT_WIDTH_FRACTION   0.02
 
+/* ---- Relief (PlanetStyle.landRelief / oceanRelief, terrain_gen.h) ---------
+   Real Earth: land up to its highest peak (8.85 km), the seafloor down to
+   its deepest trench (11 km) along the shelf profile. Generated planets
+   draw theirs as a fraction of their radius from the ranges below
+   (solar_system.c): rocky ones from flat to Mars-like rugged (Olympus Mons
+   is 0.0065 of Mars's radius), dwarfs rougher. Edited live in the debug
+   panel's Surface section (a re-bake updates the occlusion). */
+#define EARTH_LAND_RELIEF_M       8850.0
+#define EARTH_OCEAN_RELIEF_M      11000.0
+#define ROCKY_LAND_RELIEF_MIN     0.0008
+#define ROCKY_LAND_RELIEF_MAX     0.0035
+#define DWARF_LAND_RELIEF_MIN     0.002
+#define DWARF_LAND_RELIEF_MAX     0.008
+
 /* ---- Baked terrain maps (terrain_gen.c, shaders/planetmap.glsl) ------------
    Height, climate and ocean maps are cube maps over the body-local sphere:
    GL's face layout with the plain (gnomonic) projection the quadtree uses,
@@ -301,14 +315,20 @@
 /* ---- Atmosphere (atmosphere.c, atmosphere.frag) -------------------------
    A stylised single-scattering shell (O'Neill, GPU Gems 2 ch. 16), tuned
    for look rather than measured Earth (which is ~100 km with 8 km air and
-   1.2 km haze scale heights). Defaults reproduce the original look. The
-   debug panel's Atmosphere section edits both live.
+   1.2 km haze scale heights), thinned from the original 270 km / 67.5 km
+   toward it when the relief became real (2026-10-23): the sky's colours
+   are about the same (the dome's optical depths are per shell height),
+   the limb a thinner, crisper band. The debug panel's Atmosphere section
+   edits both live.
    Shell height: where the air ends. The scattering constants (K_R, K_M)
    are per shell height, so a taller shell also scatters more overall.
    Scale height: density falls by e every this many metres. Below ~1/8 of
    the shell the dome's 5-sample ray march starts to band. */
-#define ATMOSPHERE_SHELL_HEIGHT_M   (0.0424 * EARTH_RADIUS_M)          /* 270 km */
-#define ATMOSPHERE_SCALE_HEIGHT_M   (0.25 * ATMOSPHERE_SHELL_HEIGHT_M) /* 67.5 km */
+#define ATMOSPHERE_SHELL_HEIGHT_M   120000.0
+/* Scale height as a fraction of the shell (generated planets vary it
+   x0.8-1.3, staying above the banding limit). */
+#define ATMOSPHERE_SCALE_FRACTION   (1.0 / 6.0)
+#define ATMOSPHERE_SCALE_HEIGHT_M   (ATMOSPHERE_SCALE_FRACTION * ATMOSPHERE_SHELL_HEIGHT_M) /* 20 km */
 
 /* ---- Clouds (clouds.c, the shared cloud volume, docs/volumetric-clouds.md)
    Earth's cloud layer; every other planet's is generated (solar_system.c)
@@ -321,15 +341,15 @@
    moves the clouds along the wind map (clouds re-form over about this).
    Keep wind x period well under the weather scale: winds differ between
    latitude belts, and a long period shears the noise into streaks.
-   Heights follow the stylised terrain, not real Earth: land rises up to
-   landRelief = 0.025 radii (~160 km, terrain_gen.c), so a real 5 km layer
-   would sit under every continent. Earth's layer floats at half the land
-   relief, so high ground and ranges stand above it. */
+   Heights are real: Earth's layer runs from ~1 km (the cumulus bases) to
+   ~9 km (where storms top out); how high a cloud builds inside it is the
+   weather's (fair-weather cumulus stay in the bottom part). The highest
+   ranges stand at its top. */
 /* Clouds start switched on; the debug panel's Clouds section (or
    --clouds 0) turns them off. */
 #define CLOUDS_ENABLED_DEFAULT      1
-#define CLOUD_EARTH_ALTITUDE_M      (0.0125 * EARTH_RADIUS_M)   /* 80 km */
-#define CLOUD_EARTH_THICKNESS_M     (0.005 * EARTH_RADIUS_M)    /* 32 km */
+#define CLOUD_EARTH_ALTITUDE_M      5000.0
+#define CLOUD_EARTH_THICKNESS_M     8000.0
 #define CLOUD_EARTH_COVERAGE        0.5
 #define CLOUD_EARTH_CLIMATE_WEIGHT  0.8
 #define CLOUD_EARTH_OPACITY         40.0
@@ -346,15 +366,16 @@
 #define CLOUD_DETAIL_OCTAVES        9
 #define CLOUD_DETAIL_MIN_WAVELENGTH_M 200.0
 /* Generated planets: layer altitude as a fraction of the planet's land
-   relief (Earth's is 0.5), thickness as a fraction of the altitude.
-   Overcast (Venus-like) decks sit above the highest peaks. Every layer is
-   kept under CLOUD_GEN_MAX_SHELL of the atmosphere shell. */
+   relief (Earth's is ~0.56), thickness as a fraction of the altitude
+   (Earth's 1.6: the bases low down). Overcast (Venus-like) decks sit well
+   above the highest peaks. Every layer is kept under CLOUD_GEN_MAX_SHELL
+   of the atmosphere shell. */
 #define CLOUD_GEN_ALTITUDE_MIN      0.35
 #define CLOUD_GEN_ALTITUDE_MAX      0.8
-#define CLOUD_GEN_OVERCAST_ALT_MIN  1.05
-#define CLOUD_GEN_OVERCAST_ALT_MAX  1.4
-#define CLOUD_GEN_THICKNESS_MIN     0.25
-#define CLOUD_GEN_THICKNESS_MAX     0.6
+#define CLOUD_GEN_OVERCAST_ALT_MIN  2.5
+#define CLOUD_GEN_OVERCAST_ALT_MAX  5.0
+#define CLOUD_GEN_THICKNESS_MIN     0.8
+#define CLOUD_GEN_THICKNESS_MAX     1.6
 #define CLOUD_GEN_MAX_SHELL         0.6
 /* The active planet's weather cube (clouds.c, cloudweather.frag): texels a
    face side (2048: ~6 km on Earth), re-made as its

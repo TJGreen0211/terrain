@@ -137,7 +137,7 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 	if (p->hasAtmosphere) {
 		hsv(rnd(r), range(r, 0.35, 0.85), 1.0, &p->atmo.C_R.x);
 		p->atmo.shellHeight = (float)(ROCKY_SHELL_FRACTION * b->radius * range(r, 0.5, 1.4) * (dwarf ? 0.5 : 1.0));
-		p->atmo.scaleHeight = (float)(0.25 * p->atmo.shellHeight * range(r, 0.7, 1.3));
+		p->atmo.scaleHeight = (float)(ATMOSPHERE_SCALE_FRACTION * p->atmo.shellHeight * range(r, 0.8, 1.3));
 		p->atmo.K_R = (float)(0.166 * logRange(r, 0.4, 1.8));
 		p->atmo.K_M = (float)(0.0025 * logRange(r, 0.5, 2.5));
 	} else {
@@ -181,7 +181,8 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 	s->equatorLush = 0.0f;
 	s->hadleyStrength = 0.0f;
 	s->riverThreshold = 2.0f;      /* no rivers */
-	s->landRelief = dwarf ? frange(r, 0.02, 0.05) : frange(r, 0.015, 0.035);
+	s->landRelief = dwarf ? frange(r, DWARF_LAND_RELIEF_MIN, DWARF_LAND_RELIEF_MAX)
+	                      : frange(r, ROCKY_LAND_RELIEF_MIN, ROCKY_LAND_RELIEF_MAX);
 	s->oceanRelief = 0.0f;
 
 	/* Terrain recipe: Earth's, varied. Fewer droplets: no rain carving
@@ -204,8 +205,7 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
    adding clouds left every other generated property as it was. Climate
    style for planets that generated water (their moisture map is weather);
    otherwise none through patchy and banded to Venus-like overcast. Heights
-   scale with the planet's land relief (the terrain is stylised, ~20x real
-   relief), kept inside its air. */
+   scale with the planet's land relief, kept inside its air. */
 static void generateClouds(unsigned int seed, int id, PlanetInfo *p)
 {
 	cloudParams *c = &p->clouds;

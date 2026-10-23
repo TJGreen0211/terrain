@@ -761,8 +761,8 @@ void Clouds_DebugPanel(struct nk_context *ctx)
 	nk_label(ctx, Clouds_StyleName(c->style), NK_TEXT_RIGHT);
 	DebugGUI_Slider(ctx, "Coverage", &c->coverage, 0.0f, 1.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Climate weight", &c->climateWeight, 0.0f, 1.0f, 0.01f, "%.2f");
-	DebugGUI_Slider(ctx, "Altitude (m)", &c->altitude, 1.0e3f, 3.0e5f, 500.0f, "%.0f");
-	DebugGUI_Slider(ctx, "Thickness (m)", &c->thickness, 500.0f, 1.0e5f, 500.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Altitude (m)", &c->altitude, 500.0f, 1.5e5f, 100.0f, "%.0f");
+	DebugGUI_Slider(ctx, "Thickness (m)", &c->thickness, 200.0f, 1.0e5f, 100.0f, "%.0f");
 	DebugGUI_Slider(ctx, "Opacity (tau)", &c->opacity, 0.5f, 80.0f, 0.5f, "%.1f");
 	DebugGUI_Slider(ctx, "Weather scale", &c->weatherScale, 0.1f, 1.5f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Sharpness", &c->sharpness, 0.0f, 1.0f, 0.01f, "%.2f");

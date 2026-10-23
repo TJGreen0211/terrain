@@ -5,8 +5,10 @@
 // Light absorbed per planet radius of optical path, per channel. Red goes
 // first, then green, so sand in the shallows turns turquoise and the deep
 // sea navy. The water surface's alpha carries the blue (least absorbed)
-// channel; quad.frag tints the floor by the extra red/green loss.
-const float WATER_ABSORB = 500.0;
+// channel; quad.frag tints the floor by the extra red/green loss. Set for
+// the look, not real water: 2900 kept the sea's colours when the seafloor
+// went from 64 km to Earth's real 11 km (it was 500 against 64 km).
+const float WATER_ABSORB = 2900.0;
 const vec3 WATER_ABSORB_RGB = WATER_ABSORB * vec3(6.0, 2.2, 1.0);
 // Optical path: the geometric column (oceanRelief dT^2, the drawn seafloor
 // profile) plus a shelf term linear in dT. The squared profile alone keeps

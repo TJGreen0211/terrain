@@ -74,7 +74,17 @@ void main()
 	float dist = texture(cloudDepth, uv).r;
 	vec2 ndc = uv * 2.0 - 1.0;
 	vec3 d = normalize(vec3(ndc.x / projection[0][0], ndc.y / projection[1][1], -1.0));
+#ifdef DOME_AIR
+	// Tested DEPTH_LEAD of the way in front of their distance: a planet's
+	// clouds sit only km over the ground, and seen from far off near the
+	// limb one pixel spans more depth than that, so at their own distance
+	// every other pixel of a 2x2 block fell behind the ground (a dot grid).
+	// The march already ends at the scene; this only keeps what is nearer.
+	const float DEPTH_LEAD = 0.02;
+	vec4 cc = vec4(d * dist * (1.0 - DEPTH_LEAD), 1.0) * projection;
+#else
 	vec4 cc = vec4(d * dist, 1.0) * projection;
+#endif
 	gl_FragDepth = cc.z / cc.w;
 #ifdef DOME_AIR
 	if (depthOnly == 0 && hasAtmosphere > 0.5) {

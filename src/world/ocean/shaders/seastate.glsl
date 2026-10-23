@@ -16,7 +16,7 @@ const float SEA_STATE_REF_WIND = 7.0;
 // Water depth (m) over which each cascade's waves ramp from flat at the
 // coast to full height: a few of its drawn rms heights, about where waves
 // that size break (terrain_draw.c). In metres, not normalized depth: the seafloor
-// drops oceanRelief * depthT^2 (64 km at depthT 1 on an Earth), so a
+// drops oceanRelief * depthT^2 (11 km at depthT 1 on Earth), so a
 // normalized ramp calmed the sea out to kilometres of depth and left every
 // shelf a glassy mirror. The short wind waves now run right up to the
 // shore; only the big (scaled) swell is held off the shallows, where its
