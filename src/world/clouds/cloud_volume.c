@@ -59,7 +59,7 @@ static float shadowLo, shadowHi;
 static CloudVolumeParams g_params = {
 	1,          /* enabled */
 	2,          /* resDivisor */
-	96,         /* viewSteps */
+	160,        /* viewSteps */
 	5,          /* lightSteps */
 	400.0e3f,   /* maxDistance */
 	0.9f,       /* history */
@@ -67,7 +67,7 @@ static CloudVolumeParams g_params = {
 	0.5f,       /* multiScatter */
 	0.5f,       /* powder */
 	0.6f,       /* ambient */
-	300.0e3f,   /* shadowExtent */
+	600.0e3f,   /* shadowExtent */
 };
 
 CloudVolumeParams *CloudVolume_Params(void) { return &g_params; }
@@ -436,6 +436,7 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	float lb[CLOUDVOL_MAX_LAYERS], lt[CLOUDVOL_MAX_LAYERS], ld[CLOUDVOL_MAX_LAYERS], lc[CLOUDVOL_MAX_LAYERS];
 	float ls[CLOUDVOL_MAX_LAYERS], lsw[CLOUDVOL_MAX_LAYERS], lsh[CLOUDVOL_MAX_LAYERS], le[CLOUDVOL_MAX_LAYERS];
 	float lan[CLOUDVOL_MAX_LAYERS], lsf[CLOUDVOL_MAX_LAYERS], lri[CLOUDVOL_MAX_LAYERS], lst[CLOUDVOL_MAX_LAYERS];
+	float lsk[CLOUDVOL_MAX_LAYERS], lcp[CLOUDVOL_MAX_LAYERS];
 	float ltint[CLOUDVOL_MAX_LAYERS * 3];
 	*lo = 1e30f;
 	*hi = -1e30f;
@@ -454,6 +455,8 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 		lsf[i] = L->shelf;
 		lri[i] = L->ridges;
 		lst[i] = L->stretch > 0.1f ? L->stretch : 1.0f;
+		lsk[i] = L->streaks;
+		lcp[i] = L->carpet;
 		for (int c = 0; c < 3; c++)
 			ltint[i * 3 + c] = L->tint[c];
 		if (on) {
@@ -474,6 +477,8 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glUniform1fv(glGetUniformLocation(p, "layerShelf"), CLOUDVOL_MAX_LAYERS, lsf);
 	glUniform1fv(glGetUniformLocation(p, "layerRidges"), CLOUDVOL_MAX_LAYERS, lri);
 	glUniform1fv(glGetUniformLocation(p, "layerStretch"), CLOUDVOL_MAX_LAYERS, lst);
+	glUniform1fv(glGetUniformLocation(p, "layerStreaks"), CLOUDVOL_MAX_LAYERS, lsk);
+	glUniform1fv(glGetUniformLocation(p, "layerCarpet"), CLOUDVOL_MAX_LAYERS, lcp);
 	glUniform3fv(glGetUniformLocation(p, "layerTint"), CLOUDVOL_MAX_LAYERS, ltint);
 	glUniform1f(glGetUniformLocation(p, "shellLo"), *lo);
 	glUniform1f(glGetUniformLocation(p, "shellHi"), *hi);
@@ -679,7 +684,15 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 
 	glUniform1i(glGetUniformLocation(p, "viewSteps"), g_params.viewSteps);
 	glUniform1i(glGetUniformLocation(p, "lightSteps"), g_params.lightSteps);
-	glUniform1f(glGetUniformLocation(p, "maxDistance"), (float)CloudVolume_Reach(camAlt - lo, s->mapExtent));
+	double reach = s->reach > 0.0 ? fmin(s->reach, 0.45 * s->mapExtent) : CloudVolume_Reach(camAlt - lo, s->mapExtent);
+	glUniform1f(glGetUniformLocation(p, "maxDistance"), (float)reach);
+	glUniform1i(glGetUniformLocation(p, "deckOn"), s->deckOn);
+	glUniform1f(glGetUniformLocation(p, "deckAlt"), s->deckAlt);
+	uniform3f(p, "deckColor", s->deckColor);
+	glUniform1f(glGetUniformLocation(p, "deckScale"), s->deckScale > 1.0f ? s->deckScale : 1.0f);
+	glUniform1f(glGetUniformLocation(p, "deckMist"), s->deckMist > 1.0f ? s->deckMist : 1.0f);
+	glUniform1f(glGetUniformLocation(p, "deckDensity"), s->deckDensity);
+	glUniform1f(glGetUniformLocation(p, "deckFade"), s->fade);
 	glUniform1f(glGetUniformLocation(p, "multiScatter"), g_params.multiScatter);
 	glUniform1f(glGetUniformLocation(p, "powder"), g_params.powder);
 	glUniform1f(glGetUniformLocation(p, "ambient"), g_params.ambient);

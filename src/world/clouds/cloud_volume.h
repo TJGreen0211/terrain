@@ -45,7 +45,7 @@
    with cloudshadowmap.glsl). */
 
 #define CLOUDVOL_MAX_LAYERS  2
-#define CLOUDVOL_MAP_SIZE    1024
+#define CLOUDVOL_MAP_SIZE    2048
 #define CLOUDVOL_MAX_FLASHES 4
 #define CLOUDVOL_SHADOW_SIZE 512
 
@@ -62,6 +62,8 @@ typedef struct CloudVolumeLayer {
 	float shelf;           /* thin flat sheets out from the clouds, 0..1 */
 	float ridges;          /* vertical ribs carved into the faces, 0..1 */
 	float stretch;         /* the shapes' vertical stretch (1: as wide as tall) */
+	float streaks;         /* thin horizontal windswept bands, 0..1 */
+	float carpet;          /* cover of low billows filling the layer's lowest part, 0..1 */
 } CloudVolumeLayer;
 
 /* A point light in the clouds (lightning). Its light falls off over
@@ -99,6 +101,16 @@ typedef struct CloudVolumeScene {
 	float groundGain;      /* ... times this, x the Sun */
 	float exposure;
 	float fade;            /* overall density, 0..1 (the provider's hand-off) */
+	/* A flat cloud deck under the layers (deckOn): opaque, drawn to the
+	   horizon as a lumpy surface at deckAlt with a mist rising off it, so
+	   the layers' bottoms sink into it. */
+	int deckOn;
+	float deckAlt;         /* m above the reference radius */
+	float deckColor[3];    /* albedo (display) */
+	float deckScale;       /* m: its lumps */
+	float deckMist;        /* m: the mist's scale height above and below it */
+	float deckDensity;     /* the mist's extinction at the deck (1/m) */
+	double reach;          /* m: how far the march reaches (0: CloudVolume_Reach) */
 	int flashCount;
 	CloudVolumeFlash flashes[CLOUDVOL_MAX_FLASHES];
 } CloudVolumeScene;
@@ -122,7 +134,9 @@ CloudVolumeParams *CloudVolume_Params(void);
 /* How far the march reaches (m): the Max distance setting, or farther
    when the camera is high above the layers (aboveLayers: its height over
    their lowest base, m), but within the weather map. The clouds fade out
-   over the last 40%; a provider fading anything into them uses the same. */
+   over the last 40%; a provider fading anything into them uses the same.
+   A scene's own reach replaces it (still within the map). The march also
+   ends where the air has hidden everything. */
 double CloudVolume_Reach(double aboveLayers, double mapExtent);
 
 /* Programs, noise volumes and the weather map (GL up). */

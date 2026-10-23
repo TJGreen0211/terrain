@@ -18,6 +18,11 @@ PlanetInfo *SolarSystem_Info(int id)
 	return &g_planetInfo[id];
 }
 
+int SolarSystem_HasWater(int id)
+{
+	return id == BODY_EARTH || (OTHER_PLANET_WATER && g_planetInfo[id].hasWater);
+}
+
 SolarSystemParams * SolarSystem_Params(void)
 {
 	return &ssParams;
@@ -427,8 +432,7 @@ static void loadActive(int body)
 static void bakeDone(int body)
 {
 	PlanetInfo *p = &g_planetInfo[body];
-	int water = body == BODY_EARTH || (OTHER_PLANET_WATER && p->hasWater);
-	if (!water) {
+	if (!SolarSystem_HasWater(body)) {
 		float gmin, gmax;
 		TerrainGen_PlanetRange(&p->gen, &gmin, &gmax);
 		p->gen.seaLevel = gmin - 1e-4f;

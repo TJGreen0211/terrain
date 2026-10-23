@@ -24,6 +24,14 @@
 // the clouds hide than of that air). Fogging everything at one weighted
 // distance instead left dark rims where a ray grazed a near cloud and went
 // on to far ones: the far clouds got the near cloud's thin air.
+//
+// The deck (deckOn): a flat, opaque cloud layer under the volume, drawn to
+// the horizon as a surface at deckAlt with lumps shaded on it (no march),
+// and a mist rising off it (marched with the clouds), so the layers'
+// bottoms sink into it. Under it, the clouds and the mist get little Sun.
+//
+// The march ends where the air has hidden everything (optical depth 5) or
+// at the reach, whichever is nearer.
 
 uniform mat4 projection;
 uniform vec2 lowSize;          // this target, px
@@ -63,6 +71,14 @@ uniform float maxDistance;
 uniform float multiScatter;
 uniform float powder;
 uniform float ambient;
+
+uniform int deckOn;
+uniform float deckAlt;         // m above the reference radius
+uniform vec3 deckColor;        // display
+uniform float deckScale;       // m: its lumps
+uniform float deckMist;        // m: the mist's scale height
+uniform float deckDensity;     // the mist's extinction at the deck, 1/m
+uniform float deckFade;        // its opacity (the provider's hand-off)
 
 uniform sampler2DMS sceneDepth;
 uniform int sceneSamples;
@@ -221,6 +237,101 @@ vec4 airTo(float tEnd, float ph, vec3 airLin)
 	return vec4(L, T);
 }
 
+// Where the air along the ray has hidden everything behind (optical
+// depth 5), up to tMax.
+float airReach(float tMax)
+{
+	float tau = 0.0, tPrev = 0.0;
+	const int N = 24;
+	for (int i = 0; i < N; i++) {
+		float u = float(i + 1) / float(N);
+		float tNext = tMax * u * u;
+		float t = 0.5 * (tPrev + tNext);
+		float r = sqrt(gRc * gRc + 2.0 * gB * t + t * t);
+		float a = (camAlt * (2.0 * radius + camAlt) + 2.0 * gB * t + t * t) / (r + radius);
+		float s = airColumn / airScaleHeight * exp(-max(a, 0.0) / airScaleHeight);
+		float dtau = s * (tNext - tPrev);
+		if (tau + dtau >= 5.0)
+			return tPrev + (5.0 - tau) / s;
+		tau += dtau;
+		tPrev = tNext;
+	}
+	return tMax;
+}
+
+// How much of the Sun reaches altitude a past the deck: little under it.
+float deckShade(float a)
+{
+	return deckOn != 0 ? mix(0.15, 1.0, smoothstep(deckAlt - 2.0 * deckMist, deckAlt, a)) : 1.0;
+}
+
+// The deck's mist at altitude a: extinction (1/m).
+float mistSigma(float a)
+{
+	return deckOn != 0 ? deckFade * deckDensity * exp(-abs(a - deckAlt) / deckMist) : 0.0;
+}
+
+// The mist's light at view-space point pv (altitude a, Sun cosine mus).
+vec3 mistLight(vec3 pv, float a, float mus, vec3 deckLin, vec3 skyLin)
+{
+	float tauAir = airColumn * exp(-max(a, 0.0) / airScaleHeight) * airMass(mus);
+	vec3 E = sunlight(mus, 2.0 * wrap);
+	vec3 S = deckLin * (2.0 * E * exp(-tauAir) * cloudShadow(pv, a, mus) * deckShade(a) + skyLin * ambient * E);
+	if (flashCount > 0)
+		S += deckLin * flashLight(pv);
+	return S;
+}
+
+// The deck's lumps at map-plane point xy (m): 0 in the hollows, 1 on top.
+// Billows, swept east-west.
+float deckLumps(vec2 xy, float foot)
+{
+	float h = 0.0, amp = 0.55, s = deckScale;
+	for (int o = 0; o < 3; o++) {
+		vec3 p = vec3(xy.x / (2.5 * s), xy.y / s, 0.23 + 0.31 * float(o));
+		vec4 n = textureLod(shapeNoise, p, log2(max(foot / (s / 128.0), 1.0)));
+		h += amp * (0.5 * n.r + 0.5 * n.g);
+		amp *= 0.5;
+		s *= 0.37;
+	}
+	return clamp((h - 0.3) / 0.6, 0.0, 1.0);
+}
+
+// The deck seen at view-space point pv (distance t): its light.
+vec3 deckLight(vec3 pv, float t, vec3 deckLin, vec3 skyLin, vec3 groundLin)
+{
+	vec3 upV = normalize(camUp * gRc + pv);
+	float mus = dot(upV, sunDir);
+	vec3 rel = camToMap + viewToBody * pv;
+	vec2 xy = vec2(dot(rel, mapEast), dot(rel, mapNorth));
+	float foot = t * gPixA;
+	// The lumps' slope, for a normal: relief 0.15 of their size.
+	float e = max(2.0 * foot, 0.03 * deckScale);
+	float h = deckLumps(xy, foot);
+	float hx = deckLumps(xy + vec2(e, 0.0), foot), hy = deckLumps(xy + vec2(0.0, e), foot);
+	vec3 upB = viewToBody * upV;
+	vec3 eB = normalize(mapEast - upB * dot(mapEast, upB));
+	vec3 nB = cross(upB, eB);
+	float k = 0.15 * deckScale / e;
+	vec3 nrm = normalize(upB - (eB * (hx - h) + nB * (hy - h)) * k);
+	float ndl = dot(nrm, viewToBody * sunDir);
+	vec3 alb = deckLin * mix(0.65, 1.15, h);
+	float tauAir = airColumn * exp(-max(deckAlt, 0.0) / airScaleHeight) * airMass(mus);
+	float shadow = cloudShadow(pv, deckAlt, mus);
+	vec3 S;
+	if (camAlt >= deckAlt) {
+		// Lit from above, the hollows darker.
+		vec3 sun = 2.0 * sunlight(min(ndl, mus + 0.3), wrap) * exp(-tauAir) * shadow;
+		S = alb * (sun * mix(0.45, 1.0, h) + skyLin * ambient * sunlight(mus, 2.0 * wrap) * (0.5 + 0.5 * h));
+	} else {
+		// The underside: the little light that comes through.
+		S = alb * (0.3 * sunlight(mus, 2.0 * wrap) * exp(-tauAir) * shadow + groundLin * ambient);
+	}
+	if (flashCount > 0)
+		S += alb * flashLight(pv);
+	return S;
+}
+
 float ign(vec2 p)
 {
 	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
@@ -256,14 +367,26 @@ void main()
 	// Down through the shell's floor: the clouds end there.
 	if (camAlt >= shellLo && loH.x > 0.0)
 		t1 = min(t1, loH.x);
-	t1 = min(t1, min(sceneDistance(lowPx), maxDistance));
-	if (t1 <= t0)
+	float tScene = sceneDistance(lowPx);
+	// The deck: from above, its near crossing; from below, the far one.
+	float tDeck = NONE;
+	if (deckOn != 0) {
+		vec2 dh = shellHits(deckAlt);
+		tDeck = camAlt >= deckAlt ? (dh.x > 0.0 ? dh.x : NONE) : (dh.y > 0.0 ? dh.y : NONE);
+		if (tDeck >= tScene)
+			tDeck = NONE;
+	}
+	t1 = min(min(t1, tDeck), min(tScene, maxDistance));
+	t1 = min(t1, airReach(t1));
+	if (t1 <= t0 && tDeck >= NONE)
 		return;
+	t1 = max(t1, t0);
 
 	float cosT = dot(gD, sunDir);
 	vec3 skyLin = displayToLinear(skyColor) * skyGain;
 	vec3 groundLin = displayToLinear(groundColor) * groundGain;
 	vec3 airLin = displayToLinear(airAlbedo);
+	vec3 deckLin = displayToLinear(deckColor);
 	float phA = mix(1.0, hg(cosT, 0.6) / hg(0.0, 0.6), airForward);
 	// The air from the camera to the shell (in front of all the clouds),
 	// then the air in the shell, step by step: A0 its in-scatter, A1 the
@@ -303,19 +426,36 @@ void main()
 
 		vec3 pv = gD * t;
 		float foot = t * gPixA;
-		vec3 alb;
-		// Cheap test first; the detail only where there is cloud.
-		if (densityV(pv, a, foot, false, alb) <= 0.0)
-			continue;
-		float sigma = densityV(pv, a, foot, true, alb);
-		sigma *= 1.0 - smoothstep(0.6 * maxDistance, maxDistance, t);
-		if (sigma <= 0.0)
-			continue;
-
 		vec3 upS = (camUp * gRc + pv) / r;
 		float mus = dot(upS, sunDir);
+		// The deck's mist.
+		float sm = mistSigma(a);
+		vec3 Sm = vec3(0.0);
+		if (sm > 1e-7)
+			Sm = mistLight(pv, a, mus, deckLin, skyLin);
+		vec3 alb;
+		// Cheap test first; the detail only where there is cloud.
+		float sigma = 0.0;
+		if (densityV(pv, a, foot, false, alb) > 0.0) {
+			sigma = densityV(pv, a, foot, true, alb);
+			sigma *= 1.0 - smoothstep(0.6 * maxDistance, maxDistance, t);
+		}
+		if (sigma <= 0.0) {
+			if (sm <= 1e-7)
+				continue;
+			float extM = exp(-sm * dt);
+			float wM = T * (1.0 - extM);
+			L += Sm * wM * TaS;
+			dSum += t * wM;
+			wSum += wM;
+			T *= extM;
+			if (T < 0.01)
+				break;
+			continue;
+		}
+
 		float tauAir = airColumn * exp(-max(a, 0.0) / airScaleHeight) * airMass(mus);
-		vec3 sunE = sunlight(mus, wrap) * exp(-tauAir);
+		vec3 sunE = sunlight(mus, wrap) * exp(-tauAir) * deckShade(a);
 
 		// The short march for the cloud nearby; the shadow map for clouds
 		// farther up the Sun's ray, from where the march ends. The map has
@@ -344,7 +484,14 @@ void main()
 		float pw = mix(1.0, 1.0 - exp(-sigma * 1500.0), powder);
 
 		float hs = clamp((a - shellLo) / (shellHi - shellLo), 0.0, 1.0);
-		vec3 amb = (skyLin * (0.4 + 0.6 * hs) + groundLin * (1.0 - hs)) * ambient * sunlight(mus, 2.0 * wrap);
+		// The skylight comes from above: less of it under more cloud (two
+		// probes up, no detail), so the folds and lower faces of a mass
+		// fall into shade instead of being lit evenly.
+		vec3 albU;
+		float tauU = densityV(pv + upS * 400.0, a + 400.0, foot, false, albU) * 600.0
+		           + densityV(pv + upS * 1600.0, a + 1600.0, foot, false, albU) * 1800.0;
+		float occ = mix(0.35, 1.0, exp(-0.5 * tauU));
+		vec3 amb = (skyLin * (0.4 + 0.6 * hs) * occ + groundLin * (1.0 - hs)) * ambient * sunlight(mus, 2.0 * wrap);
 		// x2: thick cloud reflects about like a sunlit Lambert surface
 		// (what the provider's own deck uses), not half as much.
 		vec3 S = alb * (2.0 * sunE * Ls * pw + amb * hue);
@@ -353,17 +500,15 @@ void main()
 		// the orders above do, so the inside of a big cloud glows dimly
 		// instead of going black. Only deep inside: near
 		// the surface the orders above keep the shading's contrast.
-		S += 2.0 * sunE * alb * 0.8 * smoothstep(4.0, 20.0, tauL) / (1.0 + 0.1 * tauL);
-		// Low down the clouds sink into the murk: their light gives way to
-		// the air's around them, so the walls' feet dissolve into the haze.
-		// (Thinning the density there can't do it: any cloud thick enough
-		// to see is opaque, so it only moved the level they end on.)
-		S = mix(S, Ja, 0.9 * (1.0 - smoothstep(0.0, 0.3, hs)));
+		S += 2.0 * sunE * alb * 0.4 * smoothstep(4.0, 20.0, tauL) / (1.0 + 0.1 * tauL);
 		// Flashes: their own colour shows through the cloud's (bright
 		// white-blue light swamps the tint).
 		if (flashCount > 0)
 			S += mix(alb, vec3(dot(alb, vec3(0.3, 0.59, 0.11))), 0.7) * flashLight(pv);
 
+		// With the mist, by their shares of the extinction.
+		S = (sigma * S + sm * Sm) / (sigma + sm);
+		sigma += sm;
 		float ext = exp(-sigma * dt);
 		float wgt = T * (1.0 - ext);
 		L += S * wgt * TaS;
@@ -372,6 +517,46 @@ void main()
 		T *= ext;
 		if (T < 0.01)
 			break;
+	}
+
+	// On to the deck past the march: the air and mist there, then the
+	// deck itself, opaque.
+	if (tDeck < NONE && T >= 0.01) {
+		float tA = t1;
+		const int N = 16;
+		for (int i = 0; i < N; i++) {
+			float u = float(i + 1) / float(N);
+			float tNext = t1 + (tDeck - t1) * u * u;
+			float dt = tNext - tA;
+			float t = tA + dt * jit;
+			tA = tNext;
+			float r = sqrt(gRc * gRc + 2.0 * gB * t + t * t);
+			float a = (camAlt * (2.0 * radius + camAlt) + 2.0 * gB * t + t * t) / (r + radius);
+			float sa;
+			vec3 Ja = airLight(t, r, a, phA, airLin, sa);
+			float extA = exp(-sa * dt);
+			float TaS = Ta * exp(-sa * dt * jit);
+			vec3 dA = Ta * Ja * (1.0 - extA);
+			A0 += dA;
+			A1 += T * dA;
+			Ta *= extA;
+			float sm = mistSigma(a);
+			if (sm > 1e-7) {
+				vec3 pv = gD * t;
+				float mus = dot((camUp * gRc + pv) / r, sunDir);
+				float extM = exp(-sm * dt);
+				float wM = T * (1.0 - extM);
+				L += mistLight(pv, a, mus, deckLin, skyLin) * wM * TaS;
+				dSum += t * wM;
+				wSum += wM;
+				T *= extM;
+			}
+		}
+		float wD = T * deckFade;
+		L += deckLight(gD * tDeck, tDeck, deckLin, skyLin, groundLin) * wD * Ta;
+		dSum += tDeck * wD;
+		wSum += wD;
+		T -= wD;
 	}
 
 	float alpha = 1.0 - T;

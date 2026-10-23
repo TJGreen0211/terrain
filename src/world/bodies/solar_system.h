@@ -49,6 +49,9 @@ typedef struct PlanetInfo {
 
 /* Body id (BodyId). */
 PlanetInfo *SolarSystem_Info(int id);
+/* Whether body id has seas drawn (water shell + waves): Earth, and with
+   OTHER_PLANET_WATER every planet generated with hasWater. */
+int SolarSystem_HasWater(int id);
 
 typedef struct SolarSystemParams {
 	unsigned int seed;   /* the system seed (SolarSystem_Generate); starts at SYSTEM_SEED_DEFAULT */

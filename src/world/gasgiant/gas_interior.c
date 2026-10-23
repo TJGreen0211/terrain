@@ -216,7 +216,8 @@ void GasInterior_Draw(const FrameContext *f)
 
 double GasInterior_CloudReach(double H, double altitude)
 {
-	return CloudVolume_Reach(altitude - GAS_CLOUD_MID_BASE_H * H, GAS_CLOUD_MAP_EXTENT_M);
+	return fmin(fmax(GAS_CLOUD_REACH_M, CloudVolume_Reach(altitude - GAS_CLOUD_MID_BASE_H * H, GAS_CLOUD_MAP_EXTENT_M)),
+	            0.45 * GAS_CLOUD_MAP_EXTENT_M);
 }
 
 float GasInterior_VolumeFade(double H, double altitude)
@@ -409,30 +410,42 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	CloudVolumeLayer *top = &sc->layers[0], *mid = &sc->layers[1];
 	top->base = (float)(GAS_CLOUD_TOP_BASE_H * H);
 	top->top = (float)(GAS_CLOUD_TOP_TOP_H * H);
-	top->density = 1.0f / 4000.0f;
+	top->density = 1.0f / 1500.0f;
 	top->tint[0] = 1.2f; top->tint[1] = 1.18f; top->tint[2] = 1.12f;
 	top->coverage = 1.0f;
 	top->scale = 90.0e3f;
 	top->sweep = 3.0f;
 	top->shear = 0.6f;
-	top->erosion = 1.0f;
+	top->erosion = 0.85f;
 	top->anvil = 0.3f;
 	top->shelf = 0.3f;
-	top->ridges = 0.2f;
+	top->ridges = 0.0f;
 	top->stretch = 1.0f;
+	top->streaks = 0.3f;
 	mid->base = (float)(GAS_CLOUD_MID_BASE_H * H);
 	mid->top = (float)(GAS_CLOUD_MID_TOP_H * H);
-	mid->density = 1.0f / 500.0f;
+	mid->density = 1.0f / 250.0f;
 	mid->tint[0] = 1.05f; mid->tint[1] = 0.98f; mid->tint[2] = 0.92f;
 	mid->coverage = 1.0f;
 	mid->scale = 30.0e3f;
 	mid->sweep = 1.5f;
 	mid->shear = 0.3f;
-	mid->erosion = 1.0f;
+	mid->erosion = 0.8f;
 	mid->anvil = 0.8f;
 	mid->shelf = 0.15f;
-	mid->ridges = 1.0f;
-	mid->stretch = 1.6f;
+	mid->ridges = 0.0f;
+	mid->stretch = 1.0f;
+	mid->carpet = 0.9f;
+	mid->streaks = 0.4f;
+	/* The deck under them: the walls' feet sink into it. */
+	sc->deckOn = 1;
+	sc->deckAlt = (float)(GAS_CLOUD_DECK_H * H);
+	for (int c = 0; c < 3; c++)
+		sc->deckColor[c] = 0.75f * s->belt[c] + 0.25f * s->zone[c];
+	sc->deckScale = 40.0e3f;
+	sc->deckMist = (float)(GAS_CLOUD_DECK_MIST_H * H);
+	sc->deckDensity = (float)(GAS_CLOUD_DECK_MIST_TAU / (GAS_CLOUD_DECK_MIST_H * H));
+	sc->reach = GasInterior_CloudReach(H, alt);
 
 	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, f->cam);
 	sc->sunDir = dnormal(toSun);

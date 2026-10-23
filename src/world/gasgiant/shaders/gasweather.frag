@@ -55,13 +55,13 @@ void main()
 	vec4 mw = gasFbm4(qm * 0.5 + vec3(3.7, 1.3, 8.1), 3, fpm * 0.5);
 	vec4 m = gasFbm4(qm + vec3(mw.xy - 0.5, 0.0) * 1.6, 4, fpm);
 	float ridge = m.x + 0.1 * (c.h - 0.5) + 0.06 * c.turb;
-	float range = smoothstep(0.5, 0.56, ridge);
+	float range = smoothstep(0.45, 0.6, ridge);
 
 	float top = clamp(smoothstep(0.25, 0.85, zone) * (0.6 + 1.2 * (c.h - 0.5)) + 0.8 * c.hi, 0.0, 1.0);
 	top = max(top, 0.55 * smoothstep(0.56, 0.68, m.z));
 	float mid = clamp(mix(0.12, 1.0, range) + 0.4 * c.storm, 0.0, 1.0);
-	// Full height right from a range's edge: its sides are cliffs.
-	float tower = clamp(mix(0.25, 0.85, smoothstep(0.51, 0.55, ridge)) + 0.15 * smoothstep(0.58, 0.68, ridge)
+	// Rising from a range's edge toward its middle: its sides slope.
+	float tower = clamp(mix(0.25, 0.85, smoothstep(0.47, 0.62, ridge)) + 0.15 * smoothstep(0.6, 0.72, ridge)
 	                    + 0.3 * c.turb + 0.6 * c.storm, 0.0, 1.0);
 
 	// Band luminance either side, over about a third of a degree.

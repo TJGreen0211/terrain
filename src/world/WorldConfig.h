@@ -118,7 +118,8 @@
    real decks (two scale heights, ~55 km, for the middle one), for the
    painting's towering walls. Under them a flat, opaque cloud deck at
    GAS_CLOUD_DECK_H, drawn to the horizon, with a mist rising off it
-   (scale height GAS_CLOUD_DECK_MIST_H): the middle layer starts below it,
+   (scale height GAS_CLOUD_DECK_MIST_H, optical depth GAS_CLOUD_DECK_MIST_TAU
+   straight up from the deck): the middle layer starts below it,
    so the walls' feet sink into it.
    They fade in below GAS_CLOUD_FADE_HI_H scale heights and are fully
    there below _LO_H. Their weather map is a patch GAS_CLOUD_MAP_EXTENT_M
@@ -129,7 +130,8 @@
 #define GAS_CLOUD_TOP_BASE_H      2.1
 #define GAS_CLOUD_TOP_TOP_H       2.5
 #define GAS_CLOUD_DECK_H          0.35
-#define GAS_CLOUD_DECK_MIST_H     0.1
+#define GAS_CLOUD_DECK_MIST_H     0.05
+#define GAS_CLOUD_DECK_MIST_TAU   1.0
 #define GAS_CLOUD_REACH_M         2.6e6
 #define GAS_CLOUD_FADE_LO_H       7.0
 #define GAS_CLOUD_FADE_HI_H       11.0
