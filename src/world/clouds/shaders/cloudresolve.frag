@@ -9,15 +9,24 @@
 // range, the colour per unit alpha (the clouds' own colour) to theirs.
 // Clamping the premultiplied channels one by one paired a thin edge's low
 // colour with a thick neighbour's alpha: dark rims along every edge.
+//
+// Temporal block 2: this frame marched one pixel of each 2x2 block
+// (blockOffset); that one blends as above, the other three take the
+// history (clamped the same way), reprojected at their block's distance.
+// With no usable history (just on screen, or a reset) they interpolate
+// this frame's samples round them.
 
 uniform mat4 projection;
 uniform vec2 lowSize;
+uniform vec2 marchSize;        // lowSize / block (the march target)
+uniform int block;             // 1 or 2
+uniform ivec2 blockOffset;     // the marched pixel in each block
 uniform mat3 viewToBody;       // this frame
 uniform mat3 bodyToPrevView;   // last frame
 uniform vec3 camDelta;         // camera now - camera then, body axes, m
 uniform float historyWeight;   // 0: no usable history
 
-uniform sampler2D curColor;
+uniform sampler2D curColor;   // linear (texelFetch for the samples themselves)
 uniform sampler2D curDepth;
 uniform sampler2D histColor;   // linear
 uniform sampler2D histDepth;
@@ -30,11 +39,16 @@ const float NONE = 1e9;
 void main()
 {
 	ivec2 px = ivec2(gl_FragCoord.xy);
-	ivec2 hi = ivec2(lowSize) - 1;
-	vec4 c = texelFetch(curColor, px, 0);
-	float dc = texelFetch(curDepth, px, 0).r;
+	ivec2 q = px / block;          // its block's texel in the march
+	ivec2 hi = ivec2(marchSize) - 1;
+	bool fresh = px - q * block == blockOffset;
+	vec4 c = texelFetch(curColor, q, 0);
+	float dc = texelFetch(curDepth, q, 0).r;
+	// Without history: this frame's samples, between them for the pixels
+	// not marched (sample k sits at pixel k * block + blockOffset).
+	vec4 cFill = fresh ? c : texture(curColor, ((gl_FragCoord.xy - vec2(blockOffset) - 0.5) / float(block) + 0.5) / marchSize);
 	if (historyWeight <= 0.0) {
-		OutColor = c;
+		OutColor = cFill;
 		OutDepth = dc;
 		return;
 	}
@@ -44,7 +58,7 @@ void main()
 	vec3 uMin = vec3(1e9), uMax = vec3(-1e9);
 	for (int y = -1; y <= 1; y++)
 		for (int x = -1; x <= 1; x++) {
-			vec4 n = texelFetch(curColor, clamp(px + ivec2(x, y), ivec2(0), hi), 0);
+			vec4 n = texelFetch(curColor, clamp(q + ivec2(x, y), ivec2(0), hi), 0);
 			aMin = min(aMin, n.a);
 			aMax = max(aMax, n.a);
 			if (n.a > 0.02) {
@@ -63,7 +77,7 @@ void main()
 	vec4 clip = vec4(pv, 1.0) * projection;
 	vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
 	if (pv.z >= 0.0 || any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
-		OutColor = c;
+		OutColor = cFill;
 		OutDepth = dc;
 		return;
 	}
@@ -73,6 +87,11 @@ void main()
 	if (uMax.x >= uMin.x)
 		hu = clamp(hu, uMin, uMax);
 	h = vec4(hu * ha, ha);
-	OutColor = mix(c, h, historyWeight);
-	OutDepth = dc < NONE ? dc : texture(histDepth, uv).r;
+	if (fresh) {
+		OutColor = mix(c, h, historyWeight);
+		OutDepth = dc < NONE ? dc : texture(histDepth, uv).r;
+	} else {
+		OutColor = h;
+		OutDepth = texture(histDepth, uv).r;
+	}
 }

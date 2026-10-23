@@ -124,6 +124,8 @@ typedef struct CloudVolumeScene {
 typedef struct CloudVolumeParams {
 	int enabled;
 	int resDivisor;        /* march at 1/n of the screen per axis */
+	int temporalBlock;     /* 1, or 2: each frame marches one pixel of every 2x2 block (cycling),
+	                          the others come from the accumulated history */
 	int viewSteps;         /* max samples per view ray */
 	int lightSteps;        /* samples toward the Sun */
 	float maxDistance;     /* m: the march ends here (fading out before) */
@@ -139,7 +141,7 @@ CloudVolumeParams *CloudVolume_Params(void);
 
 /* --cloud-debug <n>: start with debugView n and log the march's mean
    steps and density calls per pixel (every DEBUG_STATS_EVERY frames) on
-   stderr. */
+   stderr. --cloud-block <n>: start with temporalBlock n. */
 void CloudVolume_ParseArgs(int argc, char *argv[]);
 
 /* How far the march reaches (m): the Max distance setting, or farther

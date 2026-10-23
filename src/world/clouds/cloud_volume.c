@@ -43,7 +43,7 @@ static GLuint weatherTex, colorTex, mapFBO;
    depth (distance along the ray, m). */
 static GLuint marchColor, marchDepth, marchFBO;
 static GLuint histColor[2], histDepth[2], histFBO[2];
-static int lowW, lowH, histIndex;
+static int lowW, lowH, lowBlock, histIndex;
 static GLuint sceneDepthTex;
 static int sceneDepthSamples;
 static float sceneNear;
@@ -70,6 +70,7 @@ static float shadowLo, shadowHi;
 static CloudVolumeParams g_params = {
 	1,          /* enabled */
 	2,          /* resDivisor */
+	1,          /* temporalBlock */
 	160,        /* viewSteps */
 	5,          /* lightSteps */
 	400.0e3f,   /* maxDistance */
@@ -99,6 +100,8 @@ void CloudVolume_ParseArgs(int argc, char *argv[])
 		if (strcmp(argv[i], "--cloud-debug") == 0 && i + 1 < argc) {
 			g_params.debugView = atoi(argv[++i]);
 			statsToLog = 1;
+		} else if (strcmp(argv[i], "--cloud-block") == 0 && i + 1 < argc) {
+			g_params.temporalBlock = atoi(argv[++i]);
 		}
 }
 
@@ -366,17 +369,22 @@ static void freeLowTargets(void)
 	marchFBO = 0;
 }
 
-/* (Re)makes the low-resolution targets for this size; 1 if they are new
-   (the history is then empty). */
-static int ensureLowTargets(int w, int h)
+/* The march target's size for a w x h history and a temporal block. */
+static int marchSize(int n, int block) { return (n + block - 1) / block; }
+
+/* (Re)makes the low-resolution targets for this size and temporal block;
+   1 if they are new (the history is then empty). */
+static int ensureLowTargets(int w, int h, int block)
 {
-	if (marchFBO && w == lowW && h == lowH)
+	if (marchFBO && w == lowW && h == lowH && block == lowBlock)
 		return 0;
 	freeLowTargets();
 	lowW = w;
 	lowH = h;
-	marchColor = newTex2D(w, h, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_NEAREST);
-	marchDepth = newTex2D(w, h, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST);
+	lowBlock = block;
+	int mw = marchSize(w, block), mh = marchSize(h, block);
+	marchColor = newTex2D(mw, mh, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR);
+	marchDepth = newTex2D(mw, mh, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST);
 	marchFBO = newFBO2(marchColor, marchDepth);
 	for (int i = 0; i < 2; i++) {
 		histColor[i] = newTex2D(w, h, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR);
@@ -734,8 +742,14 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glGetIntegerv(GL_VIEWPORT, vp);
 	int div = g_params.resDivisor < 1 ? 1 : g_params.resDivisor > 8 ? 8 : g_params.resDivisor;
 	int w = (vp[2] + div - 1) / div, h = (vp[3] + div - 1) / div;
-	if (ensureLowTargets(w, h))
+	int block = g_params.temporalBlock >= 2 ? 2 : 1;
+	if (ensureLowTargets(w, h, block))
 		prevValid = 0;
+	/* This frame's marched pixel in each block: the four in turn, the
+	   diagonal first. */
+	static const int order[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };
+	int ox = block > 1 ? order[frameCount % 4u][0] : 0, oy = block > 1 ? order[frameCount % 4u][1] : 0;
+	int mw = marchSize(w, block), mh = marchSize(h, block);
 
 	/* The camera and view in the body's frame. */
 	dvec3 camB = toBody(s->rotation, dsubvec3(f->cam, s->center));
@@ -759,7 +773,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	/* 1. March into the low-resolution target. */
 	Prof_Begin(PROF_CLOUD_MARCH);
 	glBindFramebuffer(GL_FRAMEBUFFER, marchFBO);
-	glViewport(0, 0, w, h);
+	glViewport(0, 0, mw, mh);
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
 	glDisable(GL_BLEND);
@@ -771,6 +785,8 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniformMatrix4fv(glGetUniformLocation(p, "projection"), 1, GL_FALSE, &f->proj.m[0][0]);
 	glUniform2f(glGetUniformLocation(p, "lowSize"), (float)w, (float)h);
 	glUniform2f(glGetUniformLocation(p, "fullSize"), (float)vp[2], (float)vp[3]);
+	glUniform1i(glGetUniformLocation(p, "block"), block);
+	glUniform2i(glGetUniformLocation(p, "blockOffset"), ox, oy);
 	int ji = (int)(frameCount % 8u) + 1;
 	glUniform2f(glGetUniformLocation(p, "jitter"), halton(ji, 2) - 0.5f, halton(ji, 3) - 0.5f);
 	glUniform1f(glGetUniformLocation(p, "frameJitter"), (float)fmod(frameCount * 0.61803398875, 1.0));
@@ -846,16 +862,20 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
 	Prof_End(PROF_CLOUD_MARCH);
 	if (debugView && frameCount % DEBUG_STATS_EVERY == 0)
-		readDebugStats(w, h);
+		readDebugStats(mw, mh);
 
 	/* 2. Accumulate: this frame over the reprojected history. */
 	Prof_Begin(PROF_CLOUD_ACCUM);
 	int cur = histIndex ^ 1;
 	glBindFramebuffer(GL_FRAMEBUFFER, histFBO[cur]);
+	glViewport(0, 0, w, h);
 	p = resolveProgram;
 	glUseProgram(p);
 	glUniformMatrix4fv(glGetUniformLocation(p, "projection"), 1, GL_FALSE, &f->proj.m[0][0]);
 	glUniform2f(glGetUniformLocation(p, "lowSize"), (float)w, (float)h);
+	glUniform2f(glGetUniformLocation(p, "marchSize"), (float)mw, (float)mh);
+	glUniform1i(glGetUniformLocation(p, "block"), block);
+	glUniform2i(glGetUniformLocation(p, "blockOffset"), ox, oy);
 	glUniformMatrix3fv(glGetUniformLocation(p, "viewToBody"), 1, GL_FALSE, v2b);
 	/* Body -> previous view: the transpose of last frame's view -> body. */
 	glUniformMatrix3fv(glGetUniformLocation(p, "bodyToPrevView"), 1, GL_TRUE, prevViewToBody);
@@ -930,6 +950,7 @@ void CloudVolume_DebugPanel(struct nk_context *ctx)
 	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
 	nk_checkbox_label(ctx, "Volumetric clouds", &g_params.enabled);
 	DebugGUI_SliderInt(ctx, "Resolution 1/n", &g_params.resDivisor, 1, 4);
+	DebugGUI_SliderInt(ctx, "Temporal block", &g_params.temporalBlock, 1, 2);
 	DebugGUI_SliderInt(ctx, "View steps", &g_params.viewSteps, 16, 256);
 	DebugGUI_SliderInt(ctx, "Light steps", &g_params.lightSteps, 0, 12);
 	DebugGUI_Slider(ctx, "Max distance (m)", &g_params.maxDistance, 20.0e3f, 1.5e6f, 1.0e3f, "%.0f");

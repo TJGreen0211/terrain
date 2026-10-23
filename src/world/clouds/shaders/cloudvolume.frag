@@ -37,6 +37,10 @@ uniform mat4 projection;
 uniform vec2 lowSize;          // this target, px
 uniform vec2 fullSize;         // the scene, px
 uniform vec2 jitter;           // sub-pixel offset this frame, px
+// Temporal block (cloud_volume.c): this target is lowSize / block, and its
+// texel k marches pixel k * block + blockOffset of lowSize.
+uniform int block;
+uniform ivec2 blockOffset;
 uniform float frameJitter;
 uniform mat3 viewToBody;
 uniform vec3 camUp;            // unit, body centre -> camera (view axes)
@@ -361,7 +365,8 @@ float ign(vec2 p)
 
 void marchPixel()
 {
-	vec2 lowPx = gl_FragCoord.xy + jitter;
+	vec2 pixC = vec2(ivec2(gl_FragCoord.xy) * block + blockOffset) + 0.5;   // the pixel's centre
+	vec2 lowPx = pixC + jitter;
 	vec2 ndc = lowPx / lowSize * 2.0 - 1.0;
 	gD = normalize(vec3(ndc.x / projection[0][0], ndc.y / projection[1][1], -1.0));
 	gRc = radius + camAlt;
@@ -422,7 +427,7 @@ void marchPixel()
 	vec3 L = vec3(0.0);
 	float T = 1.0, dSum = 0.0, wSum = 0.0;
 	float span = t1 - t0;
-	float jit = fract(ign(gl_FragCoord.xy) + frameJitter);
+	float jit = fract(ign(pixC) + frameJitter);
 	float tPrev = t0;
 	for (int i = 0; i < viewSteps; i++) {
 		gSteps++;
