@@ -242,6 +242,15 @@ float hadleyFactor(float absLatDeg) {
 // it holds at range.
 float seafloorDepth(float e, vec3 camDir, float graz)
 {
+#ifdef DEPTH_PREPASS
+	// Static use of gl_SampleID makes the prepass run per MSAA sample with
+	// gl_FragCoord.z at the sample (terrain_draw.c). glMinSampleShading
+	// alone is not enough on AMD: it kept the pixel-centre z, so the colour
+	// pass's >= test failed on sloped samples and the planet went
+	// see-through. Never true; it only has to be there.
+	if (gl_SampleID < 0)
+		return 0.0;
+#endif
 	if (e >= seaLevel)
 		return gl_FragCoord.z;
 	float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
