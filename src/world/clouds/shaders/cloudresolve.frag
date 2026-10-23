@@ -4,6 +4,11 @@
 // sample, blended with the history reprojected through the body's frame
 // (camera motion and turning both), clamped to this frame's neighbourhood
 // so moving edges don't ghost. Low resolution, in and out.
+//
+// The clamp keeps colour and alpha together: alpha to the neighbourhood's
+// range, the colour per unit alpha (the clouds' own colour) to theirs.
+// Clamping the premultiplied channels one by one paired a thin edge's low
+// colour with a thick neighbour's alpha: dark rims along every edge.
 
 uniform mat4 projection;
 uniform vec2 lowSize;
@@ -35,12 +40,18 @@ void main()
 	}
 
 	// This frame's neighbourhood: the history may not leave its range.
-	vec4 mn = c, mx = c;
+	float aMin = c.a, aMax = c.a;
+	vec3 uMin = vec3(1e9), uMax = vec3(-1e9);
 	for (int y = -1; y <= 1; y++)
 		for (int x = -1; x <= 1; x++) {
 			vec4 n = texelFetch(curColor, clamp(px + ivec2(x, y), ivec2(0), hi), 0);
-			mn = min(mn, n);
-			mx = max(mx, n);
+			aMin = min(aMin, n.a);
+			aMax = max(aMax, n.a);
+			if (n.a > 0.02) {
+				vec3 u = n.rgb / n.a;
+				uMin = min(uMin, u);
+				uMax = max(uMax, u);
+			}
 		}
 
 	// Where this pixel's clouds (or, without any, a far point) were on
@@ -56,7 +67,12 @@ void main()
 		OutDepth = dc;
 		return;
 	}
-	vec4 h = clamp(texture(histColor, uv), mn, mx);
+	vec4 h = texture(histColor, uv);
+	float ha = clamp(h.a, aMin, aMax);
+	vec3 hu = h.a > 1e-4 ? h.rgb / h.a : vec3(0.0);
+	if (uMax.x >= uMin.x)
+		hu = clamp(hu, uMin, uMax);
+	h = vec4(hu * ha, ha);
 	OutColor = mix(c, h, historyWeight);
 	OutDepth = dc < NONE ? dc : texture(histDepth, uv).r;
 }

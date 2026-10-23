@@ -19,8 +19,12 @@
 #define UNIT_SHAPE   2
 #define UNIT_DETAIL  3
 #define UNIT_DEPTH   4
+#define UNIT_SHADOW  5
 
-static GLuint marchProgram, resolveProgram, compositeProgram, emptyVAO;
+/* Shadow map: samples along each texel's ray through the shell. */
+#define SHADOW_STEPS 24
+
+static GLuint marchProgram, resolveProgram, compositeProgram, shadowProgram, emptyVAO;
 static GLuint shapeTex, detailTex;
 static GLuint weatherTex, colorTex, mapFBO;
 /* Low-resolution targets: this frame's march, and two accumulated
@@ -44,6 +48,14 @@ static dvec3 prevCamB;
 static float prevViewToBody[9];
 static unsigned int frameCount;
 
+/* The shadow map and the frame it was made in (body-fixed, m). */
+static GLuint shadowTex, shadowFBO;
+static int shadowValid;
+static dmat4 shadowRotation;
+static dvec3 shadowBodyCenter, shadowMapCenter, shadowEast, shadowNorth, shadowSunB;
+static double shadowCX, shadowCY, shadowExtentM;
+static float shadowLo, shadowHi;
+
 static CloudVolumeParams g_params = {
 	1,          /* enabled */
 	2,          /* resDivisor */
@@ -55,6 +67,7 @@ static CloudVolumeParams g_params = {
 	0.5f,       /* multiScatter */
 	0.5f,       /* powder */
 	0.6f,       /* ambient */
+	300.0e3f,   /* shadowExtent */
 };
 
 CloudVolumeParams *CloudVolume_Params(void) { return &g_params; }
@@ -236,6 +249,17 @@ static GLuint newFBO2(GLuint color, GLuint depth)
 	return fbo;
 }
 
+static GLuint newFBO1(GLuint color)
+{
+	GLuint fbo;
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
+	GLenum buf = GL_COLOR_ATTACHMENT0;
+	glDrawBuffers(1, &buf);
+	return fbo;
+}
+
 static void freeLowTargets(void)
 {
 	if (!marchFBO)
@@ -274,12 +298,15 @@ void CloudVolume_Init(void)
 	Shader_Create(&marchProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudvolume.frag");
 	Shader_Create(&resolveProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudresolve.frag");
 	Shader_Create(&compositeProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudcomposite.frag");
+	Shader_Create(&shadowProgram, "world/clouds/cloudvol.vert", "world/clouds/cloudshadow.frag");
 	glGenVertexArrays(1, &emptyVAO);
 	buildNoise();
 
 	weatherTex = newTex2D(CLOUDVOL_MAP_SIZE, CLOUDVOL_MAP_SIZE, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
 	colorTex = newTex2D(CLOUDVOL_MAP_SIZE, CLOUDVOL_MAP_SIZE, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
 	mapFBO = newFBO2(weatherTex, colorTex);
+	shadowTex = newTex2D(CLOUDVOL_SHADOW_SIZE, CLOUDVOL_SHADOW_SIZE, GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, GL_LINEAR);
+	shadowFBO = newFBO1(shadowTex);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -388,9 +415,171 @@ static void drawFullScreen(void)
 	glBindVertexArray(0);
 }
 
+/* View -> body-fixed for this frame: column j is view axis j in body
+   axes (column-major for glUniformMatrix3fv). */
+static void viewToBody(const FrameContext *f, dmat4 rot, float v2b[9])
+{
+	for (int i = 0; i < 3; i++)
+		for (int j = 0; j < 3; j++) {
+			double acc = 0.0;
+			for (int k = 0; k < 3; k++)
+				acc += rot.m[k][i] * f->view.m[j][k];
+			v2b[j * 3 + i] = (float)acc;
+		}
+}
+
+/* cloudshape.glsl's uniforms and textures (units 0-3) on program p; *lo,
+   *hi: the shell. */
+static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, float *hi)
+{
+	int n = s->layerCount > CLOUDVOL_MAX_LAYERS ? CLOUDVOL_MAX_LAYERS : s->layerCount;
+	float lb[CLOUDVOL_MAX_LAYERS], lt[CLOUDVOL_MAX_LAYERS], ld[CLOUDVOL_MAX_LAYERS], lc[CLOUDVOL_MAX_LAYERS];
+	float ls[CLOUDVOL_MAX_LAYERS], lsw[CLOUDVOL_MAX_LAYERS], lsh[CLOUDVOL_MAX_LAYERS], le[CLOUDVOL_MAX_LAYERS];
+	float lan[CLOUDVOL_MAX_LAYERS], lsf[CLOUDVOL_MAX_LAYERS];
+	float ltint[CLOUDVOL_MAX_LAYERS * 3];
+	*lo = 1e30f;
+	*hi = -1e30f;
+	for (int i = 0; i < CLOUDVOL_MAX_LAYERS; i++) {
+		const CloudVolumeLayer *L = &s->layers[i];
+		int on = i < n;
+		lb[i] = L->base;
+		lt[i] = on ? L->top : L->base;
+		ld[i] = on ? L->density * s->fade : 0.0f;
+		lc[i] = L->coverage;
+		ls[i] = L->scale > 1.0f ? L->scale : 1.0f;
+		lsw[i] = L->sweep > 0.1f ? L->sweep : 0.1f;
+		lsh[i] = L->shear;
+		le[i] = L->erosion;
+		lan[i] = L->anvil;
+		lsf[i] = L->shelf;
+		for (int c = 0; c < 3; c++)
+			ltint[i * 3 + c] = L->tint[c];
+		if (on) {
+			*lo = fminf(*lo, L->base);
+			*hi = fmaxf(*hi, L->top);
+		}
+	}
+	glUniform1i(glGetUniformLocation(p, "layerCount"), n);
+	glUniform1fv(glGetUniformLocation(p, "layerBase"), CLOUDVOL_MAX_LAYERS, lb);
+	glUniform1fv(glGetUniformLocation(p, "layerTop"), CLOUDVOL_MAX_LAYERS, lt);
+	glUniform1fv(glGetUniformLocation(p, "layerDensity"), CLOUDVOL_MAX_LAYERS, ld);
+	glUniform1fv(glGetUniformLocation(p, "layerCoverage"), CLOUDVOL_MAX_LAYERS, lc);
+	glUniform1fv(glGetUniformLocation(p, "layerScale"), CLOUDVOL_MAX_LAYERS, ls);
+	glUniform1fv(glGetUniformLocation(p, "layerSweep"), CLOUDVOL_MAX_LAYERS, lsw);
+	glUniform1fv(glGetUniformLocation(p, "layerShear"), CLOUDVOL_MAX_LAYERS, lsh);
+	glUniform1fv(glGetUniformLocation(p, "layerErosion"), CLOUDVOL_MAX_LAYERS, le);
+	glUniform1fv(glGetUniformLocation(p, "layerAnvil"), CLOUDVOL_MAX_LAYERS, lan);
+	glUniform1fv(glGetUniformLocation(p, "layerShelf"), CLOUDVOL_MAX_LAYERS, lsf);
+	glUniform3fv(glGetUniformLocation(p, "layerTint"), CLOUDVOL_MAX_LAYERS, ltint);
+	glUniform1f(glGetUniformLocation(p, "shellLo"), *lo);
+	glUniform1f(glGetUniformLocation(p, "shellHi"), *hi);
+	uniform3d(p, "mapEast", s->mapEast);
+	uniform3d(p, "mapNorth", s->mapNorth);
+	glUniform1f(glGetUniformLocation(p, "mapExtent"), (float)s->mapExtent);
+	glUniform1f(glGetUniformLocation(p, "detailScale"), g_params.detailScale);
+
+	glActiveTexture(GL_TEXTURE0 + UNIT_WEATHER);
+	glBindTexture(GL_TEXTURE_2D, weatherTex);
+	glUniform1i(glGetUniformLocation(p, "weatherMap"), UNIT_WEATHER);
+	glActiveTexture(GL_TEXTURE0 + UNIT_COLOR);
+	glBindTexture(GL_TEXTURE_2D, colorTex);
+	glUniform1i(glGetUniformLocation(p, "colorMap"), UNIT_COLOR);
+	glActiveTexture(GL_TEXTURE0 + UNIT_SHAPE);
+	glBindTexture(GL_TEXTURE_3D, shapeTex);
+	glUniform1i(glGetUniformLocation(p, "shapeNoise"), UNIT_SHAPE);
+	glActiveTexture(GL_TEXTURE0 + UNIT_DETAIL);
+	glBindTexture(GL_TEXTURE_3D, detailTex);
+	glUniform1i(glGetUniformLocation(p, "detailNoise"), UNIT_DETAIL);
+}
+
+static int sceneReady(const CloudVolumeScene *s)
+{
+	return g_params.enabled && s->fade > 0.0f && s->layerCount > 0 && mapValid && mapBody == s->body;
+}
+
+void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s)
+{
+	shadowValid = 0;
+	if (!sceneReady(s) || g_params.shadowExtent <= 0.0f)
+		return;
+	/* Centred under the camera, in the weather map's plane. */
+	dvec3 camB = toBody(s->rotation, dsubvec3(f->cam, s->center));
+	dvec3 mapC = dscalarvec3(mapCenterB, s->radius);
+	dvec3 camToMap = dsubvec3(camB, mapC);
+	shadowCX = camToMap.x * s->mapEast.x + camToMap.y * s->mapEast.y + camToMap.z * s->mapEast.z;
+	shadowCY = camToMap.x * s->mapNorth.x + camToMap.y * s->mapNorth.y + camToMap.z * s->mapNorth.z;
+	shadowExtentM = g_params.shadowExtent;
+	shadowSunB = toBody(s->rotation, s->sunDir);
+	shadowRotation = s->rotation;
+	shadowBodyCenter = s->center;
+	shadowMapCenter = mapC;
+	shadowEast = s->mapEast;
+	shadowNorth = s->mapNorth;
+
+	GLint fbo, vp[4];
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+	glGetIntegerv(GL_VIEWPORT, vp);
+	GLboolean depth = glIsEnabled(GL_DEPTH_TEST), blend = glIsEnabled(GL_BLEND), cull = glIsEnabled(GL_CULL_FACE);
+	glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
+	glViewport(0, 0, CLOUDVOL_SHADOW_SIZE, CLOUDVOL_SHADOW_SIZE);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+
+	GLuint p = shadowProgram;
+	glUseProgram(p);
+	setShapeUniforms(p, s, &shadowLo, &shadowHi);
+	uniform3d(p, "mapCenterB", mapC);
+	glUniform2f(glGetUniformLocation(p, "shadowCenter"), (float)shadowCX, (float)shadowCY);
+	glUniform1f(glGetUniformLocation(p, "shadowExtent"), (float)shadowExtentM);
+	glUniform1f(glGetUniformLocation(p, "shadowSize"), (float)CLOUDVOL_SHADOW_SIZE);
+	uniform3d(p, "sunB", shadowSunB);
+	glUniform1f(glGetUniformLocation(p, "radius"), (float)s->radius);
+	glUniform1i(glGetUniformLocation(p, "steps"), SHADOW_STEPS);
+	drawFullScreen();
+
+	for (int u = UNIT_DETAIL; u >= 0; u--) {
+		glActiveTexture(GL_TEXTURE0 + u);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glBindTexture(GL_TEXTURE_3D, 0);
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
+	glViewport(vp[0], vp[1], vp[2], vp[3]);
+	if (depth)
+		glEnable(GL_DEPTH_TEST);
+	if (blend)
+		glEnable(GL_BLEND);
+	if (cull)
+		glEnable(GL_CULL_FACE);
+	shadowValid = 1;
+}
+
+void CloudVolume_BindShadow(GLuint p, int unit, const FrameContext *f)
+{
+	glUniform1i(glGetUniformLocation(p, "csOn"), shadowValid);
+	glActiveTexture(GL_TEXTURE0 + unit);
+	glBindTexture(GL_TEXTURE_2D, shadowValid ? shadowTex : 0);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(glGetUniformLocation(p, "cloudShadowMap"), unit);
+	if (!shadowValid)
+		return;
+	float v2b[9];
+	viewToBody(f, shadowRotation, v2b);
+	glUniformMatrix3fv(glGetUniformLocation(p, "csViewToBody"), 1, GL_FALSE, v2b);
+	dvec3 camB = toBody(shadowRotation, dsubvec3(f->cam, shadowBodyCenter));
+	uniform3d(p, "csCamToMap", dsubvec3(camB, shadowMapCenter));
+	uniform3d(p, "csEast", shadowEast);
+	uniform3d(p, "csNorth", shadowNorth);
+	glUniform2f(glGetUniformLocation(p, "csCenter"), (float)shadowCX, (float)shadowCY);
+	glUniform1f(glGetUniformLocation(p, "csExtent"), (float)shadowExtentM);
+	glUniform1f(glGetUniformLocation(p, "csLo"), shadowLo);
+	glUniform1f(glGetUniformLocation(p, "csHi"), shadowHi);
+	uniform3d(p, "csSun", shadowSunB);
+}
+
 void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 {
-	if (!g_params.enabled || s->fade <= 0.0f || s->layerCount <= 0 || !mapValid || mapBody != s->body) {
+	if (!sceneReady(s)) {
 		prevValid = 0;
 		return;
 	}
@@ -412,15 +601,8 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	upW = dscalarvec3(upW, 1.0 / dlengthvec3(upW));
 	dvec3 upV = toView(f->view, upW);
 	dvec3 sunV = toView(f->view, s->sunDir);
-	/* View -> body-fixed: column j is view axis j in body axes. */
 	float v2b[9];
-	for (int i = 0; i < 3; i++)
-		for (int j = 0; j < 3; j++) {
-			double acc = 0.0;
-			for (int k = 0; k < 3; k++)
-				acc += s->rotation.m[k][i] * f->view.m[j][k];
-			v2b[j * 3 + i] = (float)acc;
-		}
+	viewToBody(f, s->rotation, v2b);
 	dvec3 camToMap = dsubvec3(camB, dscalarvec3(mapCenterB, s->radius));
 
 	/* History: same body, and the camera has not jumped. */
@@ -450,45 +632,32 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1f(glGetUniformLocation(p, "radius"), (float)s->radius);
 	glUniform1f(glGetUniformLocation(p, "camAlt"), (float)camAlt);
 	uniform3d(p, "camToMap", camToMap);
-	uniform3d(p, "mapEast", s->mapEast);
-	uniform3d(p, "mapNorth", s->mapNorth);
-	glUniform1f(glGetUniformLocation(p, "mapExtent"), (float)s->mapExtent);
+	float lo, hi;
+	setShapeUniforms(p, s, &lo, &hi);
+	CloudVolume_BindShadow(p, UNIT_SHADOW, f);
 
-	int n = s->layerCount > CLOUDVOL_MAX_LAYERS ? CLOUDVOL_MAX_LAYERS : s->layerCount;
-	float lb[CLOUDVOL_MAX_LAYERS], lt[CLOUDVOL_MAX_LAYERS], ld[CLOUDVOL_MAX_LAYERS], lc[CLOUDVOL_MAX_LAYERS];
-	float ls[CLOUDVOL_MAX_LAYERS], lsw[CLOUDVOL_MAX_LAYERS], lsh[CLOUDVOL_MAX_LAYERS], le[CLOUDVOL_MAX_LAYERS];
-	float ltint[CLOUDVOL_MAX_LAYERS * 3];
-	float lo = 1e30f, hi = -1e30f;
-	for (int i = 0; i < CLOUDVOL_MAX_LAYERS; i++) {
-		const CloudVolumeLayer *L = &s->layers[i];
-		int on = i < n;
-		lb[i] = L->base;
-		lt[i] = on ? L->top : L->base;
-		ld[i] = on ? L->density * s->fade : 0.0f;
-		lc[i] = L->coverage;
-		ls[i] = L->scale > 1.0f ? L->scale : 1.0f;
-		lsw[i] = L->sweep > 0.1f ? L->sweep : 0.1f;
-		lsh[i] = L->shear;
-		le[i] = L->erosion;
+	/* Flashes, camera-relative in view axes. */
+	int nf = s->flashCount < 0 ? 0 : s->flashCount > CLOUDVOL_MAX_FLASHES ? CLOUDVOL_MAX_FLASHES : s->flashCount;
+	float fp[CLOUDVOL_MAX_FLASHES * 3], fc[CLOUDVOL_MAX_FLASHES * 3], fr[CLOUDVOL_MAX_FLASHES];
+	memset(fp, 0, sizeof fp);
+	memset(fc, 0, sizeof fc);
+	for (int i = 0; i < CLOUDVOL_MAX_FLASHES; i++) {
+		fr[i] = 1.0f;
+		if (i >= nf)
+			continue;
+		const CloudVolumeFlash *F = &s->flashes[i];
+		dvec3 v = toView(f->view, dsubvec3(F->position, f->cam));
+		fp[i * 3 + 0] = (float)v.x;
+		fp[i * 3 + 1] = (float)v.y;
+		fp[i * 3 + 2] = (float)v.z;
 		for (int c = 0; c < 3; c++)
-			ltint[i * 3 + c] = L->tint[c];
-		if (on) {
-			lo = fminf(lo, L->base);
-			hi = fmaxf(hi, L->top);
-		}
+			fc[i * 3 + c] = F->color[c];
+		fr[i] = F->radius > 1.0f ? F->radius : 1.0f;
 	}
-	glUniform1i(glGetUniformLocation(p, "layerCount"), n);
-	glUniform1fv(glGetUniformLocation(p, "layerBase"), CLOUDVOL_MAX_LAYERS, lb);
-	glUniform1fv(glGetUniformLocation(p, "layerTop"), CLOUDVOL_MAX_LAYERS, lt);
-	glUniform1fv(glGetUniformLocation(p, "layerDensity"), CLOUDVOL_MAX_LAYERS, ld);
-	glUniform1fv(glGetUniformLocation(p, "layerCoverage"), CLOUDVOL_MAX_LAYERS, lc);
-	glUniform1fv(glGetUniformLocation(p, "layerScale"), CLOUDVOL_MAX_LAYERS, ls);
-	glUniform1fv(glGetUniformLocation(p, "layerSweep"), CLOUDVOL_MAX_LAYERS, lsw);
-	glUniform1fv(glGetUniformLocation(p, "layerShear"), CLOUDVOL_MAX_LAYERS, lsh);
-	glUniform1fv(glGetUniformLocation(p, "layerErosion"), CLOUDVOL_MAX_LAYERS, le);
-	glUniform3fv(glGetUniformLocation(p, "layerTint"), CLOUDVOL_MAX_LAYERS, ltint);
-	glUniform1f(glGetUniformLocation(p, "shellLo"), lo);
-	glUniform1f(glGetUniformLocation(p, "shellHi"), hi);
+	glUniform1i(glGetUniformLocation(p, "flashCount"), nf);
+	glUniform3fv(glGetUniformLocation(p, "flashPos"), CLOUDVOL_MAX_FLASHES, fp);
+	glUniform3fv(glGetUniformLocation(p, "flashColor"), CLOUDVOL_MAX_FLASHES, fc);
+	glUniform1fv(glGetUniformLocation(p, "flashRadius"), CLOUDVOL_MAX_FLASHES, fr);
 
 	uniform3f(p, "airAlbedo", s->airAlbedo);
 	glUniform1f(glGetUniformLocation(p, "airAmbient"), s->airAmbient);
@@ -507,23 +676,10 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1i(glGetUniformLocation(p, "viewSteps"), g_params.viewSteps);
 	glUniform1i(glGetUniformLocation(p, "lightSteps"), g_params.lightSteps);
 	glUniform1f(glGetUniformLocation(p, "maxDistance"), (float)CloudVolume_Reach(camAlt - lo, s->mapExtent));
-	glUniform1f(glGetUniformLocation(p, "detailScale"), g_params.detailScale);
 	glUniform1f(glGetUniformLocation(p, "multiScatter"), g_params.multiScatter);
 	glUniform1f(glGetUniformLocation(p, "powder"), g_params.powder);
 	glUniform1f(glGetUniformLocation(p, "ambient"), g_params.ambient);
 
-	glActiveTexture(GL_TEXTURE0 + UNIT_WEATHER);
-	glBindTexture(GL_TEXTURE_2D, weatherTex);
-	glUniform1i(glGetUniformLocation(p, "weatherMap"), UNIT_WEATHER);
-	glActiveTexture(GL_TEXTURE0 + UNIT_COLOR);
-	glBindTexture(GL_TEXTURE_2D, colorTex);
-	glUniform1i(glGetUniformLocation(p, "colorMap"), UNIT_COLOR);
-	glActiveTexture(GL_TEXTURE0 + UNIT_SHAPE);
-	glBindTexture(GL_TEXTURE_3D, shapeTex);
-	glUniform1i(glGetUniformLocation(p, "shapeNoise"), UNIT_SHAPE);
-	glActiveTexture(GL_TEXTURE0 + UNIT_DETAIL);
-	glBindTexture(GL_TEXTURE_3D, detailTex);
-	glUniform1i(glGetUniformLocation(p, "detailNoise"), UNIT_DETAIL);
 	glActiveTexture(GL_TEXTURE0 + UNIT_DEPTH);
 	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, sceneDepthTex);
 	glUniform1i(glGetUniformLocation(p, "sceneDepth"), UNIT_DEPTH);
@@ -588,7 +744,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glDepthMask(GL_TRUE);
 	if (cull)
 		glEnable(GL_CULL_FACE);
-	for (int u = 4; u >= 0; u--) {
+	for (int u = UNIT_SHADOW; u >= 0; u--) {
 		glActiveTexture(GL_TEXTURE0 + u);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);
@@ -616,4 +772,5 @@ void CloudVolume_DebugPanel(struct nk_context *ctx)
 	DebugGUI_Slider(ctx, "Multiple scattering", &g_params.multiScatter, 0.0f, 1.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Powder", &g_params.powder, 0.0f, 1.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Skylight", &g_params.ambient, 0.0f, 3.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Shadow map width (m)", &g_params.shadowExtent, 0.0f, 1.0e6f, 1.0e3f, "%.0f");
 }

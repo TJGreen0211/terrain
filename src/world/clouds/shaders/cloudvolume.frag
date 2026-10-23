@@ -12,17 +12,18 @@
 // body's frame relative to the map's centre, so the clouds stay put as the
 // camera moves and the numbers stay small.
 //
-// Density: per layer, the map's cover shapes Perlin-Worley noise under a
-// height profile (soft base, rounded top as high as the map's "towering"
-// says), stretched east-west (sweep) and leaning with height (shear);
-// detail Worley noise erodes the edges, wispy low and billowy high (the
-// Horizon Zero Dawn recipe). Light: a short march toward the Sun, two
+// Density: cloudshape.glsl. Light: a short march toward the Sun (and, farther, the shadow map), two
 // Henyey-Greenstein lobes, three multiple-scattering octaves (Wrenninge),
 // powder for thin edges, and sky- and ground-light by height in the shell.
 //
-// The air between the camera and the clouds (an exponential atmosphere:
-// airColumn over airScaleHeight) fogs them at their weighted distance, so
-// they blend over a scene whose own air is already drawn.
+// The air (an exponential atmosphere: airColumn over airScaleHeight) is
+// integrated along the march, so each sample is fogged by the air in front
+// of it. The scene behind already has its own air drawn over it, which the
+// clouds' alpha then hides in part: the clouds carry the air that sits in
+// front of them (each bit of air weighted by how much more of the scene
+// the clouds hide than of that air). Fogging everything at one weighted
+// distance instead left dark rims where a ray grazed a near cloud and went
+// on to far ones: the far clouds got the near cloud's thin air.
 
 uniform mat4 projection;
 uniform vec2 lowSize;          // this target, px
@@ -35,21 +36,12 @@ uniform vec3 sunDir;           // unit, toward the Sun (view axes)
 uniform float radius;          // reference radius, m
 uniform float camAlt;          // m above it
 uniform vec3 camToMap;         // camera - map centre, body axes, m
-uniform vec3 mapEast, mapNorth;
-uniform float mapExtent;       // m
 
-#define MAX_LAYERS 2           // CLOUDVOL_MAX_LAYERS
-uniform int layerCount;
-uniform float layerBase[MAX_LAYERS];
-uniform float layerTop[MAX_LAYERS];
-uniform float layerDensity[MAX_LAYERS];
-uniform float layerCoverage[MAX_LAYERS];
-uniform float layerScale[MAX_LAYERS];
-uniform float layerSweep[MAX_LAYERS];
-uniform float layerShear[MAX_LAYERS];
-uniform float layerErosion[MAX_LAYERS];
-uniform vec3 layerTint[MAX_LAYERS];
-uniform float shellLo, shellHi;   // the layers' lowest base, highest top
+#define MAX_FLASHES 4          // CLOUDVOL_MAX_FLASHES
+uniform int flashCount;
+uniform vec3 flashPos[MAX_FLASHES];     // view axes, m
+uniform vec3 flashColor[MAX_FLASHES];   // linear
+uniform float flashRadius[MAX_FLASHES]; // m
 
 uniform vec3 airAlbedo;        // display
 uniform float airAmbient;
@@ -68,15 +60,10 @@ uniform float exposure;
 uniform int viewSteps;
 uniform int lightSteps;
 uniform float maxDistance;
-uniform float detailScale;
 uniform float multiScatter;
 uniform float powder;
 uniform float ambient;
 
-uniform sampler2D weatherMap;  // r top cover, g middle cover, b towering
-uniform sampler2D colorMap;    // rgb albedo (display)
-uniform sampler3D shapeNoise;
-uniform sampler3D detailNoise;
 uniform sampler2DMS sceneDepth;
 uniform int sceneSamples;
 uniform float depthNear;
@@ -85,6 +72,8 @@ layout(location = 0) out vec4 OutColor;
 layout(location = 1) out float OutDepth;
 
 #include "engine/gfx/tonemap.glsl"
+#include "world/clouds/cloudshape.glsl"
+#include "world/clouds/cloudshadowmap.glsl"
 
 const float PI = 3.14159265;
 const float NONE = 1e9;
@@ -92,11 +81,6 @@ const float NONE = 1e9;
 vec3 gD;          // the view ray
 float gRc, gB;    // camera's distance from the centre; its dot with the ray
 float gPixA;      // one pixel's angle
-
-float remap(float v, float lo, float hi, float nlo, float nhi)
-{
-	return nlo + (v - lo) / (hi - lo) * (nhi - nlo);
-}
 
 // The ray's crossings of the sphere at altitude a: (near, far), or
 // (-1, -1) if it misses. Roots of t^2 + 2 b t + c = 0, the stable way.
@@ -129,86 +113,22 @@ float sceneDistance(vec2 lowPx)
 	return depthNear / d / max(-gD.z, 1e-6);
 }
 
-// Cloud extinction (1/m) at view-space point pv, altitude a; foot: a pixel
-// there (m), for the noise mips; detail: with the edge erosion. alb: the
-// albedo there (linear).
-float density(vec3 pv, float a, float foot, bool detail, out vec3 alb)
+// Cloud extinction at view-space point pv (cloudshape.glsl's density).
+float densityV(vec3 pv, float a, float foot, bool detail, out vec3 alb)
 {
-	alb = vec3(0.0);
-	if (a <= shellLo || a >= shellHi)
-		return 0.0;
-	vec3 rel = camToMap + viewToBody * pv;
-	vec2 xy = vec2(dot(rel, mapEast), dot(rel, mapNorth));
-	vec2 uv = xy / mapExtent + 0.5;
-	float edge = smoothstep(0.0, 0.06, min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y)));
-	if (edge <= 0.0)
-		return 0.0;
-	vec4 w = textureLod(weatherMap, uv, 0.0);
-	vec3 mapAlb = vec3(-1.0);
-
-	float total = 0.0;
-	vec3 albSum = vec3(0.0);
-	for (int i = 0; i < MAX_LAYERS; i++) {
-		if (i >= layerCount)
-			break;
-		float hf = (a - layerBase[i]) / (layerTop[i] - layerBase[i]);
-		if (hf <= 0.0 || hf >= 1.0)
-			continue;
-		float sc = layerScale[i];
-		// Broad regions of thick cloud and wide valleys (~5 shape periods,
-		// swept east-west), so the shape noise's tiling never shows.
-		vec2 big = vec2(xy.x / (layerSweep[i] * 1.6), xy.y) / (sc * 5.3) + vec2(0.31, 0.77) * float(i);
-		float broad = textureLod(shapeNoise, vec3(big, 0.37), 0.0).r;
-		float cover = clamp((i == 0 ? w.r : w.g) * layerCoverage[i] + (broad - 0.67) * 1.6, 0.0, 1.0);
-		if (cover <= 0.01)
-			continue;
-		vec3 np = vec3((xy.x + (a - layerBase[i]) * layerShear[i]) / layerSweep[i], xy.y, a) / sc
-		        + float(i) * vec3(0.37, 0.71, 0.13);
-		float lodS = log2(max(foot / (sc / 128.0), 1.0));
-		// Soft flat base; rounded tops, as high as the map's towering,
-		// raised and lowered by broad cells (domes and valleys).
-		// The cell noise falls off linearly from each cell's centre (a
-		// cone); a circle profile makes it a dome.
-		float cell = 1.0 - mix(textureLod(shapeNoise, vec3(np.xy * 0.5, 0.5), lodS).g,
-		                       textureLod(shapeNoise, vec3(np.yx * 0.21 + 0.13, 0.81), lodS).g, 0.45);
-		float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
-		float topF = clamp(mix(0.35, 1.0, w.b) * (0.15 + 0.95 * dome), 0.12, 1.0);
-		float prof = smoothstep(0.0, 0.1, hf) * (1.0 - smoothstep(topF * 0.55, topF, hf));
-		if (prof <= 0.0)
-			continue;
-		vec4 sn = textureLod(shapeNoise, np, lodS);
-		float wfbm = sn.g * 0.625 + sn.b * 0.25 + sn.a * 0.125;
-		// Perlin-Worley cut by the Worley cells, then stretched over its
-		// actual range (about 0.5 to 0.95) so it carves the clouds.
-		float shape = clamp((remap(sn.r, wfbm - 1.0, 1.0, 0.0, 1.0) - 0.5) / 0.45, 0.0, 1.0);
-		float d = clamp(remap(shape * prof, 1.0 - cover, 1.0, 0.0, 1.0), 0.0, 1.0) * cover;
-		if (d <= 0.0)
-			continue;
-		if (detail && layerErosion[i] > 0.0) {
-			float lodD = log2(max(foot / (sc * detailScale / 32.0), 1.0));
-			vec3 dn = textureLod(detailNoise, np / detailScale, lodD).rgb;
-			float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
-			// Wispy at the base, billowy at the top.
-			float dmod = mix(dfbm, 1.0 - dfbm, clamp(hf * 4.0, 0.0, 1.0));
-			d = clamp(remap(d, dmod * layerErosion[i] * 0.6, 1.0, 0.0, 1.0), 0.0, 1.0);
-		}
-		d *= layerDensity[i] * edge;
-		if (d <= 0.0)
-			continue;
-		if (mapAlb.r < 0.0)
-			mapAlb = displayToLinear(textureLod(colorMap, uv, 0.0).rgb);
-		total += d;
-		albSum += d * mapAlb * layerTint[i];
-	}
-	if (total > 0.0)
-		alb = albSum / total;
-	return total;
+	return density(camToMap + viewToBody * pv, a, foot, detail, alb);
 }
 
-// Optical depth toward the Sun from view-space point pv.
+// How far the short march toward the Sun goes (m).
+float lightSpan()
+{
+	return clamp((shellHi - shellLo) * 0.6, 2000.0, 15000.0);
+}
+
+// Optical depth toward the Sun from view-space point pv, over lightSpan.
 float lightDepth(vec3 pv, float foot)
 {
-	float span = clamp((shellHi - shellLo) * 0.6, 2000.0, 15000.0);
+	float span = lightSpan();
 	vec3 centre = -camUp * gRc;
 	float tau = 0.0, sPrev = 0.0;
 	vec3 alb;
@@ -219,9 +139,23 @@ float lightDepth(vec3 pv, float foot)
 		vec3 q = pv + sunDir * (sPrev + 0.5 * ds);
 		sPrev = s;
 		float aq = length(q - centre) - radius;
-		tau += density(q, aq, foot + ds * 0.5, k < 2, alb) * ds;
+		tau += densityV(q, aq, foot + ds * 0.5, k < 2, alb) * ds;
 	}
 	return tau;
+}
+
+// The flashes' light at view-space point pv: diffusing through the cloud,
+// it falls off over each one's radius.
+vec3 flashLight(vec3 pv)
+{
+	vec3 E = vec3(0.0);
+	for (int i = 0; i < MAX_FLASHES; i++) {
+		if (i >= flashCount)
+			break;
+		float d = length(pv - flashPos[i]) / flashRadius[i];
+		E += flashColor[i] * exp(-1.5 * d) / (0.05 + d * d);
+	}
+	return E;
 }
 
 // Henyey-Greenstein, scaled so isotropic is 1.
@@ -245,16 +179,28 @@ float airMass(float mu)
 	return 1.0 / (max(mu, 0.0) + 0.50572 * pow(96.07995 - z, -1.6364));
 }
 
-// The air from the camera to distance tEnd along the ray: in-scatter
-// (rgb) and transmittance (a), lit like the haze pass (no rays).
-vec4 airTo(float tEnd)
+// The air at distance t along the ray (r: from the centre, a: altitude):
+// its light (scattered toward the camera, per unit optical depth), lit
+// like the haze pass (no rays); sigma: its extinction (1/m). ph: its phase.
+// airLin: its albedo in linear (the exact inverse of the curve, as the
+// haze pass uses, so the air in front of the clouds matches the air over
+// everything else).
+vec3 airLight(float t, float r, float a, float ph, vec3 airLin, out float sigma)
 {
-	float sigma0 = airColumn / airScaleHeight;
-	// The exact inverse of the curve, as the haze pass uses: the air in
-	// front of the clouds matches the air over everything else.
-	vec3 airLin = displayToLinear(airAlbedo);
-	float cosT = dot(gD, sunDir);
-	float ph = mix(1.0, hg(cosT, 0.6) / hg(0.0, 0.6), airForward);
+	float mus = dot((camUp * gRc + gD * t) / r, sunDir);
+	float dens = exp(-max(a, 0.0) / airScaleHeight);
+	sigma = airColumn / airScaleHeight * dens;
+	float tauSun = airColumn * dens * airMass(mus);
+	vec3 light = sunlight(mus, 2.0 * wrap);
+	// The clouds' shadow: shafts where the Sun comes through the gaps.
+	float shadow = cloudShadow(gD * t, a, mus);
+	return airLin * (light * exp(-tauSun) * ph * shadow + airAmbient * light + airNight);
+}
+
+// The air from the camera to distance tEnd along the ray: in-scatter
+// (rgb) and transmittance (a).
+vec4 airTo(float tEnd, float ph, vec3 airLin)
+{
 	vec3 L = vec3(0.0);
 	float T = 1.0, tPrev = 0.0;
 	const int N = 12;
@@ -266,11 +212,8 @@ vec4 airTo(float tEnd)
 		tPrev = tNext;
 		float r = sqrt(gRc * gRc + 2.0 * gB * t + t * t);
 		float a = (camAlt * (2.0 * radius + camAlt) + 2.0 * gB * t + t * t) / (r + radius);
-		float mus = dot((camUp * gRc + gD * t) / r, sunDir);
-		float sigma = sigma0 * exp(-max(a, 0.0) / airScaleHeight);
-		float tauSun = airColumn * exp(-max(a, 0.0) / airScaleHeight) * airMass(mus);
-		vec3 light = sunlight(mus, 2.0 * wrap);
-		vec3 J = airLin * (light * exp(-tauSun) * ph + airAmbient * light + airNight);
+		float sigma;
+		vec3 J = airLight(t, r, a, ph, airLin, sigma);
 		float ext = exp(-sigma * dt);
 		L += T * J * (1.0 - ext);
 		T *= ext;
@@ -320,6 +263,16 @@ void main()
 	float cosT = dot(gD, sunDir);
 	vec3 skyLin = displayToLinear(skyColor) * skyGain;
 	vec3 groundLin = displayToLinear(groundColor) * groundGain;
+	vec3 airLin = displayToLinear(airAlbedo);
+	float phA = mix(1.0, hg(cosT, 0.6) / hg(0.0, 0.6), airForward);
+	// The air from the camera to the shell (in front of all the clouds),
+	// then the air in the shell, step by step: A0 its in-scatter, A1 the
+	// same times the clouds' transmittance in front of each bit. Ta: the
+	// air's transmittance so far.
+	vec4 air0 = t0 > 0.0 ? airTo(t0, phA, airLin) : vec4(0.0, 0.0, 0.0, 1.0);
+	float Ta = air0.a;
+	vec3 A0 = vec3(0.0), A1 = vec3(0.0);
+
 	vec3 L = vec3(0.0);
 	float T = 1.0, dSum = 0.0, wSum = 0.0;
 	float span = t1 - t0;
@@ -335,13 +288,26 @@ void main()
 
 		float r = sqrt(gRc * gRc + 2.0 * gB * t + t * t);
 		float a = (camAlt * (2.0 * radius + camAlt) + 2.0 * gB * t + t * t) / (r + radius);
+
+		// The air over this step; the sample sees it up to its own point.
+		float sa;
+		vec3 Ja = airLight(t, r, a, phA, airLin, sa);
+		if (flashCount > 0)
+			Ja += 0.15 * airLin * flashLight(gD * t);
+		float extA = exp(-sa * dt);
+		float TaS = Ta * exp(-sa * dt * jit);
+		vec3 dA = Ta * Ja * (1.0 - extA);
+		A0 += dA;
+		A1 += T * dA;
+		Ta *= extA;
+
 		vec3 pv = gD * t;
 		float foot = t * gPixA;
 		vec3 alb;
 		// Cheap test first; the detail only where there is cloud.
-		if (density(pv, a, foot, false, alb) <= 0.0)
+		if (densityV(pv, a, foot, false, alb) <= 0.0)
 			continue;
-		float sigma = density(pv, a, foot, true, alb);
+		float sigma = densityV(pv, a, foot, true, alb);
 		sigma *= 1.0 - smoothstep(0.6 * maxDistance, maxDistance, t);
 		if (sigma <= 0.0)
 			continue;
@@ -351,7 +317,16 @@ void main()
 		float tauAir = airColumn * exp(-max(a, 0.0) / airScaleHeight) * airMass(mus);
 		vec3 sunE = sunlight(mus, wrap) * exp(-tauAir);
 
-		float tauL = lightSteps > 0 && mus > -0.2 ? lightDepth(pv, foot) : 0.0;
+		// The short march for the cloud nearby; the shadow map for clouds
+		// farther up the Sun's ray, from where the march ends. The map has
+		// no detail erosion (it overstates the depth) and light leaks
+		// round whole clouds: x0.4.
+		float tauL = 0.0;
+		if (lightSteps > 0 && mus > -0.2) {
+			tauL = lightDepth(pv, foot);
+			vec3 qEnd = pv + sunDir * lightSpan();
+			tauL += 0.4 * cloudShadowTau(qEnd, length(qEnd + camUp * gRc) - radius, mus);
+		}
 		// Each scattering order picks up the albedo's hue once more (its
 		// colour, not its darkness): deep, much scattered light (the
 		// shadows) comes out warmer and richer.
@@ -373,10 +348,20 @@ void main()
 		// x2: thick cloud reflects about like a sunlit Lambert surface
 		// (what the provider's own deck uses), not half as much.
 		vec3 S = alb * (2.0 * sunE * Ls * pw + amb * hue);
+		// Diffusion: deep in thick cloud the light falls off slowly with
+		// depth (about 1 / (1 + 0.75 (1 - g) tau)), not exponentially as
+		// the orders above do, so the inside of a big cloud glows dimly
+		// instead of going black. Only deep inside: near
+		// the surface the orders above keep the shading's contrast.
+		S += 2.0 * sunE * alb * 0.8 * smoothstep(4.0, 20.0, tauL) / (1.0 + 0.1 * tauL);
+		// Flashes: their own colour shows through the cloud's (bright
+		// white-blue light swamps the tint).
+		if (flashCount > 0)
+			S += mix(alb, vec3(dot(alb, vec3(0.3, 0.59, 0.11))), 0.7) * flashLight(pv);
 
 		float ext = exp(-sigma * dt);
 		float wgt = T * (1.0 - ext);
-		L += S * wgt;
+		L += S * wgt * TaS;
 		dSum += t * wgt;
 		wSum += wgt;
 		T *= ext;
@@ -386,11 +371,10 @@ void main()
 
 	float alpha = 1.0 - T;
 	if (wSum > 1e-4) {
-		// The air in front: over the clouds' share of the pixel.
-		float dist = dSum / wSum;
-		vec4 air = airTo(dist);
-		L = L * air.a + alpha * air.rgb;
-		OutDepth = dist;
+		// The air in front of the clouds, over what the clouds hide of
+		// the scene's own air behind them.
+		L += air0.rgb * alpha + (A1 - T * A0);
+		OutDepth = dSum / wSum;
 	}
 	OutColor = vec4(L * exposure, alpha);
 }

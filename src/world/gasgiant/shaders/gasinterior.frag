@@ -52,6 +52,7 @@ uniform float depthNear;
 out vec4 FragColor;
 
 #include "engine/gfx/tonemap.glsl"
+#include "world/clouds/cloudshadowmap.glsl"
 
 const float PI = 3.14159265;
 const float MAX = 1e30;
@@ -150,7 +151,9 @@ void march(float t0, float t1, int n, bool quadratic, inout vec3 L, inout float 
 		// Sunlight here: through the haze above, and the murk.
 		float tauSun = column * exp(-max(a, 0.0) / scaleHeight) * airMass(mus)
 		             + murkSigma * below / max(mus, 0.05);
-		vec3 sun = sunlight(mus, 2.0 * wrap) * exp(-tauSun);
+		// The cloud layers' shadow (cloud_volume.c): shafts where the Sun
+		// comes through gaps, in the haze among and the murk below them.
+		vec3 sun = sunlight(mus, 2.0 * wrap) * exp(-tauSun) * cloudShadow(gD * t, a, mus);
 		float sky = exp(-murkSigma * below * 0.7);
 		vec3 J = alb * (sun * gFwd + ambient * sunlight(mus, 2.0 * wrap) * sky + nightAmbient);
 

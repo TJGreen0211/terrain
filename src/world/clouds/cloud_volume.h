@@ -14,8 +14,11 @@
    - A weather map: a square patch of the tangent plane centred under the
      camera, CLOUDVOL_MAP_SIZE texels a side, in two RGBA8 textures:
        weather: r = top layer cover, g = middle layer cover, b = height
-                (how far the clouds tower to their layer's top), a = unused
-       colour:  rgb = cloud albedo (display), a = unused
+                (how far the clouds tower to their layer's top),
+                a = wind shear across the wind, signed (0.5 = none): the
+                clouds lean with it, spread into anvils and shelves
+       colour:  rgb = cloud albedo (display), a = walls: full cover,
+                built to the layer's top (storm eyewalls)
      The provider bakes it with its own full-screen pass between
      CloudVolume_BeginWeatherBake and _EndWeatherBake, and re-bakes when the
      camera has moved far enough (CloudVolume_NeedsBake).
@@ -27,12 +30,24 @@
    over frames by reprojection (in the body's frame, so the clouds stay
    put while the camera and the body move), then upsampled over the scene.
    The clouds fog themselves with the same exponential atmosphere (the air
-   between the camera and each cloud), so they go over a scene whose own
-   air is already drawn. Layer 0 is the top layer (weather r), layer 1 the
-   middle one (weather g). */
+   between the camera and each cloud, integrated along the march), so they
+   go over a scene whose own air is already drawn. Layer 0 is the top layer
+   (weather r), layer 1 the middle one (weather g).
 
-#define CLOUDVOL_MAX_LAYERS 2
-#define CLOUDVOL_MAP_SIZE   1024
+   Flashes (lightning) are point lights inside the clouds that the provider
+   switches on and off; they light the cloud around them and, more
+   faintly, the air.
+
+   A shadow map (the clouds' optical depth toward the Sun over a square
+   around the camera, CLOUDVOL_SHADOW_SIZE texels a side) shadows the air
+   in and under the layers, so sunlight through gaps makes shafts. The
+   march uses it; a provider's own air pass can too (CloudVolume_BindShadow
+   with cloudshadowmap.glsl). */
+
+#define CLOUDVOL_MAX_LAYERS  2
+#define CLOUDVOL_MAP_SIZE    1024
+#define CLOUDVOL_MAX_FLASHES 4
+#define CLOUDVOL_SHADOW_SIZE 512
 
 typedef struct CloudVolumeLayer {
 	float base, top;       /* m above the reference radius */
@@ -43,7 +58,17 @@ typedef struct CloudVolumeLayer {
 	float sweep;           /* east-west stretch of the shapes */
 	float shear;           /* shapes lean east with height (m per m) */
 	float erosion;         /* detail noise eating the edges, 0..1 */
+	float anvil;           /* tops spreading out where the wind shears, 0..1 */
+	float shelf;           /* thin flat sheets out from the clouds, 0..1 */
 } CloudVolumeLayer;
+
+/* A point light in the clouds (lightning). Its light falls off over
+   radius as it diffuses through the cloud. */
+typedef struct CloudVolumeFlash {
+	dvec3 position;        /* world, m */
+	float color[3];        /* linear, x the Sun's light, this frame */
+	float radius;          /* m */
+} CloudVolumeFlash;
 
 typedef struct CloudVolumeScene {
 	int body;              /* the scene's owner; a change resets the history */
@@ -72,6 +97,8 @@ typedef struct CloudVolumeScene {
 	float groundGain;      /* ... times this, x the Sun */
 	float exposure;
 	float fade;            /* overall density, 0..1 (the provider's hand-off) */
+	int flashCount;
+	CloudVolumeFlash flashes[CLOUDVOL_MAX_FLASHES];
 } CloudVolumeScene;
 
 /* Quality and look shared by every body (debug panel). */
@@ -86,6 +113,7 @@ typedef struct CloudVolumeParams {
 	float multiScatter;    /* strength of the multiple-scattering octaves */
 	float powder;          /* darkening of thin cloud facing the Sun */
 	float ambient;         /* skylight strength */
+	float shadowExtent;    /* m: the shadow map's width (0: no shadow map) */
 } CloudVolumeParams;
 CloudVolumeParams *CloudVolume_Params(void);
 
@@ -112,6 +140,14 @@ void CloudVolume_BeginWeatherBake(void);
 void CloudVolume_EndWeatherBake(int body, dvec3 mapCenter);
 /* Drops the map (it no longer matches any provider). */
 void CloudVolume_Invalidate(void);
+
+/* Rebuilds the shadow map for this frame's scene (before anything reads
+   it: the provider's air pass, then CloudVolume_Draw). Off when disabled
+   or s->fade is 0. */
+void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s);
+/* Sets cloudshadowmap.glsl's uniforms on the program in use, with the map
+   on texture unit `unit` (csOn = 0 when there is no map this frame). */
+void CloudVolume_BindShadow(GLuint program, int unit, const FrameContext *f);
 
 /* Marches s and blends it over the bound target (the main pass, after the
    scene's own air). Nothing when disabled or s->fade is 0. */

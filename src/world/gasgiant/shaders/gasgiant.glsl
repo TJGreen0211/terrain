@@ -242,6 +242,7 @@ struct GasCloud {
 	float h;       // the cloud texture, [0, 1]
 	float hi;      // high cloud cover
 	float storm;   // storm and cyclone cover, cores and collars
+	float wall;    // the collars alone: the rings around spinning storms
 	vec3 ps;       // nb spun around the storms (unit)
 	vec3 qd;       // cloud texture coordinates
 	float st;      // east-west stretch here
@@ -314,6 +315,7 @@ GasCloud gasCloudField(vec3 nb, float foot)
 	c.h = h;
 	c.hi = gasHigh > 0.0 && gasHighCount > 0 ? gasHighCover(ps, st, fp) : 0.0;
 	c.storm = max(max(storm.a, polar), collar);
+	c.wall = collar;
 	c.ps = ps;
 	c.qd = qd;
 	c.st = st;

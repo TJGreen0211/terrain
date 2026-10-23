@@ -112,18 +112,25 @@
 #define GAS_HAZE_TOP_H            12.0
 #define GAS_HAZE_SCALE_HEIGHT_MIN_M 10.0e3
 #define GAS_CLOSE_DETAIL_ALT_RADII  0.05
-/* The volumetric cloud layers (world/clouds/cloud_volume.c) over the cloud
-   tops, in haze scale heights: a tall middle layer (rust) and a thin top
-   one (bright). They fade in below GAS_CLOUD_FADE_HI_H scale heights and
-   are fully there below _LO_H. Their weather map is a patch
-   GAS_CLOUD_MAP_EXTENT_M wide under the camera. */
-#define GAS_CLOUD_MID_BASE_H      0.08
-#define GAS_CLOUD_MID_TOP_H       0.55
-#define GAS_CLOUD_TOP_BASE_H      0.62
-#define GAS_CLOUD_TOP_TOP_H       0.85
+/* The volumetric cloud layers (world/clouds/cloud_volume.c), in haze
+   scale heights above the cloud tops (the stand-in's sphere): a tall
+   middle layer (rust) and a thin top one (bright). Taller than Jupiter's
+   real decks (about a scale height for the middle one), for the
+   painting's towering walls. The middle one starts below the cloud tops,
+   so the walls rise out of the deck instead of floating on flat bases.
+   They fade in below GAS_CLOUD_FADE_HI_H scale heights and are fully
+   there below _LO_H. Their weather map is a patch GAS_CLOUD_MAP_EXTENT_M
+   wide under the camera. */
+#define GAS_CLOUD_MID_BASE_H      -0.3
+#define GAS_CLOUD_MID_TOP_H       1.0
+#define GAS_CLOUD_TOP_BASE_H      1.05
+#define GAS_CLOUD_TOP_TOP_H       1.3
 #define GAS_CLOUD_FADE_LO_H       7.0
 #define GAS_CLOUD_FADE_HI_H       11.0
 #define GAS_CLOUD_MAP_EXTENT_M    2.0e6
+/* The cloud ranges in that map: their size north-south (several times
+   longer east-west), with canyons of clear air between them. */
+#define GAS_CLOUD_MASSIF_M        150.0e3
 #define GAS_INTERIOR_FADE_LO_H    4.0
 #define GAS_INTERIOR_FADE_HI_H    8.0
 #define GAS_DECK_MURK_PER_M       5.0e-5
