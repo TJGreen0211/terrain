@@ -115,16 +115,17 @@
 /* The volumetric cloud layers (world/clouds/cloud_volume.c), in haze
    scale heights above the cloud tops (the stand-in's sphere): a tall
    middle layer (rust) and a thin top one (bright). Taller than Jupiter's
-   real decks (about a scale height for the middle one), for the
-   painting's towering walls. The middle one starts below the cloud tops,
-   so the walls rise out of the deck instead of floating on flat bases.
+   real decks (three scale heights, ~80 km, for the middle one), for the
+   painting's towering walls. The middle one starts at the cloud tops and
+   fades out raggedly over its lowest part (cloudshape.glsl), so the walls
+   dissolve into the haze instead of being cut off by the deck.
    They fade in below GAS_CLOUD_FADE_HI_H scale heights and are fully
    there below _LO_H. Their weather map is a patch GAS_CLOUD_MAP_EXTENT_M
    wide under the camera. */
-#define GAS_CLOUD_MID_BASE_H      -0.3
-#define GAS_CLOUD_MID_TOP_H       1.0
-#define GAS_CLOUD_TOP_BASE_H      1.05
-#define GAS_CLOUD_TOP_TOP_H       1.3
+#define GAS_CLOUD_MID_BASE_H      0.0
+#define GAS_CLOUD_MID_TOP_H       3.0
+#define GAS_CLOUD_TOP_BASE_H      3.1
+#define GAS_CLOUD_TOP_TOP_H       3.6
 #define GAS_CLOUD_FADE_LO_H       7.0
 #define GAS_CLOUD_FADE_HI_H       11.0
 #define GAS_CLOUD_MAP_EXTENT_M    2.0e6

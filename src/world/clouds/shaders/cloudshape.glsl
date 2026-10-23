@@ -8,9 +8,15 @@
 // Worley noise erodes the edges, wispy low and billowy high (the Horizon
 // Zero Dawn recipe). Where the map's wind shear is strong the clouds lean
 // with it and their tops spread and flatten (anvils, which overhang
-// downwind), and thin flat sheets (shelves) reach out from them; the
-// detail is swept along the wind, so edges trail into streaks. The map's
+// downwind), and thin flat sheets (shelves) reach out from them. The map's
 // walls are full cover built to the layer's top.
+//
+// Tall layers stretch their shapes vertically (stretch), and their faces
+// are carved into vertical ribs and grooves (ridges): cell noise that
+// hardly changes with height, so walls read as fluted cliffs rather than
+// stacked billows; the edge detail is stretched vertically too. The bottom
+// fades out raggedly over the lowest part of the layer, so the clouds
+// dissolve into the haze below instead of ending on a level.
 
 #define MAX_LAYERS 2           // CLOUDVOL_MAX_LAYERS
 uniform int layerCount;
@@ -24,6 +30,8 @@ uniform float layerShear[MAX_LAYERS];
 uniform float layerErosion[MAX_LAYERS];
 uniform float layerAnvil[MAX_LAYERS];
 uniform float layerShelf[MAX_LAYERS];
+uniform float layerRidges[MAX_LAYERS];
+uniform float layerStretch[MAX_LAYERS];
 uniform vec3 layerTint[MAX_LAYERS];
 
 uniform float shellLo, shellHi;   // the layers' lowest base, highest top
@@ -79,24 +87,24 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		// Lean: the shapes slide downwind with height, more (either way)
 		// where the wind shears.
 		float lean = layerShear[i] * (0.5 + 3.0 * shear);
-		vec3 np = vec3((xy.x + (a - layerBase[i]) * lean) / layerSweep[i], xy.y, a) / sc
+		vec3 np = vec3((xy.x + (a - layerBase[i]) * lean) / layerSweep[i], xy.y, a / layerStretch[i]) / sc
 		        + float(i) * vec3(0.37, 0.71, 0.13);
 		float lodS = log2(max(foot / (sc / 128.0), 1.0));
-		// Soft flat base; rounded tops, as high as the map's towering,
+		// Rounded tops, as high as the map's towering,
 		// raised and lowered by broad cells (domes and valleys).
 		// The cell noise falls off linearly from each cell's centre (a
 		// cone); a circle profile makes it a dome. Walls go to the top.
 		float cell = 1.0 - mix(textureLod(shapeNoise, vec3(np.xy * 0.5, 0.5), lodS).g,
 		                       textureLod(shapeNoise, vec3(np.yx * 0.21 + 0.13, 0.81), lodS).g, 0.45);
 		float dome = sqrt(max(1.0 - 1.8 * cell * cell, 0.0));
-		float topF = clamp(mix(0.35, 1.0, w.b) * (0.15 + 0.95 * dome), 0.12, 1.0);
+		float topF = clamp(mix(0.45, 1.0, w.b) * (0.2 + 0.9 * dome), 0.15, 1.0);
 		topF = max(topF, cw.a * (0.85 + 0.15 * dome));
 		float hc = hf / topF;   // up the cloud, 0 at the base, 1 at its top
 		// Anvil: where the wind shears, the top spreads and flattens and
 		// the trunk below narrows; with the lean, the top overhangs.
 		float anv = layerAnvil[i] * abs(shear);
 		float cov = clamp(cover + anv * (0.4 * smoothstep(0.55, 0.9, hc) - 0.15 * (1.0 - hc)), 0.0, 1.0);
-		float prof = smoothstep(0.0, 0.1, hf) * (1.0 - smoothstep(topF * mix(0.55, 0.9, anv), topF, hf));
+		float prof = 1.0 - smoothstep(topF * mix(0.55, 0.9, anv), topF, hf);
 		// Shelves: thin sheets at two levels, tilted a little by the
 		// broad noise, in long swept patches near the clouds.
 		float sheet = 0.0;
@@ -119,6 +127,15 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		// Perlin-Worley cut by the Worley cells, then stretched over its
 		// actual range (about 0.5 to 0.95) so it carves the clouds.
 		float shape = clamp((remap(sn.r, wfbm - 1.0, 1.0, 0.0, 1.0) - 0.5) / 0.45, 0.0, 1.0);
+		// Ribs: cells nearly constant with height (columns), thinning the
+		// shape between them, so wall faces are fluted top to bottom.
+		if (layerRidges[i] > 0.0) {
+			const float rf = 0.8;
+			vec3 rp = vec3(np.xy * rf, np.z * 0.2) + vec3(0.5, 0.2, 0.7);
+			float lodR = log2(max(foot * rf / (sc / 128.0), 1.0));
+			float col = textureLod(shapeNoise, rp, lodR).g;
+			shape *= mix(1.0, 0.3 + 0.7 * smoothstep(0.35, 0.7, col), layerRidges[i]);
+		}
 		// (cov can reach 0 here: the remap would divide by it.)
 		float d = cov > 0.0 ? clamp(remap(shape * prof, 1.0 - cov, 1.0, 0.0, 1.0), 0.0, 1.0) * cov : 0.0;
 		d = max(d, sheet);
@@ -126,9 +143,8 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 			continue;
 		if (detail && layerErosion[i] > 0.0) {
 			float lodD = log2(max(foot / (sc * detailScale / 32.0), 1.0));
-			// Swept: stretched along the wind and squashed in height,
-			// nudged by the shape noise, so eroded edges trail as streaks.
-			vec3 dp = vec3(np.x / 2.5, np.y, np.z * 1.5) / detailScale
+			// Nudged by the shape noise.
+			vec3 dp = np / detailScale
 			        + vec3(sn.g - 0.5, sn.b - 0.5, 0.0) * 1.2;
 			vec3 dn = textureLod(detailNoise, dp, lodD).rgb;
 			float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
@@ -136,6 +152,12 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 			float dmod = mix(dfbm, 1.0 - dfbm, clamp(hc * 4.0, 0.0, 1.0));
 			d = clamp(remap(d, dmod * layerErosion[i] * 0.6, 1.0, 0.0, 1.0), 0.0, 1.0);
 		}
+		// The bottom: the density itself thins out over a long ragged
+		// stretch (its height wanders with the broad noise), after the
+		// erosion (which would cut thin cloud off at a level again);
+		// cutting the shape there instead, as the top does, leaves a level
+		// the clouds end on.
+		d *= smoothstep(0.0, 0.4, hf + 0.25 * (broad - 0.67));
 		d *= layerDensity[i] * edge;
 		if (d <= 0.0)
 			continue;

@@ -60,6 +60,8 @@ typedef struct CloudVolumeLayer {
 	float erosion;         /* detail noise eating the edges, 0..1 */
 	float anvil;           /* tops spreading out where the wind shears, 0..1 */
 	float shelf;           /* thin flat sheets out from the clouds, 0..1 */
+	float ridges;          /* vertical ribs carved into the faces, 0..1 */
+	float stretch;         /* the shapes' vertical stretch (1: as wide as tall) */
 } CloudVolumeLayer;
 
 /* A point light in the clouds (lightning). Its light falls off over

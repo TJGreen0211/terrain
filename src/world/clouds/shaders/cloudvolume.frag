@@ -354,6 +354,11 @@ void main()
 		// instead of going black. Only deep inside: near
 		// the surface the orders above keep the shading's contrast.
 		S += 2.0 * sunE * alb * 0.8 * smoothstep(4.0, 20.0, tauL) / (1.0 + 0.1 * tauL);
+		// Low down the clouds sink into the murk: their light gives way to
+		// the air's around them, so the walls' feet dissolve into the haze.
+		// (Thinning the density there can't do it: any cloud thick enough
+		// to see is opaque, so it only moved the level they end on.)
+		S = mix(S, Ja, 0.9 * (1.0 - smoothstep(0.0, 0.3, hs)));
 		// Flashes: their own colour shows through the cloud's (bright
 		// white-blue light swamps the tint).
 		if (flashCount > 0)

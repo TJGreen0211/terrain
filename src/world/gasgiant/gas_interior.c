@@ -418,6 +418,8 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	top->erosion = 1.0f;
 	top->anvil = 0.3f;
 	top->shelf = 0.3f;
+	top->ridges = 0.2f;
+	top->stretch = 1.0f;
 	mid->base = (float)(GAS_CLOUD_MID_BASE_H * H);
 	mid->top = (float)(GAS_CLOUD_MID_TOP_H * H);
 	mid->density = 1.0f / 500.0f;
@@ -428,7 +430,9 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	mid->shear = 0.3f;
 	mid->erosion = 1.0f;
 	mid->anvil = 0.8f;
-	mid->shelf = 0.7f;
+	mid->shelf = 0.15f;
+	mid->ridges = 1.0f;
+	mid->stretch = 1.6f;
 
 	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, f->cam);
 	sc->sunDir = dnormal(toSun);

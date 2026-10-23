@@ -435,7 +435,7 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	int n = s->layerCount > CLOUDVOL_MAX_LAYERS ? CLOUDVOL_MAX_LAYERS : s->layerCount;
 	float lb[CLOUDVOL_MAX_LAYERS], lt[CLOUDVOL_MAX_LAYERS], ld[CLOUDVOL_MAX_LAYERS], lc[CLOUDVOL_MAX_LAYERS];
 	float ls[CLOUDVOL_MAX_LAYERS], lsw[CLOUDVOL_MAX_LAYERS], lsh[CLOUDVOL_MAX_LAYERS], le[CLOUDVOL_MAX_LAYERS];
-	float lan[CLOUDVOL_MAX_LAYERS], lsf[CLOUDVOL_MAX_LAYERS];
+	float lan[CLOUDVOL_MAX_LAYERS], lsf[CLOUDVOL_MAX_LAYERS], lri[CLOUDVOL_MAX_LAYERS], lst[CLOUDVOL_MAX_LAYERS];
 	float ltint[CLOUDVOL_MAX_LAYERS * 3];
 	*lo = 1e30f;
 	*hi = -1e30f;
@@ -452,6 +452,8 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 		le[i] = L->erosion;
 		lan[i] = L->anvil;
 		lsf[i] = L->shelf;
+		lri[i] = L->ridges;
+		lst[i] = L->stretch > 0.1f ? L->stretch : 1.0f;
 		for (int c = 0; c < 3; c++)
 			ltint[i * 3 + c] = L->tint[c];
 		if (on) {
@@ -470,6 +472,8 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 	glUniform1fv(glGetUniformLocation(p, "layerErosion"), CLOUDVOL_MAX_LAYERS, le);
 	glUniform1fv(glGetUniformLocation(p, "layerAnvil"), CLOUDVOL_MAX_LAYERS, lan);
 	glUniform1fv(glGetUniformLocation(p, "layerShelf"), CLOUDVOL_MAX_LAYERS, lsf);
+	glUniform1fv(glGetUniformLocation(p, "layerRidges"), CLOUDVOL_MAX_LAYERS, lri);
+	glUniform1fv(glGetUniformLocation(p, "layerStretch"), CLOUDVOL_MAX_LAYERS, lst);
 	glUniform3fv(glGetUniformLocation(p, "layerTint"), CLOUDVOL_MAX_LAYERS, ltint);
 	glUniform1f(glGetUniformLocation(p, "shellLo"), *lo);
 	glUniform1f(glGetUniformLocation(p, "shellHi"), *hi);
