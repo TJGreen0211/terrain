@@ -19,6 +19,11 @@ double Water_GeomScale(double radius);
 /* How far (body radii) the displaced shell can stray from sea level: the
    water walk's culling bound and the seafloor clearance quad.frag keeps. */
 double Water_Excursion(double radius);
+/* The shell's flat triangles cut inside the sphere between their vertices:
+   at camera distance d (m) by up to (d * this)^2 body radii. Its walk is
+   coarser than the land's (QT_WATER_TRIANGLE_PX), so quad.frag keeps the
+   seafloor that much further back too. */
+double Water_SagK(double radius);
 
 /* The shell over `planet`, alpha-blended (premultiplied) over the land.
    skyTex: the cube map water.frag reflects; atmoInner: the atmosphere

@@ -2,8 +2,10 @@
 #include "engine/gfx/shader.h"
 #include "engine/debug/debug_gui.h"
 #include "engine/debug/nk.h"
+#include "engine/debug/profiler.h"
 #include "world/WorldConfig.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -68,9 +70,28 @@ static CloudVolumeParams g_params = {
 	0.5f,       /* powder */
 	0.6f,       /* ambient */
 	600.0e3f,   /* shadowExtent */
+	0,          /* debugView */
 };
 
+/* The debug view's heat map: red at this many density calls per pixel. */
+#define DEBUG_CALLS_MAX 1000.0f
+/* The debug view's means over the march target, read back every this
+   many frames: steps and density calls per pixel, over all pixels and
+   over those whose ray crossed the shell, and the share that did. */
+#define DEBUG_STATS_EVERY 60
+static float statSteps, statCalls, statStepsHit, statCallsHit, statHit;
+static int statsValid, statsToLog;
+
 CloudVolumeParams *CloudVolume_Params(void) { return &g_params; }
+
+void CloudVolume_ParseArgs(int argc, char *argv[])
+{
+	for (int i = 1; i < argc; i++)
+		if (strcmp(argv[i], "--cloud-debug") == 0 && i + 1 < argc) {
+			g_params.debugView = atoi(argv[++i]);
+			statsToLog = 1;
+		}
+}
 
 /* ---- Noise volumes (CPU, once) ------------------------------------------- */
 
@@ -591,6 +612,37 @@ void CloudVolume_BindShadow(GLuint p, int unit, const FrameContext *f)
 	uniform3d(p, "csSun", shadowSunB);
 }
 
+/* The debug view's means from this frame's march target (r: steps,
+   g: density calls, b: 1 where the ray crossed the shell). Stalls the
+   GPU: debug only. */
+static void readDebugStats(int w, int h)
+{
+	float *px = malloc((size_t)w * h * 4 * sizeof(float));
+	if (!px)
+		return;
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glReadPixels(0, 0, w, h, GL_RGBA, GL_FLOAT, px);
+	double steps = 0.0, calls = 0.0;
+	long hit = 0;
+	for (long i = 0; i < (long)w * h; i++) {
+		steps += px[i * 4 + 0];
+		calls += px[i * 4 + 1];
+		if (px[i * 4 + 2] > 0.5f)
+			hit++;
+	}
+	free(px);
+	double n = (double)w * h;
+	statSteps = (float)(steps / n);
+	statCalls = (float)(calls / n);
+	statStepsHit = hit ? (float)(steps / hit) : 0.0f;
+	statCallsHit = hit ? (float)(calls / hit) : 0.0f;
+	statHit = (float)(hit / n);
+	statsValid = 1;
+	if (statsToLog)
+		fprintf(stderr, "[cloudvol] frame %u: steps/px %.1f (in shell %.1f), density/px %.1f (in shell %.1f), in shell %.0f%%\n",
+		        frameCount, statSteps, statStepsHit, statCalls, statCallsHit, 100.0f * statHit);
+}
+
 void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 {
 	if (!sceneReady(s)) {
@@ -619,11 +671,15 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	viewToBody(f, s->rotation, v2b);
 	dvec3 camToMap = dsubvec3(camB, dscalarvec3(mapCenterB, s->radius));
 
-	/* History: same body, and the camera has not jumped. */
+	/* History: same body, and the camera has not jumped (none in the
+	   debug view: it shows this frame's counts). */
+	int debugView = g_params.debugView == 1 || g_params.debugView == 2 ? g_params.debugView : 0;
 	dvec3 camDelta = dsubvec3(camB, prevCamB);
-	int useHistory = prevValid && prevBody == s->body && dlengthvec3(camDelta) < 0.25 * g_params.maxDistance;
+	int useHistory = prevValid && prevBody == s->body && dlengthvec3(camDelta) < 0.25 * g_params.maxDistance
+	              && !debugView;
 
 	/* 1. March into the low-resolution target. */
+	Prof_Begin(PROF_CLOUD_MARCH);
 	glBindFramebuffer(GL_FRAMEBUFFER, marchFBO);
 	glViewport(0, 0, w, h);
 	glDisable(GL_DEPTH_TEST);
@@ -700,6 +756,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1f(glGetUniformLocation(p, "multiScatter"), g_params.multiScatter);
 	glUniform1f(glGetUniformLocation(p, "powder"), g_params.powder);
 	glUniform1f(glGetUniformLocation(p, "ambient"), g_params.ambient);
+	glUniform1i(glGetUniformLocation(p, "debugView"), debugView);
 
 	glActiveTexture(GL_TEXTURE0 + UNIT_DEPTH);
 	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, sceneDepthTex);
@@ -709,8 +766,12 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	drawFullScreen();
 	glActiveTexture(GL_TEXTURE0 + UNIT_DEPTH);
 	glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
+	Prof_End(PROF_CLOUD_MARCH);
+	if (debugView && frameCount % DEBUG_STATS_EVERY == 0)
+		readDebugStats(w, h);
 
 	/* 2. Accumulate: this frame over the reprojected history. */
+	Prof_Begin(PROF_CLOUD_ACCUM);
 	int cur = histIndex ^ 1;
 	glBindFramebuffer(GL_FRAMEBUFFER, histFBO[cur]);
 	p = resolveProgram;
@@ -736,8 +797,10 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1i(glGetUniformLocation(p, "histDepth"), 3);
 	drawFullScreen();
 	histIndex = cur;
+	Prof_End(PROF_CLOUD_ACCUM);
 
 	/* 3. Over the scene, with depth where the clouds are. */
+	Prof_Begin(PROF_CLOUD_COMPOSITE);
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)fbo);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);
 	p = compositeProgram;
@@ -751,6 +814,8 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glBindTexture(GL_TEXTURE_2D, histDepth[cur]);
 	glUniform1i(glGetUniformLocation(p, "cloudDepth"), 1);
 	glUniform1f(glGetUniformLocation(p, "opacity"), s->fade);
+	glUniform1i(glGetUniformLocation(p, "debugView"), debugView);
+	glUniform1f(glGetUniformLocation(p, "debugMax"), debugView == 1 ? (float)g_params.viewSteps : DEBUG_CALLS_MAX);
 	/* Premultiplied, behind anything nearer (the march already stopped
 	   at the scene's depth; this keeps the full-resolution edges); alpha
 	   keeps the slab's cloud cover. */
@@ -771,6 +836,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glBindTexture(GL_TEXTURE_3D, 0);
 	}
+	Prof_End(PROF_CLOUD_COMPOSITE);
 
 	prevValid = 1;
 	prevBody = s->body;
@@ -795,4 +861,18 @@ void CloudVolume_DebugPanel(struct nk_context *ctx)
 	DebugGUI_Slider(ctx, "Powder", &g_params.powder, 0.0f, 1.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Skylight", &g_params.ambient, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Shadow map width (m)", &g_params.shadowExtent, 0.0f, 1.0e6f, 1.0e3f, "%.0f");
+	static const char *views[] = { "Off", "March steps", "Density calls" };
+	int view = g_params.debugView < 0 || g_params.debugView > 2 ? 0 : g_params.debugView;
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 2);
+	nk_label(ctx, "Debug view", NK_TEXT_LEFT);
+	g_params.debugView = nk_combo(ctx, views, 3, view, (int)DebugGUI_RowHeight(), nk_vec2(nk_widget_width(ctx), 120.0f));
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	if (g_params.debugView) {
+		nk_labelf(ctx, NK_TEXT_LEFT, "  red: %s", g_params.debugView == 1 ? "every view step" : "1000 calls");
+		if (statsValid) {
+			nk_labelf(ctx, NK_TEXT_LEFT, "  steps/px %.1f (in shell %.1f)", statSteps, statStepsHit);
+			nk_labelf(ctx, NK_TEXT_LEFT, "  density/px %.1f (in shell %.1f)", statCalls, statCallsHit);
+			nk_labelf(ctx, NK_TEXT_LEFT, "  rays in the shell %.0f%%", 100.0f * statHit);
+		}
+	}
 }

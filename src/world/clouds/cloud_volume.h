@@ -133,8 +133,14 @@ typedef struct CloudVolumeParams {
 	float powder;          /* darkening of thin cloud facing the Sun */
 	float ambient;         /* skylight strength */
 	float shadowExtent;    /* m: the shadow map's width (0: no shadow map) */
+	int debugView;         /* 0 off; heat map of each pixel's 1 march steps, 2 density calls */
 } CloudVolumeParams;
 CloudVolumeParams *CloudVolume_Params(void);
+
+/* --cloud-debug <n>: start with debugView n and log the march's mean
+   steps and density calls per pixel (every DEBUG_STATS_EVERY frames) on
+   stderr. */
+void CloudVolume_ParseArgs(int argc, char *argv[]);
 
 /* How far the march reaches (m): the Max distance setting, or farther
    when the camera is high above the layers (aboveLayers: its height over
@@ -172,7 +178,8 @@ void CloudVolume_UpdateShadow(const FrameContext *f, const CloudVolumeScene *s);
 void CloudVolume_BindShadow(GLuint program, int unit, const FrameContext *f);
 
 /* Marches s and blends it over the bound target (the main pass, after the
-   scene's own air). Nothing when disabled or s->fade is 0. */
+   scene's own air). Nothing when disabled or s->fade is 0. Times its
+   passes as PROF_CLOUD_MARCH, _ACCUM and _COMPOSITE. */
 void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s);
 
 struct nk_context;

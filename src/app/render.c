@@ -339,18 +339,24 @@ void Render_Frame(App *app)
 	//Sun corona halo — must be drawn LAST (additive, does not write depth)
 	Sun_DrawGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
 
-	//Inside a gas giant: its haze and murk over everything, the Sun's
+	//Inside a gas giant: its cloud layers for this frame (weather map) and
+	//their shadow map, then its haze and murk over everything, the Sun's
 	//glow included (gas_interior.c). Nothing from outside.
+	Prof_Begin(PROF_CLOUD_WEATHER);
+	GasInterior_PrepareClouds(&frame);
+	Prof_End(PROF_CLOUD_WEATHER);
+	Prof_Begin(PROF_CLOUD_SHADOW);
+	GasInterior_UpdateCloudShadow(&frame);
+	Prof_End(PROF_CLOUD_SHADOW);
 	Prof_Begin(PROF_GAS_INTERIOR);
 	GasInterior_Draw(&frame);
 	Prof_End(PROF_GAS_INTERIOR);
 
 	//Then its volumetric cloud layers (the shared cloud volume,
 	//world/clouds/cloud_volume.c): they fog themselves with the same air,
-	//so they go over the hazed scene.
-	Prof_Begin(PROF_CLOUD_VOLUME);
+	//so they go over the hazed scene. It times its own passes
+	//(PROF_CLOUD_MARCH, _ACCUM, _COMPOSITE).
 	GasInterior_DrawClouds(&frame);
-	Prof_End(PROF_CLOUD_VOLUME);
 
 	/* Resolve the scene into the window; the UI draws there directly,
 	   with the standard depth convention restored. */

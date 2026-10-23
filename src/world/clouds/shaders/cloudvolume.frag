@@ -83,6 +83,10 @@ uniform sampler2DMS sceneDepth;
 uniform int sceneSamples;
 uniform float depthNear;
 
+// Debug view (cloud_volume.c): 1 or 2 write this pixel's march steps (r),
+// density calls (g) and whether the ray crossed the shell (b) instead.
+uniform int debugView;
+
 layout(location = 0) out vec4 OutColor;
 layout(location = 1) out float OutDepth;
 
@@ -96,6 +100,7 @@ const float NONE = 1e9;
 vec3 gD;          // the view ray
 float gRc, gB;    // camera's distance from the centre; its dot with the ray
 float gPixA;      // one pixel's angle
+int gSteps, gCalls, gInShell;   // the debug view's counts
 
 // The ray's crossings of the sphere at altitude a: (near, far), or
 // (-1, -1) if it misses. Roots of t^2 + 2 b t + c = 0, the stable way.
@@ -131,6 +136,7 @@ float sceneDistance(vec2 lowPx)
 // Cloud extinction at view-space point pv (cloudshape.glsl's density).
 float densityV(vec3 pv, float a, float foot, bool detail, out vec3 alb)
 {
+	gCalls++;
 	return density(camToMap + viewToBody * pv, a, foot, detail, alb);
 }
 
@@ -345,7 +351,7 @@ float ign(vec2 p)
 	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
-void main()
+void marchPixel()
 {
 	vec2 lowPx = gl_FragCoord.xy + jitter;
 	vec2 ndc = lowPx / lowSize * 2.0 - 1.0;
@@ -389,6 +395,7 @@ void main()
 	if (t1 <= t0 && tDeck >= NONE)
 		return;
 	t1 = max(t1, t0);
+	gInShell = 1;
 
 	float cosT = dot(gD, sunDir);
 	vec3 skyLin = displayToLinear(skyColor) * skyGain;
@@ -410,6 +417,7 @@ void main()
 	float jit = fract(ign(gl_FragCoord.xy) + frameJitter);
 	float tPrev = t0;
 	for (int i = 0; i < viewSteps; i++) {
+		gSteps++;
 		// Quadratic spacing: fine near the camera, long strides far off.
 		float u = float(i + 1) / float(viewSteps);
 		float tNext = t0 + span * u * u;
@@ -533,6 +541,7 @@ void main()
 		float tA = t1;
 		const int N = 16;
 		for (int i = 0; i < N; i++) {
+			gSteps++;
 			float u = float(i + 1) / float(N);
 			float tNext = t1 + (tDeck - t1) * u * u;
 			float dt = tNext - tA;
@@ -580,4 +589,14 @@ void main()
 		OutDepth = dSum / wSum;
 	}
 	OutColor = vec4(L * exposure, alpha);
+}
+
+void main()
+{
+	gSteps = 0;
+	gCalls = 0;
+	gInShell = 0;
+	marchPixel();
+	if (debugView != 0)
+		OutColor = vec4(float(gSteps), float(gCalls), float(gInShell), 1.0);
 }

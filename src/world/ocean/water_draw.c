@@ -40,6 +40,14 @@ double Water_Excursion(double radius)
 	     * Water_Params()[1] * (1.0 + Water_Params()[4]);
 }
 
+/* A cell of side a (two right triangles) sits on a circle of radius
+   a / sqrt(2), so its flat face dips a^2 / (4 R) below the sphere at the
+   middle: (a / 2R)^2 body radii, a = d * QuadTree_LeafCellK. */
+double Water_SagK(double radius)
+{
+	return QuadTree_LeafCellK(QT_WATER_TRIANGLE_PX) / (2.0 * radius);
+}
+
 /* QuadTree_ReliefFn for the active planet's water shell (water.vert): sea level, plus
    waves wherever there is sea. Its own walk, so the thin shell is culled
    and refined on its own instead of inheriting the seafloor's depth range.

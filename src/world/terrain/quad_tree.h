@@ -71,6 +71,9 @@ void QuadTree_DrawShadowCasters(const QuadTree_Body *body, mat4 lightViewProj, d
    at the current window height: a node of width W splits while the camera
    is closer than K * W, so a leaf at distance d is at most d / K wide. */
 double QuadTree_SplitK(double trianglePx);
+/* The widest grid cell (one mesh square, two triangles) a leaf of that
+   walk can have at distance d is d times this. */
+double QuadTree_LeafCellK(double trianglePx);
 
 /* Once per frame before any draw: drops the cached walk (so per-frame
    inputs the cache key cannot see, like live relief edits, apply). */

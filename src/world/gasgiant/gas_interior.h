@@ -48,11 +48,14 @@ double GasInterior_ScaleHeight(const struct GasGiantStyle *s, double radius);
    takes the rest). */
 float GasInterior_StandInHaze(double H, double altitude);
 
+/* This frame's cloud layers (re-baking their weather map when the camera
+   has moved on, ageing the lightning), then the clouds' shadow map: both
+   before GasInterior_Draw, so the haze shows the shafts the clouds cast;
+   GasInterior_DrawClouds draws them. */
+void GasInterior_PrepareClouds(const FrameContext *f);
+void GasInterior_UpdateCloudShadow(const FrameContext *f);
 /* The haze and murk around the camera, over the whole scene (after the
-   Sun's glow). Nothing when the camera is not inside a giant's haze.
-   First it makes this frame's cloud layers (re-baking their weather map
-   and the clouds' shadow map, ageing the lightning), so the haze shows
-   the shafts the clouds cast; GasInterior_DrawClouds draws them. */
+   Sun's glow). Nothing when the camera is not inside a giant's haze. */
 void GasInterior_Draw(const FrameContext *f);
 
 /* How much of the volumetric cloud layers show at this altitude, for
@@ -62,7 +65,7 @@ float GasInterior_VolumeFade(double H, double altitude);
    they fade out from 35% of it (CloudVolume_Reach). radius: the body's. */
 double GasInterior_CloudReach(double H, double radius, double altitude);
 /* The giant's cloud layers around the camera (world/clouds/cloud_volume),
-   as GasInterior_Draw made them this frame (their weather map from the
+   as GasInterior_PrepareClouds made them this frame (their weather map from the
    exterior's cloud field). Into the main pass, after the haze: the clouds
    carry their own air in front. */
 void GasInterior_DrawClouds(const FrameContext *f);

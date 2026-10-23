@@ -74,6 +74,11 @@ uniform float depthNear;
 // neighbouring land patches, which then showed through the clear shallows
 // as blocks and slats along every shore.
 uniform float seaClearance;
+// Plus the water shell's chord sag at distance D: (D * seaSagK)^2 body radii
+// (water_draw.c Water_SagK). Its coarser triangles cut kilometres inside
+// the sphere from orbit, and without this the deep floor's black (main)
+// hid their middles: dark blotches over the open sea.
+uniform float seaSagK;
 
 const float PI = 3.14159265359;
 
@@ -255,7 +260,8 @@ float seafloorDepth(float e, vec3 camDir, float graz)
 		return gl_FragCoord.z;
 	float R = length(fragPos - bodyCenter) / max(fRadius, 1e-4);
 	float D = length(camDir);
-	float clearance = max(seaClearance * R, 4.0 * D / 8388608.0);
+	float sag = D * seaSagK;
+	float clearance = max((seaClearance + sag * sag) * R, 4.0 * D / 8388608.0);
 	float poke = (fRadius - 1.0) * R + clearance;   // world units above the target
 	if (poke <= 0.0)
 		return gl_FragCoord.z;

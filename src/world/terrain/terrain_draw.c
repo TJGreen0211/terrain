@@ -257,6 +257,7 @@ void TerrainDraw_SetBodyUniforms(GLuint shader, float lodRadius, mat4 m, const F
 	   how far under sea level the wave troughs can reach. */
 	glUniform1f(glGetUniformLocation(shader, "depthNear"), f->nearPlane);
 	glUniform1f(glGetUniformLocation(shader, "seaClearance"), (float)Water_Excursion(lodRadius));
+	glUniform1f(glGetUniformLocation(shader, "seaSagK"), (float)Water_SagK(lodRadius));
 	/* Climate map (unit 8) + surface style for quad.frag's biome shading. */
 	TerrainGen_SetSurfaceUniforms(shader, 8);
 	/* Terrain detail (quad.vert/quad.frag), faded for the main walk. */

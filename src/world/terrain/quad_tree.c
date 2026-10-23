@@ -281,6 +281,11 @@ double QuadTree_SplitK(double trianglePx)
 	return Window_Height() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
 }
 
+double QuadTree_LeafCellK(double trianglePx)
+{
+	return 1.0 / (QT_DIVISIONS * QuadTree_SplitK(trianglePx));
+}
+
 static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, int cullNear,
                       double minSpacing, double trianglePx)
 {

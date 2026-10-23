@@ -130,11 +130,19 @@ static dvec3 toView(mat4 v, dvec3 w)
 
 static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc);
 
-void GasInterior_Draw(const FrameContext *f)
+void GasInterior_PrepareClouds(const FrameContext *f)
 {
 	frameCount++;
 	prepareClouds(f, &cloudScene);
+}
+
+void GasInterior_UpdateCloudShadow(const FrameContext *f)
+{
 	CloudVolume_UpdateShadow(f, &cloudScene);
+}
+
+void GasInterior_Draw(const FrameContext *f)
+{
 	double alt;
 	int id = GasInterior_Body(f->cam, &alt);
 	if (id < 0)

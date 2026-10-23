@@ -13,11 +13,16 @@ typedef enum ProfSection {
 	PROF_PLANET,
 	PROF_WATER,
 	PROF_CLOUDS,
-	PROF_CLOUD_VOLUME, /* volumetric cloud layers (cloud_volume.c) */
 	PROF_RINGS,
 	PROF_ATMOSPHERE,
 	PROF_NEBULA,      /* in-system nebula (nebula.c) */
-	PROF_GAS_INTERIOR, /* haze inside a gas giant (gas_interior.c) */
+	/* Inside a gas giant (gas_interior.c, cloud_volume.c), in frame order: */
+	PROF_CLOUD_WEATHER,   /* the cloud scene and its weather map (re-baked now and then) */
+	PROF_CLOUD_SHADOW,    /* the clouds' shadow map */
+	PROF_GAS_INTERIOR,    /* the haze */
+	PROF_CLOUD_MARCH,     /* the volume's march, low resolution */
+	PROF_CLOUD_ACCUM,     /* its accumulation over frames */
+	PROF_CLOUD_COMPOSITE, /* upsampled over the scene */
 	PROF_RESOLVE,    /* scene target MSAA resolve into the window */
 	PROF_OVERLAY,    /* UI */
 	PROF_COUNT
