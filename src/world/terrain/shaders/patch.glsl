@@ -29,6 +29,12 @@ layout (location = 10) in vec3 pEv;  // cube-space edge along v
 // Integer node address (face, level, x, y): exact lattice maths for the
 // terrain detail noise (detail.glsl).
 layout (location = 11) in ivec4 pAddr;
+// How many levels coarser the neighbour across edges u = 0, u = 1, v = 0,
+// v = 1 is (0: same or finer): quad_tree.c coarserGap, see patchStitch.
+layout (location = 12) in ivec4 pNbr;
+
+// Grid cells along a patch edge (QT_DIVISIONS in quad_tree.c).
+const int PATCH_DIVISIONS = 10;
 
 // 1 = the old float path (normalize, then the model matrix): debug panel
 // comparison only. It loses ~1e-7 of the radius (~0.5-1 m on Earth).
@@ -93,4 +99,75 @@ vec3 patchSphere(vec2 uv, vec3 dir, mat4 model)
 vec3 patchOffset(vec3 localOffset, mat4 model)
 {
 	return localOffset * mat3(model);
+}
+
+// Edge stitching. The quadtree has no 2:1 balance, so a patch edge can
+// face a neighbour k levels coarser, whose edge runs straight between
+// vertices every S = 2^k of this patch's cells: a vertex in between has to
+// lie on that segment, not on the terrain, or the gap opens a skirt wall.
+// Those vertices are on the level-(L-k) ancestor's grid (the neighbour's
+// lattice, also across cube faces), counted from the ancestor's corner.
+struct PatchStitch {
+	vec2 uvA, uvB;   // the coarse vertices either side, in this patch's uv
+	ivec4 addr;      // the level-(L-k) ancestor (detail lattice address)
+	vec2 aA, aB;     // the same vertices, in the ancestor's uv (exact)
+	float t;         // weight of B
+};
+
+// Edge with gap k, vertex at grid index n along it, this patch's node
+// coordinate j along it: true when the vertex falls between coarse
+// vertices, with r its offset past the previous one (grid cells) and i
+// that one's index in the ancestor. Unsigned: 10 * (2^28 - 1) + 10 fits.
+bool patchStitchEdge(int k, int n, int j, out int r, out int i)
+{
+	r = 0;
+	i = 0;
+	if (k <= 0)
+		return false;
+	uint S = 1u << uint(k);
+	uint m = uint(PATCH_DIVISIONS) * (uint(j) & (S - 1u)) + uint(n);
+	r = int(m & (S - 1u));
+	i = int(m >> uint(k));
+	return r != 0;
+}
+
+// The coarse segment grid vertex uv has to lie on, if any. A corner sits
+// on two edges, but between coarse vertices on at most one of them.
+bool patchStitch(vec2 uv, out PatchStitch ps)
+{
+	ivec2 g = ivec2(round(uv * float(PATCH_DIVISIONS)));
+	int k = 0, r, i, along = -1;   // along: 0 = the edge runs along u, 1 = along v
+	if (g.x == 0 || g.x == PATCH_DIVISIONS) {
+		k = g.x == 0 ? pNbr.x : pNbr.y;
+		if (patchStitchEdge(k, g.y, pAddr.w, r, i))
+			along = 1;
+	}
+	if (along < 0 && (g.y == 0 || g.y == PATCH_DIVISIONS)) {
+		k = g.y == 0 ? pNbr.z : pNbr.w;
+		if (patchStitchEdge(k, g.x, pAddr.z, r, i))
+			along = 0;
+	}
+	ps.uvA = ps.uvB = ps.aA = ps.aB = uv;
+	ps.addr = pAddr;
+	ps.t = 0.0;
+	if (along < 0)
+		return false;
+
+	int S = 1 << k;
+	int n = along == 0 ? g.x : g.y;
+	float D = float(PATCH_DIVISIONS);
+	vec2 a = vec2(float(n - r), float(n - r + S)) / D;   // this patch
+	vec2 c = vec2(float(i), float(i + 1)) / D;           // the ancestor
+	// Across the edge both share it: u (or v) is 0 or 1 in each.
+	float across = along == 0 ? uv.y : uv.x;
+	if (along == 0) {
+		ps.uvA = vec2(a.x, across); ps.uvB = vec2(a.y, across);
+		ps.aA = vec2(c.x, across);  ps.aB = vec2(c.y, across);
+	} else {
+		ps.uvA = vec2(across, a.x); ps.uvB = vec2(across, a.y);
+		ps.aA = vec2(across, c.x);  ps.aB = vec2(across, c.y);
+	}
+	ps.addr = ivec4(pAddr.x, pAddr.y - k, pAddr.z >> k, pAddr.w >> k);
+	ps.t = float(r) / float(S);
+	return true;
 }

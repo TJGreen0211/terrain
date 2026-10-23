@@ -5,7 +5,7 @@
 // (lightSpace). Hardware depth is what gets stored; receivers compare their
 // own lightSpace-projected depth against it (see sunVisibility in quad.frag).
 layout (location = 0) in vec4 vPosition;
-// Quadtree patch instance (locations 4-11) + patchDir/patchSphere.
+// Quadtree patch instance (locations 4-12) + patchDir/patchSphere.
 #include "world/terrain/patch.glsl"
 // Terrain detail noise (step 3b), as in quad.vert.
 #include "world/terrain/detail.glsl"
@@ -30,6 +30,7 @@ uniform float oceanDepth;
 uniform vec3 lodCameraPos;
 uniform float lodK;
 uniform float lodCellK;   // as quad.vert (the main walk's value)
+#include "world/terrain/terrainlift.glsl"
 
 const float PI = 3.14159265359;
 
@@ -42,24 +43,12 @@ void main()
 		vec3 sphere = patchSphere(uv, d, model);
 		float lift = 0.0;
 		if (displace > 0.5) {
-			// Identical to quad.vert: patch-size lod vs pixel-footprint lod,
-			// both by vertex distance.
-			float vDist = length(sphere - lodCameraPos);
-			float lodCell = log2(max(vDist*lodCellK, 1e-30));
-			float lodPix = log2(max(vDist*lodK, 1e-30));
-			float lod = clamp(max(lodCell, lodPix) + planetMapLodBias(d), 0.0, planetMapMaxLod(heightMap));
-			float h = textureLod(heightMap, d, lod).r;
-			float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
-			lift = landRelief * max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3)
-			     - oceanRelief * s * s;
-			// Detail as quad.vert, faded for this walk's coarser triangles
-			// (detailTriPx = QT_SHADOW_TRIANGLE_PX).
-			float alt01 = max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
-			float mapSlope = h > seaLevel ? length(textureLod(surfaceMap, d, lod).xyz) : 0.0;
-			float env = detailEnvelope(landRelief * alt01 * detailRadius, mapSlope);
+			// Identical to quad.vert (terrainlift.glsl), detail faded for
+			// this walk's coarser triangles (detailTriPx =
+			// QT_SHADOW_TRIANGLE_PX) and stitched to this walk's leaves.
 			vec2 gradCube;
-			lift += detailVertex(pAddr, uv, length(patchCube(uv)),
-			                     vDist * detailPix, env, gradCube) / detailRadius;
+			lift = terrainLift(d, length(sphere - lodCameraPos), patchCube(uv), pAddr, uv, gradCube);
+			lift = terrainLiftStitched(uv, lift);
 		}
 		// Skirt: same drop as quad.vert, as an offset from 1.
 		if (vPosition.w > 0.5)

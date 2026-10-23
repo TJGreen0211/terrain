@@ -611,5 +611,5 @@ void main()
 	alpha = mix(alpha, 1.0, ice);
 	vec3 outCol = toneMap(max(color, 0.0)) * alpha
 	            + toneMap(max(surface, 0.0)) * (1.0 - alpha);
-	FragColor = vec4(outCol, alpha); if (fWave > 1.0) FragColor = vec4(1.0, 0.0, 0.0, 1.0); if (any(isnan(outCol))) FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+	FragColor = vec4(outCol, alpha);
 }

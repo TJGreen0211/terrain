@@ -58,9 +58,12 @@ typedef struct qtInstance {
 	float eu[3];          /* cube-space edge along u */
 	float ev[3];          /* cube-space edge along v */
 	int addr[4];          /* face, level, x, y: terrain detail lattice (detail.glsl) */
+	int nbr[4];           /* levels coarser the neighbour across edges u = 0, u = 1,
+	                         v = 0, v = 1 is (0: same or finer); patch.glsl stitches to it */
 } qtInstance;
 
 static qtInstance instances[QT_INSTANCE_CAP];
+static int instanceNode[QT_INSTANCE_CAP];   /* tree node of each instance */
 static int instanceCount;
 
 static GLuint gridVAO, gridVBO, gridEBO, instanceVBO;
@@ -200,7 +203,7 @@ void QuadTree_InitGL(void)
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4*sizeof(float), BUFFER_OFFSET(0));
 
-	/* Patch instance attributes, locations 4-11 (shaders/patch.glsl). */
+	/* Patch instance attributes, locations 4-12 (shaders/patch.glsl). */
 	glGenBuffers(1, &instanceVBO);
 	glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(qtInstance)*QT_INSTANCE_CAP, NULL, GL_STREAM_DRAW);
@@ -222,6 +225,9 @@ void QuadTree_InitGL(void)
 	glEnableVertexAttribArray(11);
 	glVertexAttribIPointer(11, 4, GL_INT, stride, BUFFER_OFFSET(offsetof(qtInstance, addr)));
 	glVertexAttribDivisor(11, 1);
+	glEnableVertexAttribArray(12);
+	glVertexAttribIPointer(12, 4, GL_INT, stride, BUFFER_OFFSET(offsetof(qtInstance, nbr)));
+	glVertexAttribDivisor(12, 1);
 
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -244,6 +250,7 @@ typedef struct qtWalk {
 	dvec3 camDir;           /* unit, centre -> camera */
 	double occluder;        /* horizon occluder radius, m */
 	double frustum[6][4];   /* ax + by + cz + d >= 0 inside */
+	int id;                 /* stamps the tree nodes this walk splits and draws */
 } qtWalk;
 
 static double dotd(dvec3 a, dvec3 b)
@@ -338,6 +345,8 @@ typedef struct qtTreeNode {
 	int split;              /* the split rule wants children (before a walk's maxLevel) */
 	int child;              /* first of 4 consecutive children, -1 = not created */
 	int inst;               /* leafCache index, -1 = not built */
+	int splitWalk;          /* id of the last walk that split this node */
+	int leafWalk;           /* id of the last walk that drew it as a leaf */
 	double skirt;           /* body radii */
 	dvec3 s;                /* frustum sphere centre, camera-relative */
 	double bound;           /* and radius */
@@ -367,6 +376,8 @@ static void initTreeNode(qtTreeNode *c, int f, int level, int x, int y)
 	c->built = 0;
 	c->child = -1;
 	c->inst = -1;
+	c->splitWalk = 0;
+	c->leafWalk = 0;
 }
 
 static void useTree(const QuadTree_Body *body, double trianglePx)
@@ -542,6 +553,7 @@ static void traverseFace(const qtWalk *w, int f)
 		            && instanceCount + (numNodes - k) + 4 <= QT_INSTANCE_CAP
 		            && (c->child >= 0 || treeCount + 4 <= QT_TREE_CAP);
 		if(canSplit && c->split && c->level < w->maxLevel) {
+			c->splitWalk = w->id;
 			if(c->child < 0) {
 				c->child = treeCount;
 				for(int j = 0; j < 4; j++)
@@ -559,13 +571,61 @@ static void traverseFace(const qtWalk *w, int f)
 				buildLeaf(&leafCache[c->inst], &w->body->model, c);
 			}
 			if(c->inst >= 0)
-				instances[instanceCount++] = leafCache[c->inst];
+				instances[instanceCount] = leafCache[c->inst];
 			else
-				buildLeaf(&instances[instanceCount++], &w->body->model, c);
+				buildLeaf(&instances[instanceCount], &w->body->model, c);
+			instanceNode[instanceCount++] = queue[k];
+			c->leafWalk = w->id;
 			if(c->level > g_qtStats.maxLevel)
 				g_qtStats.maxLevel = c->level;
 		}
 	}
+}
+
+/* Face holding cube-space direction q and its face coordinates (s, t) in
+   [0,1]^2 (cubePoint's inverse at level 0). */
+static int faceOf(dvec3 q, double *s, double *t)
+{
+	double a[3] = { q.x, q.y, q.z };
+	int axis = 0;
+	for(int i = 1; i < 3; i++)
+		if(fabs(a[i]) > fabs(a[axis]))
+			axis = i;
+	int f = 2 * axis + (a[axis] < 0.0);
+	double inv = 1.0 / fabs(a[axis]);
+	double p[3];
+	for(int i = 0; i < 3; i++)
+		p[i] = a[i] * inv - faceO[f][i];
+	*s = 0.25 * (p[0]*faceA[f][0] + p[1]*faceA[f][1] + p[2]*faceA[f][2]);
+	*t = 0.25 * (p[0]*faceB[f][0] + p[1]*faceB[f][1] + p[2]*faceB[f][2]);
+	return f;
+}
+
+/* How many levels coarser the leaf this walk drew across edge e (u = 0,
+   u = 1, v = 0, v = 1) of leaf c is; 0 when it is as fine or finer, or not
+   drawn. The tree has no 2:1 balance, and the split test measures to each
+   node's vertical extent, so a mountain coast can sit several levels finer
+   than the sea patch beside it. The shaders lay such an edge onto the
+   coarse neighbour's (patch.glsl patchStitch), or the coarse edge cuts
+   straight across terrain the fine side follows and its skirt shows as a
+   wall. The probe is a quarter node past the edge midpoint, found by
+   direction so it works across cube faces too: off the face plane there,
+   its direction lands in the neighbouring face's matching node. */
+static int coarserGap(const qtWalk *w, const qtTreeNode *c, int e)
+{
+	static const double probe[4][2] = { {-0.25, 0.5}, {1.25, 0.5}, {0.5, -0.25}, {0.5, 1.25} };
+	double s, t;
+	int f = faceOf(cubePoint(c->f, c->level, c->x + probe[e][0], c->y + probe[e][1]), &s, &t);
+	int span = 1 << c->level;
+	int ix = (int)floor(s * span), iy = (int)floor(t * span);
+	ix = ix < 0 ? 0 : (ix >= span ? span - 1 : ix);
+	iy = iy < 0 ? 0 : (iy >= span ? span - 1 : iy);
+	const qtTreeNode *n = &tree[f];
+	while(n->level < c->level && n->splitWalk == w->id) {
+		int sh = c->level - n->level - 1;
+		n = &tree[n->child + (((ix >> sh) & 1) | (((iy >> sh) & 1) << 1))];
+	}
+	return (n->level < c->level && n->leafWalk == w->id) ? c->level - n->level : 0;
 }
 
 /* Last walk's inputs: a repeated draw of the same body with the same
@@ -612,12 +672,17 @@ static void walkFaces(const QuadTree_Body *body, mat4 viewProj, int useHorizon, 
 	LARGE_INTEGER t0, t1, freq;
 	QueryPerformanceCounter(&t0);
 
+	static int walkId;
 	qtWalk w;
 	buildWalk(&w, body, viewProj, useHorizon, cullNear, minSpacing, trianglePx);
+	w.id = ++walkId;
 	useTree(body, trianglePx);
 	instanceCount = 0;
 	for(int f = 0; f < 6; f++)
 		traverseFace(&w, f);
+	for(int i = 0; i < instanceCount; i++)
+		for(int e = 0; e < 4; e++)
+			instances[i].nbr[e] = coarserGap(&w, &tree[instanceNode[i]], e);
 
 	if(instanceCount > 0) {
 		/* Full re-specify orphans the old storage, so a draw still reading
