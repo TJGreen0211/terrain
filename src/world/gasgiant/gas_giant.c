@@ -1,4 +1,5 @@
 #include "world/gasgiant/gas_giant.h"
+#include "world/gasgiant/gas_interior.h"
 #include "world/bodies/bodies.h"
 #include "world/bodies/solar_system.h"
 #include "engine/debug/debug_gui.h"
@@ -625,11 +626,21 @@ static void uniform3(GLuint shader, const char *name, const float v[3])
 	glUniform3f(glGetUniformLocation(shader, name), v[0], v[1], v[2]);
 }
 
-void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s)
+void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s, double radius, double altitude)
 {
 	glUniform1i(glGetUniformLocation(shader, "gasOn"), s != NULL);
 	if (!s)
 		return;
+	double H = GasInterior_ScaleHeight(s, radius);
+	glUniform1f(glGetUniformLocation(shader, "gasInside"), 1.0f - GasInterior_StandInHaze(H, altitude));
+	/* The glow beyond the limb assumes the camera is outside the shell:
+	   gone by the time the interior pass starts. */
+	glUniform1f(glGetUniformLocation(shader, "gasGlowFade"),
+	            (float)smoothstep(GAS_INTERIOR_FADE_HI_H * H, GAS_HAZE_TOP_H * H, altitude));
+	glUniform1f(glGetUniformLocation(shader, "gasDeep"), GasInterior_VolumeFade(H, altitude));
+	glUniform1f(glGetUniformLocation(shader, "gasDeepReach"), (float)GasInterior_CloudReach(H, altitude));
+	glUniform1i(glGetUniformLocation(shader, "gasOctaves"),
+	            altitude < GAS_CLOSE_DETAIL_ALT_RADII * radius ? 8 : 5);
 
 	unsigned int h = styleHash(s);
 	if (!s->profileTex || h != s->profileHash) {
@@ -825,4 +836,6 @@ void GasGiant_DebugPanel(struct nk_context *ctx)
 	DebugGUI_Slider(ctx, "Haze rim", &g->rim, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Limb glow", &g->glow, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Exposure", &g->exposure, 0.3f, 3.0f, 0.01f, "%.2f");
+
+	GasInterior_DebugPanel(ctx);
 }

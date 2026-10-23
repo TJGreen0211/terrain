@@ -98,6 +98,41 @@
 #define GAS_ICE_AU_OUTER          15.0
 #define GAS_SHELL_FRACTION_MIN    0.012
 #define GAS_SHELL_FRACTION_MAX    0.03
+/* Inside a gas giant (world/gasgiant/gas_interior.c, docs/gas-giant-
+   interior.md). Altitudes are above the cloud tops (the stand-in sphere).
+   The haze over them falls off exponentially; the glow shell
+   (shellFraction) spans GAS_HAZE_TOP_H of its scale heights, never less
+   than GAS_HAZE_SCALE_HEIGHT_MIN_M (Jupiter's real one is ~27 km). The
+   interior pass takes the haze over from the stand-in's veil between
+   GAS_INTERIOR_FADE_LO_H and _HI_H scale heights. Below the cloud tops a
+   murk (extinction per metre) darkens down to the floor the camera stops
+   at, GAS_INTERIOR_FLOOR_M below them (under the water clouds). Within
+   GAS_CLOSE_DETAIL_ALT_RADII of the cloud tops the stand-in adds detail
+   octaves (they cost time and show nothing from farther out). */
+#define GAS_HAZE_TOP_H            12.0
+#define GAS_HAZE_SCALE_HEIGHT_MIN_M 10.0e3
+#define GAS_CLOSE_DETAIL_ALT_RADII  0.05
+/* The volumetric cloud layers (world/clouds/cloud_volume.c) over the cloud
+   tops, in haze scale heights: a tall middle layer (rust) and a thin top
+   one (bright). They fade in below GAS_CLOUD_FADE_HI_H scale heights and
+   are fully there below _LO_H. Their weather map is a patch
+   GAS_CLOUD_MAP_EXTENT_M wide under the camera. */
+#define GAS_CLOUD_MID_BASE_H      0.08
+#define GAS_CLOUD_MID_TOP_H       0.55
+#define GAS_CLOUD_TOP_BASE_H      0.62
+#define GAS_CLOUD_TOP_TOP_H       0.85
+#define GAS_CLOUD_FADE_LO_H       7.0
+#define GAS_CLOUD_FADE_HI_H       11.0
+#define GAS_CLOUD_MAP_EXTENT_M    2.0e6
+#define GAS_INTERIOR_FADE_LO_H    4.0
+#define GAS_INTERIOR_FADE_HI_H    8.0
+#define GAS_DECK_MURK_PER_M       5.0e-5
+#define GAS_INTERIOR_FLOOR_M      120.0e3
+/* Flight near a gas giant: the camera's speed scales with altitude above
+   the cloud tops, full speed at GAS_FLIGHT_FULL_SPEED_ALT_M and above,
+   never below GAS_FLIGHT_MIN_SPEED_SCALE of it. */
+#define GAS_FLIGHT_FULL_SPEED_ALT_M  2.0e7
+#define GAS_FLIGHT_MIN_SPEED_SCALE   2.0e-4
 /* Rocky planets: atmosphere shell as a fraction of the radius (Earth's look
    is ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M), times a random factor. */
 #define ROCKY_SHELL_FRACTION      (ATMOSPHERE_SHELL_HEIGHT_M / EARTH_RADIUS_M)
@@ -111,10 +146,13 @@
 #define OTHER_PLANET_WATER        1
 
 /* ---- Time --------------------------------------------------------------
-   Simulation seconds per real second (R pauses). 1440 = one Earth day per
-   real minute, close to the old per-frame spin at 60 fps. The default of
-   the debug panel's time-scale slider; bench runs always use it. */
-#define SIM_TIME_SCALE            1440.0
+   Simulation seconds per real second (R pauses). The app starts in real
+   time (the gas giants' cloud layers drift at their true speed); the debug
+   panel's time-scale slider speeds it up. */
+#define SIM_TIME_SCALE            1.0
+/* Bench runs: 1440 = one Earth day per real minute (the old default, so
+   the bench scenes' lighting and motion are unchanged). */
+#define BENCH_TIME_SCALE          1440.0
 #define SIM_TIME_SCALE_MAX        3.0e7      /* ~1 year per real second */
 
 /* ---- Camera (metres) ---------------------------------------------------- */

@@ -164,8 +164,11 @@ void main()
 	float h2 = dot(c, c);
 	float h = sqrt(h2);
 	float front = -dot(o, d);           // distance to the closest approach
-	// Sphere: coverage over about one pixel at the limb.
-	float cover = front > 0.0 ? clamp((1.0 - h) / pixelR + 0.5, 0.0, 1.0) : 0.0;
+	// Sphere: coverage over about one pixel at the limb, measured where
+	// the ray passes it (pixelR is a pixel at the centre's distance: from
+	// close up, far wider than the limb's).
+	float pixLimb = pixelR * max(front, 0.0) / length(o);
+	float cover = front > 0.0 ? clamp((1.0 - h) / max(pixLimb, 1e-9) + 0.5, 0.0, 1.0) : 0.0;
 	float tS = front - sqrt(max(1.0 - h2, 0.0));
 
 	vec4 col = vec4(0.0);
@@ -178,7 +181,10 @@ void main()
 		float sunVis = ringOn == 1 ? ringShadowOnSphere(n) : 1.0;
 		vec3 lit;
 		if (gasOn == 1) {
-			lit = gasGiantSurface(n, d, sunView, viewToBody * n, viewToBody * sunView, pixelR, sunVis);
+			// One pixel at the hit point, not at the centre's distance
+			// (they differ a lot up close).
+			float pixHit = pixelR * tS / length(o);
+			lit = gasGiantSurface(n, d, sunView, viewToBody * n, viewToBody * sunView, pixHit, sunVis, radius * tS);
 		} else {
 			vec3 albedo = color;
 			if (mottle > 0.0) {

@@ -49,6 +49,7 @@ static long switchFrame[MAX_KEYS]; static int switchBody[MAX_KEYS]; static int n
 static int startBody = BODY_EARTH;
 static double pivotOff, phaseDeg, pivotLatDeg, simStart;
 static int pivotGround;           /* poff ground: pivotOff is above the terrain */
+static int localUp;               /* localup: subsolar camera's up = the pivot's vertical */
 static double timeScale = 1.0;
 static PoseKey keys[MAX_KEYS]; static int nKeys;
 static AltKey akeys[MAX_KEYS];  static int nAKeys;
@@ -156,6 +157,8 @@ static int loadScene(const char *path)
 						switchFrame[nSwitch] = f;
 						switchBody[nSwitch++] = i;
 					}
+		} else if (strcmp(tok, "localup") == 0) {
+			localUp = 1;
 		} else if (strcmp(tok, "bakeasync") == 0) {
 			bakeAsync = 1;
 		} else if (strcmp(tok, "systemseed") == 0) {
@@ -265,7 +268,7 @@ int Bench_Active(void) { return active; }
 int Bench_BlockingBakes(void) { return active && !bakeAsync; }
 long Bench_Frame(void) { return frame; }
 double Bench_SimTimeStart(void) { return simStart; }
-double Bench_SimTime(void) { return simStart + (double)frame * BENCH_DT * SIM_TIME_SCALE * timeScale; }
+double Bench_SimTime(void) { return simStart + (double)frame * BENCH_DT * BENCH_TIME_SCALE * timeScale; }
 
 int Bench_FixedWindowSize(int *w, int *h)
 {
@@ -316,7 +319,10 @@ void Bench_UpdateCamera(void)
 		double base = pivotGround ? Earth_GroundRadius(dir, 1000.0 / e->radius) : e->radius;
 		pivot = daddvec3(e->position, dscalarvec3(dir, base + pivotOff));
 		Camera_SetPivot(pivot);
-		Camera_SetOrbitEyeDir(u.x, u.y, u.z, (float)dist);
+		if (localUp)
+			Camera_SetOrbitEyeDirUp(u.x, u.y, u.z, dir.x, dir.y, dir.z, (float)dist);
+		else
+			Camera_SetOrbitEyeDir(u.x, u.y, u.z, (float)dist);
 		return;
 	}
 	Camera_SetPivot(pivot);

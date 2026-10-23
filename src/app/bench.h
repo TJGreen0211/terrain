@@ -16,6 +16,9 @@
                                  be negative: inside the planet gives a
                                  grazing near-horizontal view)
      phase  <deg>                sub-solar phase offset (default 0)
+     localup                     subsolar pivot: the screen's up is the
+                                 pivot's vertical (level horizon), not
+                                 world +Y
      frames <n>                  run length (default 480, --frames wins)
      simtime <seconds>           simulation time at frame 0
      bakeasync                   planets bake in the background as in
@@ -43,7 +46,7 @@ int Bench_FixedWindowSize(int *w, int *h);
    Bodies_Update() (it reads the earth's position). No-op when not benching. */
 void Bench_UpdateCamera(void);
 double Bench_SimTimeStart(void);
-/* The sim clock for the current frame: start + frame time x SIM_TIME_SCALE
+/* The sim clock for the current frame: start + frame time x BENCH_TIME_SCALE
    x the scene's 'timescale' (0 freezes the bodies). */
 double Bench_SimTime(void);
 

@@ -96,8 +96,8 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 	const PlanetInfo *pi = SolarSystem_Info(id);
 	dvec3 rel = dsubvec3(b->position, cam);
 	double d = dlengthvec3(rel), R = b->radius;
-	if (R <= 0.0 || d <= R * 1.0001)
-		return;
+	if (R <= 0.0 || d <= R)
+		return;   /* inside: a gas giant's interior pass draws the murk */
 	double rpx = asin(R / d) * pixelsPerRadian();
 	int isDot = rpx < DOT_RADIUS_PX;
 	if (isDot != dots)
@@ -109,15 +109,18 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 	                 : pi->atmo.shellHeight > 0.0f ? pi->atmo.shellHeight / R : 0.0;
 	int rings = pi->hasRings;
 	double extent = R * fmax(1.0 + atmoThick, rings ? RING_OUTER * 1.02 : 1.0);
+	/* Close up (in or near the air or the rings) the silhouette cone gets
+	   too wide for a billboard: cover the whole screen instead. */
+	int fullScreen = !isDot && d < 1.5 * extent;
 	extent = fmin(extent, d / 1.02);   /* inside the rings: they are cut off */
 
 	dvec3 cv = toView(view, rel);
-	if (cv.z > extent)
+	if (!fullScreen && cv.z > extent)
 		return;   /* behind the camera */
 
 	/* Billboard half-size: the extent's silhouette cone in the plane through
 	   the centre (exact cover), or the dot's footprint. */
-	double half = extent * d / sqrt(d * d - extent * extent);
+	double half = fullScreen ? 0.0 : extent * d / sqrt(d * d - extent * extent);
 	if (isDot)
 		half = fmax(R * d / sqrt(d * d - R * R), 3.0 * DOT_SIGMA_PX * d / pixelsPerRadian());
 
@@ -126,6 +129,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 
 	glUniform3f(glGetUniformLocation(shader, "centerView"), (float)cv.x, (float)cv.y, (float)cv.z);
 	glUniform1f(glGetUniformLocation(shader, "halfSize"), (float)half);
+	glUniform1i(glGetUniformLocation(shader, "fullScreen"), fullScreen);
 	glUniform1f(glGetUniformLocation(shader, "radius"), (float)R);
 	/* Camera relative to the body, in body radii (o in the ray-sphere). */
 	glUniform3f(glGetUniformLocation(shader, "camBody"), (float)(-cv.x / R), (float)(-cv.y / R), (float)(-cv.z / R));
@@ -145,7 +149,7 @@ static void drawBody(int id, mat4 view, dvec3 cam, int dots, int ringBody)
 		glUniformMatrix3fv(glGetUniformLocation(shader, "viewToBody"), 1, GL_FALSE, m);
 	}
 	glUniform3f(glGetUniformLocation(shader, "color"), b->color[0], b->color[1], b->color[2]);
-	GasGiant_BindStandIn(shader, gas && !isDot ? &SolarSystem_Info(id)->gas : NULL);
+	GasGiant_BindStandIn(shader, gas && !isDot ? &SolarSystem_Info(id)->gas : NULL, R, d - R);
 	glUniform1f(glGetUniformLocation(shader, "mottle"),
 	            pi->type == PLANET_ROCKY || pi->type == PLANET_DWARF ? 1.0f : 0.0f);
 	glUniform1f(glGetUniformLocation(shader, "seed"), (float)(pi->ringSeed % 997u) * 0.137f + (float)id);

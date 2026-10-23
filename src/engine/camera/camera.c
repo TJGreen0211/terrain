@@ -15,6 +15,7 @@ static float CameraDistance = 0.0f;
 static float CameraDistanceMax;
 static GLfloat MovementSpeed;
 static GLfloat CameraScrollSpeed;   // fine: lets you dolly all the way through the atmosphere shell
+static double SpeedScale = 1.0;     // Camera_SetSpeedScale
 
 /* The whole orbit orientation is one unit quaternion: the world -> camera
    rotation. A drag never accumulates per frame; it recomposes from the
@@ -296,11 +297,19 @@ static quaternion quatFromRows(const float m[4][4])
    local "up" is not world +Y. */
 void Camera_SetOrbitEyeDir(double ux, double uy, double uz, float distMeters)
 {
+    Camera_SetOrbitEyeDirUp(ux, uy, uz, 0.0, 1.0, 0.0, distMeters);
+}
+
+void Camera_SetOrbitEyeDirUp(double ux, double uy, double uz,
+                             double upx, double upy, double upz, float distMeters)
+{
     float len = (float)sqrt(ux * ux + uy * uy + uz * uz);
     if (len < 1e-9f)
         return;
     vec3 u = { (float)(ux / len), (float)(uy / len), (float)(uz / len) };
-    vec3 w = fabsf(u.y) > 0.99f ? (vec3){ 0.0f, 0.0f, 1.0f } : (vec3){ 0.0f, 1.0f, 0.0f };
+    vec3 w = normalizevec3((vec3){ (float)upx, (float)upy, (float)upz });
+    if (fabsf(dotvec3(w, u)) > 0.99f)
+        w = fabsf(u.y) > 0.99f ? (vec3){ 0.0f, 0.0f, 1.0f } : (vec3){ 0.0f, 1.0f, 0.0f };
     vec3 r0 = normalizevec3(crossvec3(w, u));
     vec3 r1 = crossvec3(u, r0);
 
@@ -415,7 +424,7 @@ void Camera_ProcessKeyboard(float forward, float right, float up, float roll, GL
     dir.z = Front.z * forward + Right.z * right + Up.z * up;
     dir = normalizevec3(dir);
 
-    double velocity = (double)MovementSpeed * deltaTime;
+    double velocity = (double)MovementSpeed * SpeedScale * deltaTime;
     Pivot = daddvec3(Pivot, (dvec3){dir.x * velocity, dir.y * velocity, dir.z * velocity});
 }
 
@@ -469,6 +478,21 @@ void Camera_ProcessScroll(float yoffset)
         CameraDistance = 0.0f;
     if (CameraDistance > CameraDistanceMax)
         CameraDistance = CameraDistanceMax;
+}
+
+void Camera_SetSpeedScale(double scale)
+{
+    SpeedScale = scale;
+}
+
+void Camera_KeepOutside(dvec3 center, double minRadius)
+{
+    if (surfaceViewActive()) return;
+    dvec3 v = dsubvec3(Camera_Position(), center);
+    double r = dlengthvec3(v);
+    if (r >= minRadius) return;
+    dvec3 out = r > 0.0 ? dscalarvec3(v, 1.0 / r) : (dvec3){ 0.0, 0.0, 1.0 };
+    Pivot = daddvec3(Pivot, dscalarvec3(out, minRadius - r));
 }
 
 float Camera_MoveSpeed(void)

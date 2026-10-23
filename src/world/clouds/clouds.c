@@ -1,5 +1,6 @@
 #include "engine/gfx/shader.h"
 #include "world/clouds/clouds.h"
+#include "world/clouds/cloud_volume.h"
 #include "world/bodies/solar_system.h"
 #include "world/atmosphere/atmosphere.h"
 #include "world/rings/rings.h"
@@ -578,4 +579,6 @@ void Clouds_DebugPanel(struct nk_context *ctx)
 	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
 	if (nk_button_label(ctx, "Reset clouds (Earth)"))
 		*c = Clouds_Defaults();
+
+	CloudVolume_DebugPanel(ctx);
 }

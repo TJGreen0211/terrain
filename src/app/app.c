@@ -25,7 +25,9 @@
 #include "world/bodies/solar_system.h"
 #include "world/bodies/sun.h"
 #include "world/clouds/clouds.h"
+#include "world/clouds/cloud_volume.h"
 #include "world/gasgiant/gas_giant.h"
+#include "world/gasgiant/gas_interior.h"
 #include "world/ocean/water_draw.h"
 #include "world/rings/rings.h"
 #include "world/shadows/shadows.h"
@@ -237,6 +239,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 
 	Sun_Init();
 	GasGiant_Init();
+	GasInterior_Init();
 	Planets_Init();
 	LoadingScreen_Step();
 
@@ -290,6 +293,7 @@ int App_Create(App *app, int argc, char *argv[], int *exitCode)
 	Rings_AttachReceiver(BodyDraw_Program());
 	Rings_AttachReceiver(Atmosphere_Program());
 	Clouds_Init();
+	CloudVolume_Init();
 
 	/* The procedural system (solar_system.c): Earth as baked above, every
 	   other planet from the system seed (baked on approach). */
@@ -372,6 +376,16 @@ void App_Update(App *app)
 		}
 	}
 	Bench_UpdateCamera();
+
+	/* Near a gas giant: slower flight among its clouds, and never below
+	   the floor under them (gas_interior.c). */
+	{
+		double alt;
+		int giant = GasInterior_Body(Camera_Position(), &alt);
+		if (giant >= 0)
+			Camera_KeepOutside(Bodies_Get(giant)->position, GasInterior_FloorRadius(giant));
+		Camera_SetSpeedScale(giant >= 0 ? GasInterior_SpeedScale(alt) : 1.0);
+	}
 
 	/* This frame's floating origin (render.c). */
 	app->cam = Camera_Position();

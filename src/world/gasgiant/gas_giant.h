@@ -108,8 +108,11 @@ const char *GasGiant_FamilyName(int family);
    and switches the gas shading off. */
 void GasGiant_AttachStandIn(GLuint shader);
 /* Program in use: s's uniforms and profile (rebuilt if s changed), or
-   gas shading off when s is NULL. Leaves glActiveTexture at unit 0. */
-void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s);
+   gas shading off when s is NULL. inside: how much of the haze the
+   interior pass draws instead (gas_interior.h; 0 from outside). radius,
+   altitude: the giant's and the camera's above its cloud tops (m). Leaves
+   glActiveTexture at unit 0. */
+void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s, double radius, double altitude);
 
 struct nk_context;
 /* The Gas giants tab: the focused giant's style and the shared look. */

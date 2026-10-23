@@ -25,6 +25,12 @@ float Camera_MoveSpeed(void);
 void Camera_SetMoveSpeed(float metresPerSecond);
 float Camera_ScrollStep(void);
 void Camera_SetScrollStep(float metres);
+/* Factor on the WASD speed (1 = the slider's), e.g. slower near a surface
+   the app knows about. */
+void Camera_SetSpeedScale(double scale);
+/* Keeps the camera at least minRadius from center (world, m), by moving
+   the pivot straight out. No-op in the surface view. */
+void Camera_KeepOutside(dvec3 center, double minRadius);
 
 /* Camera-relative rendering: Camera_ViewMatrix() is rotation only, and the camera
    sits at the origin of every space the GPU sees. Camera_Position() is the
@@ -63,5 +69,9 @@ void Camera_SetOrbitPose(double yawDeg, double pitchDeg, float distMeters);
 /* Benchmark subsolar pose: eye direction from the pivot given as a unit
    vector, so the pivot's local frame (not world +Y) can drive the camera. */
 void Camera_SetOrbitEyeDir(double ux, double uy, double uz, float distMeters);
+/* The same with the screen's up taken from (upx, upy, upz) instead of
+   world +Y (e.g. the local vertical, so the horizon is level). */
+void Camera_SetOrbitEyeDirUp(double ux, double uy, double uz,
+                             double upx, double upy, double upz, float distMeters);
 
 #endif

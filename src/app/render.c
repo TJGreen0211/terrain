@@ -18,6 +18,8 @@
 #include "world/bodies/solar_system.h"
 #include "world/bodies/sun.h"
 #include "world/clouds/clouds.h"
+#include "world/clouds/cloud_volume.h"
+#include "world/gasgiant/gas_interior.h"
 #include "world/ocean/water_draw.h"
 #include "world/rings/rings.h"
 #include "world/shadows/shadows.h"
@@ -65,6 +67,8 @@ static void ensureSceneTarget(int w, int h) {
 		return;
 	Atmosphere_SetSceneDepth(SceneTarget_DepthTexture(), SceneTarget_Samples(), CAMERA_NEAR);
 	Nebula_SetSceneDepth(SceneTarget_DepthTexture(), SceneTarget_Samples(), CAMERA_NEAR);
+	GasInterior_SetSceneDepth(SceneTarget_DepthTexture(), SceneTarget_Samples(), CAMERA_NEAR);
+	CloudVolume_SetSceneDepth(SceneTarget_DepthTexture(), SceneTarget_Samples(), CAMERA_NEAR);
 }
 
 /* Switches clip control, depth test and depth clear value between the main
@@ -333,6 +337,19 @@ void Render_Frame(App *app)
 
 	//Sun corona halo — must be drawn LAST (additive, does not write depth)
 	Sun_DrawGlow(sunProj, sunView, lightPositionXYZ, sunGlowRadius);
+
+	//Inside a gas giant: its haze and murk over everything, the Sun's
+	//glow included (gas_interior.c). Nothing from outside.
+	Prof_Begin(PROF_GAS_INTERIOR);
+	GasInterior_Draw(&frame);
+	Prof_End(PROF_GAS_INTERIOR);
+
+	//Then its volumetric cloud layers (the shared cloud volume,
+	//world/clouds/cloud_volume.c): they fog themselves with the same air,
+	//so they go over the hazed scene.
+	Prof_Begin(PROF_CLOUD_VOLUME);
+	GasInterior_DrawClouds(&frame);
+	Prof_End(PROF_CLOUD_VOLUME);
 
 	/* Resolve the scene into the window; the UI draws there directly,
 	   with the standard depth convention restored. */

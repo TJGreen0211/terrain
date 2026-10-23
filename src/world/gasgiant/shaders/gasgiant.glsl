@@ -59,6 +59,11 @@ uniform float gasAmbient;
 uniform float gasRim;
 uniform float gasGlow;
 uniform float gasExposure;
+uniform float gasInside;        // share of the haze the interior pass draws (gas_interior.c)
+uniform int gasOctaves;         // detail octaves: more close to the cloud tops
+uniform float gasGlowFade;      // the glow beyond the limb (0 once the camera is in the shell)
+uniform float gasDeep;          // 1: the deck lies under the interior's cloud layers (darker)
+uniform float gasDeepReach;     // m: how far those layers reach (fading over the last 40%)
 
 const float GAS_NOISE_PERIOD = 32.0;   // lattice cells per tile (gas_giant.c)
 
@@ -227,16 +232,26 @@ vec3 gasSunlight(float mu0, float wrap)
 	return w * mix(gasTerminator, vec3(1.0), smoothstep(0.0, 0.4, w));
 }
 
-// n, d, sunV: unit surface normal, view ray and Sun direction (view axes);
-// nb, sunB: the normal and Sun direction in body-fixed axes (pole = +Z).
-// pixelR: one pixel at the body, radii. sunVis: sunlight left after the
-// ring's shadow. Returns the display colour.
-vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR, float sunVis)
-{
-	float mu = max(dot(n, -d), 0.0);
-	float mu0 = dot(n, sunV);
-	float foot = pixelR / max(mu, 0.08);       // one pixel on the cloud tops, radii
+// The cloud field at body-fixed direction nb (pole = +Z), one footprint
+// foot (radii) across: what the deck's look is made of, before lighting.
+// gasGiantSurface lights it; the interior's weather bake
+// (gasweather.frag) turns it into cloud cover.
+struct GasCloud {
+	vec3 col;      // albedo, display
+	float turb;    // the profile's turbulence weight here
+	float h;       // the cloud texture, [0, 1]
+	float hi;      // high cloud cover
+	float storm;   // storm and cyclone cover, cores and collars
+	vec3 ps;       // nb spun around the storms (unit)
+	vec3 qd;       // cloud texture coordinates
+	float st;      // east-west stretch here
+	float fp;      // one footprint in noise units
+	float fpd;     // the same for the cloud texture
+};
 
+GasCloud gasCloudField(vec3 nb, float foot)
+{
+	GasCloud c;
 	float lat = asin(clamp(nb.z, -1.0, 1.0));
 	float lon = atan(nb.y, nb.x);
 	float polarCollar;
@@ -261,23 +276,16 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 	vec2 w1 = gasFbm4(q, 4, fp).xy - 0.5;
 	float amt = gasTurbulence * (0.25 + turb);
 	vec3 q2 = q * 2.3 + vec3(w1.x, w1.y, w1.x + w1.y) * 4.0 * amt;
-	vec4 n2 = gasFbm4(q2, 5, fp * 2.3);
+	vec4 n2 = gasFbm4(q2, gasOctaves, fp * 2.3);
 	float w2 = n2.z - 0.5;
 	float dlat = (w2 + 0.5 * w1.x) * 1.2 / gasFreq * amt;
 	vec3 col = textureLod(gasProfile, (lat + dlat) / GAS_PI + 0.5, lod).rgb;
 
-	// Cloud texture and its slope toward the Sun (sculpted relief).
+	// Cloud texture (its slope toward the Sun is the relief:
+	// gasGiantSurface).
 	vec3 qd = q2 * 1.7 + vec3(11.0, 3.0, 7.0);
 	float fpd = fp * 2.3 * 1.7;
-	float h = gasFbm4(qd, 5, fpd).w;
-	vec3 sunT = sunB - nb * dot(sunB, nb);
-	float sunTl = length(sunT);
-	float shade = 1.0;
-	if (sunTl > 1e-4) {
-		vec3 dq = vec3(sunT.xy / st, sunT.z);
-		float h2 = gasFbm4(qd + normalize(dq) * 0.12, 5, fpd).w;
-		shade = max(1.0 + gasRelief * (h2 - h) * 5.0 * sunTl, 0.2);
-	}
+	float h = gasFbm4(qd, gasOctaves, fpd).w;
 
 	col = mix(col, gasPolarColor, polar * 0.75 * (0.8 + 0.4 * h));
 	col = mix(col, storm.rgb, clamp(storm.a * (1.0 + 1.2 * (h - 0.5)), 0.0, 1.0));
@@ -301,29 +309,73 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 
 	col *= 1.0 + gasDetail * (h - 0.5) * 0.9;
 
-	// High clouds here, and the cover sunward by their height (the
-	// shadow they cast on the deck).
-	float hi = 0.0, hiShadow = 0.0;
-	if (gasHigh > 0.0 && gasHighCount > 0) {
-		hi = gasHighCover(ps, st, fp);
+	c.col = col;
+	c.turb = turb;
+	c.h = h;
+	c.hi = gasHigh > 0.0 && gasHighCount > 0 ? gasHighCover(ps, st, fp) : 0.0;
+	c.storm = max(max(storm.a, polar), collar);
+	c.ps = ps;
+	c.qd = qd;
+	c.st = st;
+	c.fp = fp;
+	c.fpd = fpd;
+	return c;
+}
+
+// n, d, sunV: unit surface normal, view ray and Sun direction (view axes);
+// nb, sunB: the normal and Sun direction in body-fixed axes (pole = +Z).
+// pixelR: one pixel at the body, radii. sunVis: sunlight left after the
+// ring's shadow. hitM: the camera's distance to this point (m). Returns
+// the display colour.
+vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR, float sunVis, float hitM)
+{
+	// Under the interior's cloud layers, as far as they reach: there the
+	// deck is the deep layer below them (darker, no high clouds); beyond,
+	// it keeps the look from outside, so the clouds fade into it.
+	float deep = gasDeep * (1.0 - smoothstep(0.6 * gasDeepReach, gasDeepReach, hitM));
+	float mu = max(dot(n, -d), 0.0);
+	float mu0 = dot(n, sunV);
+	float foot = pixelR / max(mu, 0.08);       // one pixel on the cloud tops, radii
+
+	GasCloud c = gasCloudField(nb, foot);
+	vec3 col = c.col;
+	float h = c.h;
+
+	// Sculpted relief: the cloud texture's slope toward the Sun.
+	vec3 sunT = sunB - nb * dot(sunB, nb);
+	float sunTl = length(sunT);
+	float shade = 1.0;
+	if (sunTl > 1e-4) {
+		vec3 dq = vec3(sunT.xy / c.st, sunT.z);
+		float h2 = gasFbm4(c.qd + normalize(dq) * 0.12, gasOctaves, c.fpd).w;
+		shade = max(1.0 + gasRelief * (h2 - h) * 5.0 * sunTl, 0.2);
+	}
+
+	// The high clouds' shadow: their cover sunward by their height.
+	float hi = c.hi, hiShadow = 0.0;
+	if (hi > 0.0 || (gasHigh > 0.0 && gasHighCount > 0)) {
 		float mu0b = dot(sunB, nb);
 		if (sunTl > 1e-4 && mu0b > -0.1) {
 			float off = min(gasHighHeight * sunTl / max(mu0b, 0.15), 0.08);
-			hiShadow = gasHighCover(normalize(ps + sunT / sunTl * off), st, fp);
+			hiShadow = gasHighCover(normalize(c.ps + sunT / sunTl * off), c.st, c.fp);
 		}
 	}
 
-	// Lighting, linear.
-	vec3 alb = displayToLinear(clamp(col, 0.0, 1.0));
+	// Lighting, linear. From inside the giant the deck lies under the
+	// cloud layers: gasDeep darkens it.
+	vec3 alb = displayToLinear(clamp(col, 0.0, 1.0)) * mix(1.0, 0.35, deep);
 	vec3 haze = displayToLinear(gasHazeColor);
 	float wrapL = clamp((mu0 + gasWrap) / (1.0 + gasWrap), 0.0, 1.0);
-	float limb = pow(max(wrapL, 1e-4), gasLimbK - 1.0) * pow(max(mu, 0.02), gasLimbK - 1.0);
+	// From inside the haze the darkening toward the horizon is the
+	// interior pass's haze, not the limb's.
+	float muL = mix(mu, 1.0, gasInside);
+	float limb = pow(max(wrapL, 1e-4), gasLimbK - 1.0) * pow(max(muL, 0.02), gasLimbK - 1.0);
 	vec3 sun = gasSunlight(mu0, gasWrap) * limb * sunVis;
 	vec3 surface = alb * (sun * shade * (1.0 - 0.6 * hiShadow) + gasAmbient * haze);
 
 	// Haze veil: thicker toward the limb, lit with a wider wrap and a
 	// forward-scattering rim when the Sun is behind the planet.
-	float veil = 1.0 - exp(-gasHazeTau / max(mu, 0.03));
+	float veil = (1.0 - exp(-gasHazeTau / max(mu, 0.03))) * (1.0 - gasInside);
 	vec3 hazeSun = gasSunlight(mu0, 2.0 * gasWrap) * sunVis;
 	float phase = mix(1.0, gasPhase(dot(d, sunV)), clamp(0.25 * gasRim, 0.0, 1.0));
 	vec3 inScatter = haze * (hazeSun * phase + gasAmbient);
@@ -331,7 +383,8 @@ vec3 gasGiantSurface(vec3 n, vec3 d, vec3 sunV, vec3 nb, vec3 sunB, float pixelR
 
 	// High clouds: above most of the haze, so a thinner veil and a
 	// milder limb darkening; dimmer where more cloud lies sunward (their
-	// shaded side).
+	// shaded side). From inside, the volume's top layer replaces them.
+	hi *= 1.0 - deep;
 	if (hi > 0.0) {
 		float kH = mix(1.0, gasLimbK, 0.5);
 		float limbH = pow(max(wrapL, 1e-4), kH - 1.0) * pow(max(mu, 0.02), kH - 1.0);
@@ -353,7 +406,7 @@ vec4 gasGiantGlow(float x, vec3 limbDir, vec3 d, vec3 sunV)
 	float phase = mix(1.0, gasPhase(dot(d, sunV)), clamp(0.25 * gasRim, 0.0, 1.0));
 	float dens = exp(-4.0 * x) * (1.0 - x);
 	float bright = max(max(light.r, light.g), light.b) * phase;
-	float a = clamp(dens * gasGlow * bright, 0.0, 1.0);
+	float a = clamp(dens * gasGlow * bright, 0.0, 1.0) * gasGlowFade;
 	vec3 c = displayToLinear(gasHazeColor) * light / max(bright, 1e-3) * min(phase, 2.0);
 	return vec4(toneMap(c * gasExposure), a);
 }

@@ -643,9 +643,12 @@ void SolarSystem_DebugPanel(struct nk_context *ctx)
 		nk_labelf(ctx, NK_TEXT_RIGHT, "%.0fx", Bodies_Params()->timeScale);
 	else
 		nk_labelf(ctx, NK_TEXT_RIGHT, "%.1f d/s", Bodies_Params()->timeScale / 86400.0);
-	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
-	if (nk_button_label(ctx, "Default time scale"))
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 2);
+	if (nk_button_label(ctx, "Real time"))
 		Bodies_Params()->timeScale = SIM_TIME_SCALE;
+	if (nk_button_label(ctx, "1 day / min"))
+		Bodies_Params()->timeScale = BENCH_TIME_SCALE;
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
 
 	DebugGUI_Group(ctx, "Focus (Tab / Shift+Tab)");
 	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 3);
