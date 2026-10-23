@@ -59,8 +59,8 @@ void GasInterior_Draw(const FrameContext *f);
    scale height H: 1 among them, 0 well above (the stand-in alone). */
 float GasInterior_VolumeFade(double H, double altitude);
 /* How far the cloud layers reach from the camera at this altitude (m);
-   they fade out over its last 40% (CloudVolume_Reach). */
-double GasInterior_CloudReach(double H, double altitude);
+   they fade out over its last 40% (CloudVolume_Reach). radius: the body's. */
+double GasInterior_CloudReach(double H, double radius, double altitude);
 /* The giant's cloud layers around the camera (world/clouds/cloud_volume),
    as GasInterior_Draw made them this frame (their weather map from the
    exterior's cloud field). Into the main pass, after the haze: the clouds

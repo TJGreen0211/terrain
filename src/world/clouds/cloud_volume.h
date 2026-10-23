@@ -100,7 +100,8 @@ typedef struct CloudVolumeScene {
 	float groundColor[3];  /* light bounced from below (display) ... */
 	float groundGain;      /* ... times this, x the Sun */
 	float exposure;
-	float fade;            /* overall density, 0..1 (the provider's hand-off) */
+	float fade;            /* the clouds' opacity over the scene, 0..1 (the provider's
+	                          hand-off: a cross-fade, the clouds themselves unchanged) */
 	/* A flat cloud deck under the layers (deckOn): opaque, drawn to the
 	   horizon as a lumpy surface at deckAlt with a mist rising off it, so
 	   the layers' bottoms sink into it. */

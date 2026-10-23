@@ -638,7 +638,7 @@ void GasGiant_BindStandIn(GLuint shader, GasGiantStyle *s, double radius, double
 	glUniform1f(glGetUniformLocation(shader, "gasGlowFade"),
 	            (float)smoothstep(GAS_INTERIOR_FADE_HI_H * H, GAS_HAZE_TOP_H * H, altitude));
 	glUniform1f(glGetUniformLocation(shader, "gasDeep"), GasInterior_VolumeFade(H, altitude));
-	glUniform1f(glGetUniformLocation(shader, "gasDeepReach"), (float)GasInterior_CloudReach(H, altitude));
+	glUniform1f(glGetUniformLocation(shader, "gasDeepReach"), (float)GasInterior_CloudReach(H, radius, altitude));
 	glUniform1i(glGetUniformLocation(shader, "gasOctaves"),
 	            altitude < GAS_CLOSE_DETAIL_ALT_RADII * radius ? 8 : 5);
 

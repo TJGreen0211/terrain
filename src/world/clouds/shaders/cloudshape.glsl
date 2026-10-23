@@ -68,7 +68,7 @@ float density(vec3 rel, float a, float foot, bool detail, out vec3 alb)
 		return 0.0;
 	vec2 xy = vec2(dot(rel, mapEast), dot(rel, mapNorth));
 	vec2 uv = xy / mapExtent + 0.5;
-	float edge = smoothstep(0.0, 0.06, min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y)));
+	float edge = smoothstep(0.0, 0.12, min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y)));
 	if (edge <= 0.0)
 		return 0.0;
 	// The walls wander with height: the map is read up to 0.8 of the

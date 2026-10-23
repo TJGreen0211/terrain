@@ -2,19 +2,21 @@
 
 // The accumulated clouds over the scene (cloud_volume.c), upsampled from
 // the low-resolution target: premultiplied, depth-tested against the
-// scene at the clouds' distance (nothing written).
+// scene at the clouds' distance (nothing written), times the provider's
+// hand-off (opacity).
 
 uniform mat4 projection;
 uniform vec2 fullSize;
 uniform sampler2D cloudColor;   // linear
 uniform sampler2D cloudDepth;   // nearest
+uniform float opacity;
 
 out vec4 FragColor;
 
 void main()
 {
 	vec2 uv = gl_FragCoord.xy / fullSize;
-	vec4 c = texture(cloudColor, uv);
+	vec4 c = texture(cloudColor, uv) * opacity;
 	if (c.a < 0.004)
 		discard;
 	float dist = texture(cloudDepth, uv).r;

@@ -445,7 +445,7 @@ static void setShapeUniforms(GLuint p, const CloudVolumeScene *s, float *lo, flo
 		int on = i < n;
 		lb[i] = L->base;
 		lt[i] = on ? L->top : L->base;
-		ld[i] = on ? L->density * s->fade : 0.0f;
+		ld[i] = on ? L->density : 0.0f;
 		lc[i] = L->coverage;
 		ls[i] = L->scale > 1.0f ? L->scale : 1.0f;
 		lsw[i] = L->sweep > 0.1f ? L->sweep : 0.1f;
@@ -692,7 +692,6 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glUniform1f(glGetUniformLocation(p, "deckScale"), s->deckScale > 1.0f ? s->deckScale : 1.0f);
 	glUniform1f(glGetUniformLocation(p, "deckMist"), s->deckMist > 1.0f ? s->deckMist : 1.0f);
 	glUniform1f(glGetUniformLocation(p, "deckDensity"), s->deckDensity);
-	glUniform1f(glGetUniformLocation(p, "deckFade"), s->fade);
 	glUniform1f(glGetUniformLocation(p, "multiScatter"), g_params.multiScatter);
 	glUniform1f(glGetUniformLocation(p, "powder"), g_params.powder);
 	glUniform1f(glGetUniformLocation(p, "ambient"), g_params.ambient);
@@ -746,6 +745,7 @@ void CloudVolume_Draw(const FrameContext *f, const CloudVolumeScene *s)
 	glActiveTexture(GL_TEXTURE0 + 1);
 	glBindTexture(GL_TEXTURE_2D, histDepth[cur]);
 	glUniform1i(glGetUniformLocation(p, "cloudDepth"), 1);
+	glUniform1f(glGetUniformLocation(p, "opacity"), s->fade);
 	/* Premultiplied, behind anything nearer (the march already stopped
 	   at the scene's depth; this keeps the full-resolution edges); alpha
 	   keeps the slab's cloud cover. */

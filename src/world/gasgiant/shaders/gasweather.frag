@@ -43,7 +43,9 @@ layout(location = 1) out vec4 Colour;
 void main()
 {
 	vec2 xy = (gl_FragCoord.xy / mapSize - 0.5) * mapExtent;
-	vec3 nb = normalize(mapCenter * radius + mapEast * xy.x + mapNorth * xy.y);
+	// Straight down onto the sphere, as the clouds read the map
+	// (cloudshape.glsl: the point's offsets along east and north).
+	vec3 nb = normalize(mapCenter * sqrt(max(radius * radius - dot(xy, xy), 0.0)) + mapEast * xy.x + mapNorth * xy.y);
 	GasCloud c = gasCloudField(nb, mapExtent / mapSize / radius);
 
 	float lum = dot(c.col, vec3(0.3, 0.59, 0.11));

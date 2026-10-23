@@ -78,7 +78,6 @@ uniform vec3 deckColor;        // display
 uniform float deckScale;       // m: its lumps
 uniform float deckMist;        // m: the mist's scale height
 uniform float deckDensity;     // the mist's extinction at the deck, 1/m
-uniform float deckFade;        // its opacity (the provider's hand-off)
 
 uniform sampler2DMS sceneDepth;
 uniform int sceneSamples;
@@ -268,7 +267,7 @@ float deckShade(float a)
 // The deck's mist at altitude a: extinction (1/m).
 float mistSigma(float a)
 {
-	return deckOn != 0 ? deckFade * deckDensity * exp(-abs(a - deckAlt) / deckMist) : 0.0;
+	return deckOn != 0 ? deckDensity * exp(-abs(a - deckAlt) / deckMist) : 0.0;
 }
 
 // The mist's light at view-space point pv (altitude a, Sun cosine mus).
@@ -552,7 +551,11 @@ void main()
 				T *= extM;
 			}
 		}
-		float wD = T * deckFade;
+		// Toward the weather map's edge the deck gives way to what is
+		// behind (the provider's own look of the far cloud tops).
+		vec3 relD = camToMap + viewToBody * (gD * tDeck);
+		vec2 uvD = vec2(dot(relD, mapEast), dot(relD, mapNorth)) / mapExtent + 0.5;
+		float wD = T * smoothstep(0.0, 0.15, min(min(uvD.x, uvD.y), min(1.0 - uvD.x, 1.0 - uvD.y)));
 		L += deckLight(gD * tDeck, tDeck, deckLin, skyLin, groundLin) * wD * Ta;
 		dSum += tDeck * wD;
 		wSum += wD;

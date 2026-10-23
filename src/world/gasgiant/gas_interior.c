@@ -23,6 +23,7 @@ static GLuint program, emptyVAO;
 static GLuint bakeProgram;
 static unsigned int bakedHash;
 static int bakedBody = -1;
+static double bakedExtent;
 static dvec3 bakedCenter, bakedEast, bakedNorth;   /* the map's frame, body-fixed */
 static GLuint sceneDepthTex;
 static int sceneDepthSamples;
@@ -214,10 +215,25 @@ void GasInterior_Draw(const FrameContext *f)
 	glActiveTexture(GL_TEXTURE0);
 }
 
-double GasInterior_CloudReach(double H, double altitude)
+/* The weather map's width for a camera at this altitude: GAS_CLOUD_MAP_EXTENT_M
+   among the clouds, growing with the distance to the horizon from higher up
+   (so the map covers the view), in steps of 1.25 so it is re-baked only
+   now and then. */
+static double mapExtent(double radius, double altitude)
 {
-	return fmin(fmax(GAS_CLOUD_REACH_M, CloudVolume_Reach(altitude - GAS_CLOUD_MID_BASE_H * H, GAS_CLOUD_MAP_EXTENT_M)),
-	            0.45 * GAS_CLOUD_MAP_EXTENT_M);
+	double need = GAS_CLOUD_MAP_HORIZONS * sqrt(2.0 * radius * fmax(altitude, 0.0));
+	need = fmin(need, GAS_CLOUD_MAP_MAX_RADII * radius);
+	double e = GAS_CLOUD_MAP_EXTENT_M;
+	while (e < need)
+		e *= 1.25;
+	return e;
+}
+
+double GasInterior_CloudReach(double H, double radius, double altitude)
+{
+	double extent = mapExtent(radius, altitude);
+	return fmin(fmax(GAS_CLOUD_REACH_M, CloudVolume_Reach(altitude - GAS_CLOUD_MID_BASE_H * H, extent)),
+	            0.45 * extent);
 }
 
 float GasInterior_VolumeFade(double H, double altitude)
@@ -341,7 +357,8 @@ static void updateFlashes(const FrameContext *f, const Body *b, const CloudVolum
 }
 
 /* The weather map under the camera, from the exterior's cloud field. */
-static void bakeWeather(int id, GasGiantStyle *s, const Body *b, double alt, dvec3 center, dvec3 east, dvec3 north)
+static void bakeWeather(int id, GasGiantStyle *s, const Body *b, double alt, double extent,
+                        dvec3 center, dvec3 east, dvec3 north)
 {
 	CloudVolume_BeginWeatherBake();
 	glUseProgram(bakeProgram);
@@ -349,7 +366,7 @@ static void bakeWeather(int id, GasGiantStyle *s, const Body *b, double alt, dve
 	glUniform3f(glGetUniformLocation(bakeProgram, "mapCenter"), (float)center.x, (float)center.y, (float)center.z);
 	glUniform3f(glGetUniformLocation(bakeProgram, "mapEast"), (float)east.x, (float)east.y, (float)east.z);
 	glUniform3f(glGetUniformLocation(bakeProgram, "mapNorth"), (float)north.x, (float)north.y, (float)north.z);
-	glUniform1f(glGetUniformLocation(bakeProgram, "mapExtent"), (float)GAS_CLOUD_MAP_EXTENT_M);
+	glUniform1f(glGetUniformLocation(bakeProgram, "mapExtent"), (float)extent);
 	glUniform1f(glGetUniformLocation(bakeProgram, "mapSize"), (float)CLOUDVOL_MAP_SIZE);
 	glUniform1f(glGetUniformLocation(bakeProgram, "radius"), (float)b->radius);
 	glUniform1f(glGetUniformLocation(bakeProgram, "lumZone"), (float)luminance(s->zone));
@@ -362,6 +379,7 @@ static void bakeWeather(int id, GasGiantStyle *s, const Body *b, double alt, dve
 	bakedCenter = center;
 	bakedEast = east;
 	bakedNorth = north;
+	bakedExtent = extent;
 }
 
 /* Makes this frame's cloud scene (and re-bakes the weather map, ages the
@@ -389,9 +407,10 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	dvec3 north = dcross(center, east);
 	/* Re-bake when the camera has moved on, or the style changed (the
 	   stand-in pass, just before, rebuilt its profile). */
-	if (CloudVolume_NeedsBake(id, camB, b->radius, GAS_CLOUD_MAP_EXTENT_M) ||
-	    bakedBody != id || bakedHash != s->profileHash)
-		bakeWeather(id, s, b, alt, center, east, north);
+	double extent = mapExtent(b->radius, alt);
+	if (CloudVolume_NeedsBake(id, camB, b->radius, extent) ||
+	    bakedBody != id || bakedHash != s->profileHash || bakedExtent != extent)
+		bakeWeather(id, s, b, alt, extent, center, east, north);
 
 	const GasGiantParams *g = GasGiant_Params();
 	sc->body = id;
@@ -402,7 +421,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	sc->mapCenter = bakedCenter;
 	sc->mapEast = bakedEast;
 	sc->mapNorth = bakedNorth;
-	sc->mapExtent = GAS_CLOUD_MAP_EXTENT_M;
+	sc->mapExtent = bakedExtent;
 	sc->layerCount = 2;
 
 	/* Layer 0, top: bright ammonia, thin, swept. Layer 1, middle: rust,
@@ -445,7 +464,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	sc->deckScale = 40.0e3f;
 	sc->deckMist = (float)(GAS_CLOUD_DECK_MIST_H * H);
 	sc->deckDensity = (float)(GAS_CLOUD_DECK_MIST_TAU / (GAS_CLOUD_DECK_MIST_H * H));
-	sc->reach = GasInterior_CloudReach(H, alt);
+	sc->reach = GasInterior_CloudReach(H, b->radius, alt);
 
 	dvec3 toSun = dsubvec3(Bodies_Get(BODY_SUN)->position, f->cam);
 	sc->sunDir = dnormal(toSun);

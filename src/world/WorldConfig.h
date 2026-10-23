@@ -121,10 +121,13 @@
    (scale height GAS_CLOUD_DECK_MIST_H, optical depth GAS_CLOUD_DECK_MIST_TAU
    straight up from the deck): the middle layer starts below it,
    so the walls' feet sink into it.
-   They fade in below GAS_CLOUD_FADE_HI_H scale heights and are fully
-   there below _LO_H. Their weather map is a patch GAS_CLOUD_MAP_EXTENT_M
-   wide under the camera; they reach GAS_CLOUD_REACH_M (within 0.45 of
-   it), or as far as the haze lets anything be seen. */
+   They cross-fade in (their opacity, not their density) below
+   GAS_CLOUD_FADE_HI_H scale heights and are fully there below _LO_H. Their
+   weather map is a patch under the camera, GAS_CLOUD_MAP_EXTENT_M wide
+   among the clouds, from higher up GAS_CLOUD_MAP_HORIZONS times the
+   distance to the horizon (at most GAS_CLOUD_MAP_MAX_RADII radii); they
+   reach GAS_CLOUD_REACH_M (within 0.45 of it), or as far as the haze lets
+   anything be seen. */
 #define GAS_CLOUD_MID_BASE_H      0.0
 #define GAS_CLOUD_MID_TOP_H       2.0
 #define GAS_CLOUD_TOP_BASE_H      2.1
@@ -133,9 +136,11 @@
 #define GAS_CLOUD_DECK_MIST_H     0.05
 #define GAS_CLOUD_DECK_MIST_TAU   1.0
 #define GAS_CLOUD_REACH_M         2.6e6
-#define GAS_CLOUD_FADE_LO_H       7.0
-#define GAS_CLOUD_FADE_HI_H       11.0
+#define GAS_CLOUD_FADE_LO_H       10.0
+#define GAS_CLOUD_FADE_HI_H       45.0
 #define GAS_CLOUD_MAP_EXTENT_M    6.0e6
+#define GAS_CLOUD_MAP_HORIZONS    1.6
+#define GAS_CLOUD_MAP_MAX_RADII   1.2
 /* The cloud ranges in that map: their size north-south (several times
    longer east-west), with canyons of clear air between them. */
 #define GAS_CLOUD_MASSIF_M        150.0e3
