@@ -268,14 +268,14 @@ void Render_Frame(App *app)
 	//centred camera-relative (the walk runs with the camera at the origin).
 	glPolygonMode(GL_FRONT_AND_BACK, Input_Wireframe() ? GL_LINE : GL_FILL);
 
-	//Planet (land + seafloor), then the water shell over it (Earth
-	//only for now), alpha-blended over the seafloor.
+	//Planet (land + seafloor), then the water shell over it (planets
+	//with seas), alpha-blended over the seafloor.
 	if (planetFull) {
 		Prof_Begin(PROF_PLANET);
 		TerrainDraw_Planet(&planetBody, &frame, atmoInner, activeId, app->dxWaveTex);
 		Prof_End(PROF_PLANET);
 	}
-	if (planetFull && isEarth) {
+	if (planetFull && SolarSystem_HasWater(activeId)) {
 		Prof_Begin(PROF_WATER);
 		WaterDraw_Draw(&app->ocean, planetB, &frame, app->skyboxTex, atmoInner, activeId);
 		Prof_End(PROF_WATER);

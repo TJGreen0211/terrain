@@ -341,8 +341,8 @@ void App_Update(App *app)
 		Camera_ResetForFocus(CAMERA_FOCUS_DISTANCE_RADII * Bodies_Get(Bodies_Params()->focusBody)->radius);
 	}
 
-	/* Ocean waves: only Earth has water. */
-	if (SolarSystem_ActiveBody() == BODY_EARTH) {
+	/* Ocean waves: only for an active planet with seas. */
+	if (SolarSystem_HasWater(SolarSystem_ActiveBody())) {
 		Prof_Begin(PROF_WAVES);
 		Water_Generate(&app->ocean, App_Time());
 		Prof_End(PROF_WAVES);

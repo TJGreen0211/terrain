@@ -115,20 +115,25 @@
 /* The volumetric cloud layers (world/clouds/cloud_volume.c), in haze
    scale heights above the cloud tops (the stand-in's sphere): a tall
    middle layer (rust) and a thin top one (bright). Taller than Jupiter's
-   real decks (three scale heights, ~80 km, for the middle one), for the
-   painting's towering walls. The middle one starts at the cloud tops and
-   fades out raggedly over its lowest part (cloudshape.glsl), so the walls
-   dissolve into the haze instead of being cut off by the deck.
+   real decks (two scale heights, ~55 km, for the middle one), for the
+   painting's towering walls. Under them a flat, opaque cloud deck at
+   GAS_CLOUD_DECK_H, drawn to the horizon, with a mist rising off it
+   (scale height GAS_CLOUD_DECK_MIST_H): the middle layer starts below it,
+   so the walls' feet sink into it.
    They fade in below GAS_CLOUD_FADE_HI_H scale heights and are fully
    there below _LO_H. Their weather map is a patch GAS_CLOUD_MAP_EXTENT_M
-   wide under the camera. */
+   wide under the camera; they reach GAS_CLOUD_REACH_M (within 0.45 of
+   it), or as far as the haze lets anything be seen. */
 #define GAS_CLOUD_MID_BASE_H      0.0
-#define GAS_CLOUD_MID_TOP_H       3.0
-#define GAS_CLOUD_TOP_BASE_H      3.1
-#define GAS_CLOUD_TOP_TOP_H       3.6
+#define GAS_CLOUD_MID_TOP_H       2.0
+#define GAS_CLOUD_TOP_BASE_H      2.1
+#define GAS_CLOUD_TOP_TOP_H       2.5
+#define GAS_CLOUD_DECK_H          0.35
+#define GAS_CLOUD_DECK_MIST_H     0.1
+#define GAS_CLOUD_REACH_M         2.6e6
 #define GAS_CLOUD_FADE_LO_H       7.0
 #define GAS_CLOUD_FADE_HI_H       11.0
-#define GAS_CLOUD_MAP_EXTENT_M    2.0e6
+#define GAS_CLOUD_MAP_EXTENT_M    6.0e6
 /* The cloud ranges in that map: their size north-south (several times
    longer east-west), with canyons of clear air between them. */
 #define GAS_CLOUD_MASSIF_M        150.0e3
@@ -149,8 +154,8 @@
    neighbours (Venus to Mars slots and a bit beyond) can be wet worlds. */
 #define HABITABLE_AU_MIN          0.5
 #define HABITABLE_AU_MAX          2.5
-/* Water on every planet but Earth: generated (hasWater) but not drawn
-   until the water rendering is reworked. 0 = dry worlds. */
+/* Water on the other planets generated with hasWater (sea level, water
+   shell and waves, like Earth's). 0 = every planet but Earth is dry. */
 #define OTHER_PLANET_WATER        1
 
 /* ---- Time --------------------------------------------------------------
