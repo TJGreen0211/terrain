@@ -59,6 +59,7 @@
 
 #define NORMALIZE_LO_PCT     0.01    /* final percentile stretch of the relief */
 #define NORMALIZE_HI_PCT     0.999
+#define STRETCH_KNEE         0.85f   /* stretch01: soft roll-off above this, not a clip */
 #define OCEAN_DEPTH_PCT      0.95    /* depth normalizing percentile */
 
 /* ---- Tectonic plates (shaping input for heightbake.frag) ---- */
@@ -206,6 +207,11 @@ void hydraulicErode(float *h, float *dep, float seaLevel0,
 unsigned char *climatePixels(const PlanetStyle *ps, const float *h, const float *hEq,
                              const float *anomEq, float *dep, float sea);
 unsigned char *oceanPixels(const float *hEq, const float *anom, float sea);
+
+/* stats.c: the final field's relief statistics (TerrainReliefStats).
+   climate: the climate map's pixels (RGBA8, A = lake depth), so the
+   landmarks stay off lakes. */
+void reliefStats(const float *h, float sea, const unsigned char *climate, TerrainReliefStats *out);
 
 /* surface.c */
 unsigned short *surfacePixels(const PlanetStyle *ps, const float *h, float sea,

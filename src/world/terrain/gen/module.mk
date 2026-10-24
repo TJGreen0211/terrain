@@ -4,6 +4,7 @@ OBJS = $(OBJS) \
 	$(OBJDIR)\world\terrain\gen\erosion.obj \
 	$(OBJDIR)\world\terrain\gen\climate.obj \
 	$(OBJDIR)\world\terrain\gen\surface.obj \
+	$(OBJDIR)\world\terrain\gen\stats.obj \
 	$(OBJDIR)\world\terrain\gen\upload.obj \
 	$(OBJDIR)\world\terrain\gen\bounds.obj \
 	$(OBJDIR)\world\terrain\gen\bake_job.obj

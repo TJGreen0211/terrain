@@ -33,10 +33,18 @@ static uint32_t hash3(int x, int y, int z, int c)
 	return h;
 }
 
-/* Gradient component c (axis) at table point (x, y, z), as RG8_SNORM. */
+/* Gradient component c (axis) at table point (x, y, z), as RG8_SNORM: a
+   random unit 3D vector (uniform on the sphere), so the two components a
+   face uses are isotropic in direction. Independent uniform components
+   fill a cube instead, biased toward the diagonals: the noise's features,
+   and the ridged octaves' crests most of all, line up with the lattice
+   (chevrons and blocks on steep rugged ground). */
 static signed char gradComponent(int x, int y, int z, int c)
 {
-	double g = (hash3(x, y, z, c) >> 8) * (2.0 / 16777215.0) - 1.0;
+	double u = (hash3(x, y, z, 0) >> 8) * (2.0 / 16777215.0) - 1.0;
+	double phi = (hash3(x, y, z, 1) >> 8) * (2.0 * M_PI / 16777215.0);
+	double r = sqrt(fmax(1.0 - u * u, 0.0));
+	double g = c == 0 ? r * cos(phi) : c == 1 ? r * sin(phi) : u;
 	return (signed char)lround(g * 127.0);
 }
 
@@ -127,34 +135,31 @@ void TerrainDetail_Init(void)
 
 typedef struct DetailOctaves {
 	int first, count;      /* lattice level of the coarsest octave, octave count */
-	double amp0, total;    /* coarsest and summed amplitude, metres */
+	double total;          /* summed amplitude, metres (the roughest spectrum) */
 	double maxRatio;       /* largest amplitude / wavelength over the octaves */
 } DetailOctaves;
 
-/* Metres of relief per raw height unit on land, for the active planet. */
-static double landMetresPerUnit(double radius)
+/* The roughness spectrum's amplitude (m) at wavelength lambda (m) for A10
+   (m) and H (detail.glsl's detailAmpAt). */
+static double ampAt(double a10, double H, double lambda)
 {
-	return TerrainGen_Style()->landRelief * radius / fmax(1.0 - TerrainGen_GenParams()->seaLevel, 1e-3);
-}
-
-/* The map's RMS height step between neighbouring land texels, metres: the
-   reference the coarsest octave's amplitude and the local scale use. */
-static double stepRefMetres(double radius)
-{
-	return TerrainGen_GenParams()->landStepRms * landMetresPerUnit(radius);
+	double l = fmax(lambda, TERRAIN_ROUGH_LAMBDA_C_M);
+	return a10 * pow(l * 1e-4, H) * (lambda / l);
 }
 
 /* Octave n has 2^n lattice cells across a cube face, i.e. a wavelength of
    ~2R / 2^n at the face centre (shorter toward the corners, by up to the
-   1/|q| of the cube projection). The coarsest is the map's texel grid
-   (n = log2 TERRAIN_MAP_SIZE). amp0 is before the local scale (up to
-   TERRAIN_DETAIL_LOCAL_MAX), total and maxRatio after it, for bounds. */
+   1/|q| of the cube projection, which only shortens it: the bounds take
+   the face centre's, the amplitudes there are the largest when H <= 1).
+   The coarsest is the map's texel grid (n = log2 TERRAIN_MAP_SIZE): the
+   bake carries the spectrum above it. Each octave's bound is the larger of
+   the plains' and the mountains' spectrum there, without the plains' knee
+   (it only lowers them). */
 static DetailOctaves octavesFor(double radius)
 {
-	DetailOctaves o = { 0, 0, 0.0, 0.0, 0.0 };
+	DetailOctaves o = { 0, 0, 0.0, 0.0 };
 	if (!detailParams.enabled || radius <= 0.0)
 		return o;
-	o.amp0 = detailParams.roughness * stepRefMetres(radius);
 	int first = (int)lround(log2((double)TERRAIN_MAP_SIZE));
 	int last = (int)floor(log2(2.0 * radius / TERRAIN_DETAIL_MIN_WAVELENGTH_M));
 	if (first < 0)
@@ -163,12 +168,13 @@ static DetailOctaves octavesFor(double radius)
 		last = DETAIL_MAX_LEVEL;
 	o.first = first;
 	o.count = last >= first ? last - first + 1 : 0;
-	double amp = o.amp0 * TERRAIN_DETAIL_LOCAL_MAX;
+	double k = detailParams.roughness;
 	for (int i = 0; i < o.count; i++) {
 		double lambda = ldexp(2.0 * radius, -(first + i));
+		double amp = k * fmax(ampAt(TERRAIN_ROUGH_A10_PLAINS_M, TERRAIN_ROUGH_H_PLAINS, lambda),
+		                      ampAt(TERRAIN_ROUGH_A10_MOUNTAIN_M, TERRAIN_ROUGH_H_MOUNTAIN, lambda));
 		o.total += amp;
 		o.maxRatio = fmax(o.maxRatio, amp / lambda);
-		amp *= TERRAIN_DETAIL_GAIN;
 	}
 	return o;
 }
@@ -179,17 +185,21 @@ void TerrainDetail_SetUniforms(GLuint shader, double radius, double trianglePx)
 	double pix = 2.0 * tan(0.5 * CAMERA_FOV_Y_DEG * M_PI / 180.0) / Window_Height();
 	glUniform1i(glGetUniformLocation(shader, "detailOctave0"), o.first);
 	glUniform1i(glGetUniformLocation(shader, "detailOctaves"), o.count);
-	glUniform1f(glGetUniformLocation(shader, "detailAmp0"), (float)o.amp0);
-	glUniform1f(glGetUniformLocation(shader, "detailGain"), (float)TERRAIN_DETAIL_GAIN);
-	glUniform1f(glGetUniformLocation(shader, "detailAmpTotal"),
-	            (float)fmax(o.total / TERRAIN_DETAIL_LOCAL_MAX, 1e-3));
-	glUniform1f(glGetUniformLocation(shader, "detailPlains"), (float)TERRAIN_DETAIL_PLAINS);
-	glUniform1f(glGetUniformLocation(shader, "detailLocalMax"), (float)TERRAIN_DETAIL_LOCAL_MAX);
-	/* Local scale = |map slope| (raw units per radian) x this / the RMS step:
-	   the slope over one face-centre texel, in metres. */
-	double stepRef = stepRefMetres(radius);
-	glUniform1f(glGetUniformLocation(shader, "detailSlopeToStep"),
-	            (float)(stepRef > 0.0 ? TerrainGen_MapTexelRad() * landMetresPerUnit(radius) / stepRef : 0.0));
+	double k = detailParams.roughness;
+	glUniform2f(glGetUniformLocation(shader, "detailA10"),
+	            (float)(k * TERRAIN_ROUGH_A10_PLAINS_M), (float)(k * TERRAIN_ROUGH_A10_MOUNTAIN_M));
+	glUniform2f(glGetUniformLocation(shader, "detailH"), (float)TERRAIN_ROUGH_H_PLAINS, (float)TERRAIN_ROUGH_H_MOUNTAIN);
+	glUniform2f(glGetUniformLocation(shader, "detailKnee"),
+	            (float)TERRAIN_ROUGH_KNEE_PLAINS_M, (float)TERRAIN_ROUGH_KNEE_MOUNTAIN_M);
+	glUniform1f(glGetUniformLocation(shader, "detailHLong"), (float)TERRAIN_ROUGH_H_LONG);
+	glUniform1f(glGetUniformLocation(shader, "detailErode"), (float)TERRAIN_DETAIL_ERODE);
+	glUniform1f(glGetUniformLocation(shader, "detailLambdaC"), (float)TERRAIN_ROUGH_LAMBDA_C_M);
+	glUniform2f(glGetUniformLocation(shader, "detailRugged"), (float)TERRAIN_RUGGED_SLOPE_LO, (float)TERRAIN_RUGGED_SLOPE_HI);
+	glUniform2f(glGetUniformLocation(shader, "detailAltRugged"), (float)TERRAIN_RUGGED_ALT_LO, (float)TERRAIN_RUGGED_ALT_HI);
+	/* The map's slope (raw units per radian) as rise / run: metres of
+	   relief per raw unit over metres per radian (the radius cancels). */
+	glUniform1f(glGetUniformLocation(shader, "detailSlopeToRise"),
+	            (float)(TerrainGen_Style()->landRelief / fmax(1.0 - TerrainGen_GenParams()->seaLevel, 1e-3)));
 	glUniform1f(glGetUniformLocation(shader, "terrainAO"), detailParams.ao);
 	glUniform1f(glGetUniformLocation(shader, "detailRadius"), (float)radius);
 	glUniform1f(glGetUniformLocation(shader, "detailPix"), (float)pix);
@@ -206,8 +216,8 @@ void TerrainDetail_SetUniforms(GLuint shader, double radius, double trianglePx)
 	glActiveTexture(GL_TEXTURE0);
 }
 
-/* The noise stays within [-1, 1] and the envelope within
-   [0, TERRAIN_DETAIL_LOCAL_MAX] (included in octavesFor's total). */
+/* The noise stays within [-1, 1] and the coastal ramp within [0, 1]; the
+   roughest spectrum is octavesFor's total. */
 double TerrainDetail_Amplitude(double radius)
 {
 	return radius > 0.0 ? octavesFor(radius).total / radius : 0.0;
@@ -218,8 +228,9 @@ double TerrainDetail_Amplitude(double radius)
    ~1.5 coarse vertex spacings long, and the interpolation error falls off
    with the square of the wavelength above that, so the seam sums to under
    ~0.5 x the steepest amplitude/wavelength ratio x the patch width; 1.5
-   covers the shorter wavelengths near cube corners. */
+   covers the shorter wavelengths near cube corners, and 1.8 the ridged
+   octaves' steeper gradient (detail.glsl). */
 double TerrainDetail_Seam(double radius)
 {
-	return 1.5 * octavesFor(radius).maxRatio;
+	return 1.5 * 1.8 * octavesFor(radius).maxRatio;
 }

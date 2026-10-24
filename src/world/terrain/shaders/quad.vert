@@ -20,7 +20,7 @@ uniform vec3 lightPosition;
 // LOD, combined with the quadtree node's cell size so the geometry follows
 // the field at its own resolution and never crinkles finer than it can draw.
 uniform samplerCube heightMap;
-uniform samplerCube surfaceMap;   // slope: sizes the detail (detailEnvelope)
+uniform samplerCube surfaceMap;   // slope: the detail's ruggedness (detailSpec)
 #include "planetmap.glsl"
 uniform float seaLevel;
 uniform float landRelief;
@@ -54,6 +54,8 @@ out mat3 fNormalMat;
 flat out ivec4 fPatchAddr;
 out vec2 fPatchUV;
 out vec3 fDetailSlope;
+// The vertices' detail height (m), for the materials' height (quad.frag).
+out float fDetailH;
 // Where this fragment takes its shadow from: the surface point, also for
 // skirt walls (the edge they hang from). A wall glimpsed through a patch-
 // edge crack lies under the neighbouring surface, and the fine shadow
@@ -74,7 +76,7 @@ void main()
 	float vDist = length(sphere - lodCameraPos);
 	vec3 q = patchCube(uv);
 	vec2 gradCube;
-	float lift = terrainLift(d, vDist, q, pAddr, uv, gradCube);
+	float lift = terrainLift(d, vDist, q, pAddr, uv, gradCube, fDetailH);
 	fDetailSlope = detailSlope(pAddr.x, q, gradCube);
 	fPatchAddr = pAddr;
 	fPatchUV = uv;

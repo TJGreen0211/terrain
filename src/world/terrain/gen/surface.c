@@ -161,7 +161,8 @@ PlanetStyle g_planetStyle = {
 	{ 0.10f, 0.22f, 0.30f },   /* river / lake water */
 	0.0f,    /* tempOffset */
 	1.0f,    /* lapseRate */
-	0.12f,   /* snowTemp */
+	0.12f,   /* snowTemp: equatorial snowline TERRAIN_LAPSE_PER_KM away */
+	0.33f,   /* treeTemp: equatorial treeline ~7.6 km, sea level near 64 deg */
 	1.0f,    /* humidity */
 	1.0f,    /* equatorLush */
 	1.0f,    /* hadleyStrength */
@@ -204,8 +205,10 @@ void TerrainGen_SetSurfaceUniforms(unsigned int shader, int unit)
 	uniformSrgb3(shader, "saltColor", ps->salt, 1);
 	uniformSrgb3(shader, "inlandWaterColor", ps->water, 1);
 	glUniform1f(glGetUniformLocation(shader, "tempOffset"), ps->tempOffset);
-	glUniform1f(glGetUniformLocation(shader, "lapseRate"), ps->lapseRate);
+	glUniform1f(glGetUniformLocation(shader, "lapsePerM"), ps->lapseRate * (float)(TERRAIN_LAPSE_PER_KM / 1000.0));
+	glUniform1f(glGetUniformLocation(shader, "lapseDry"), (float)TERRAIN_LAPSE_DRY);
 	glUniform1f(glGetUniformLocation(shader, "snowTemp"), ps->snowTemp);
+	glUniform1f(glGetUniformLocation(shader, "treeTemp"), ps->treeTemp);
 	glUniform1f(glGetUniformLocation(shader, "humidity"), ps->humidity);
 	glUniform1f(glGetUniformLocation(shader, "equatorLush"), ps->equatorLush);
 	glUniform1f(glGetUniformLocation(shader, "hadleyStrength"), ps->hadleyStrength);

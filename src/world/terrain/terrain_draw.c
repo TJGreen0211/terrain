@@ -118,7 +118,7 @@ double TerrainDraw_GroundRadius(const Body *planet, dvec3 worldDir, double capAn
 	double relief = reliefOf(hi);
 	if (SolarSystem_HasWater(SolarSystem_ActiveBody()))
 		relief = fmax(relief, 0.0);
-	return planet->radius * (1.0 + relief) + TerrainDetail_Amplitude(planet->radius);
+	return planet->radius * (1.0 + relief + TerrainDetail_Amplitude(planet->radius));
 }
 
 double Earth_GroundRadius(dvec3 worldDir, double capAngle)

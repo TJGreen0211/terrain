@@ -19,6 +19,7 @@
 #include "world/WorldConfig.h"
 #include "world/terrain/quad_tree.h"
 #include "world/terrain/terrain_draw.h"
+#include "world/terrain/terrain_gen.h"
 #include "engine/debug/profiler.h"
 #include "engine/core/paths.h"
 #include <stb_image_write.h>
@@ -43,6 +44,19 @@ static char shotDir[512];         /* --shots-dir, else <bench root>/cand */
 
 static int viewSurface;           /* 0 orbit, 1 surface preset */
 static int pivotSubsolar;
+/* pivot terrain <peak|rugged|plain>: one of the bake's landmarks on Earth
+   (TerrainReliefStats), fixed to the ground: 1, 2, 3; 0 = none.
+   pivot terrain <lat> <lon>: a fixed spot instead (4; body-local, pole +Z,
+   as the landmark log prints them), for A/B shots across bakes that move
+   the landmarks. */
+static int pivotTerrain;
+static double pivotSpot[3];
+/* sunelev <deg> [pm] (with pivot terrain): the start time moves to when
+   the landmark has the Sun this high, in its morning (pm: afternoon), so
+   a slope can be lit from either side. Solved on the first frame, once the
+   bake has found the landmark. */
+static double sunElevDeg = -999.0;
+static int sunPm, sunSolved;
 static int pivotBody = BODY_EARTH;  /* pivot <body name>: orbit it (and focus it) */
 /* pivotat <frame> <body name>: switch the pivot body from that frame on. */
 static long switchFrame[MAX_KEYS]; static int switchBody[MAX_KEYS]; static int nSwitch;
@@ -73,6 +87,54 @@ static double lerp2(double f0, double v0, double f1, double v1, double f)
 {
 	if (f1 <= f0) return v1;
 	return v0 + (v1 - v0) * ((f - f0) / (f1 - f0));
+}
+
+static dvec3 dcross(dvec3 a, dvec3 b)
+{
+	return (dvec3){ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
+}
+
+static dvec3 dnormalize(dvec3 v)
+{
+	return dscalarvec3(v, 1.0 / dlengthvec3(v));
+}
+
+/* A body-local direction to world, by the body's rotation (the inverse of
+   TerrainDraw_GroundRadius's world -> local). */
+static dvec3 landmarkWorld(const Body *b, const double l[3])
+{
+	const double (*m)[4] = b->rotation.m;
+	return (dvec3){ m[0][0] * l[0] + m[0][1] * l[1] + m[0][2] * l[2],
+	                m[1][0] * l[0] + m[1][1] * l[1] + m[1][2] * l[2],
+	                m[2][0] * l[0] + m[2][1] * l[1] + m[2][2] * l[2] };
+}
+
+/* sunelev: over one rotation from simStart, the time the Sun stands
+   closest to sunElevDeg over the landmark while rising (sunPm: setting); simStart moves
+   there and the bodies are put back at the (new) frame time. */
+static void solveSunTime(const Body *b, const double l[3])
+{
+	const int N = 1440;
+	double period = b->rotationPeriod > 0.0 ? b->rotationPeriod : 86400.0;
+	double want = sin(sunElevDeg * (M_PI / 180.0)), best = 1e30, bestT = simStart, bestS = 0.0, prev = 0.0;
+	for (int k = 0; k <= N; k++) {
+		double t = simStart + period * k / N;
+		Bodies_Update(t);
+		dvec3 toSun = dnormalize(dsubvec3(Bodies_Get(BODY_SUN)->position, b->position));
+		dvec3 d = landmarkWorld(b, l);
+		double s = d.x * toSun.x + d.y * toSun.y + d.z * toSun.z;
+		if (k > 0 && (sunPm ? s < prev : s > prev) && fabs(s - want) < best) {
+			best = fabs(s - want);
+			bestT = t;
+			bestS = s;
+		}
+		prev = s;
+	}
+	simStart = bestT;
+	Bodies_Update(Bench_SimTime());
+	fprintf(stderr, "[bench] landmark at lat %.1f lon %.1f (body pole +Z): sun %.1f deg up at simtime %.0f\n",
+	        asin(l[2]) * (180.0 / M_PI), atan2(l[1], l[0]) * (180.0 / M_PI),
+	        asin(bestS) * (180.0 / M_PI), simStart);
 }
 
 static void interpPose(double f, double *dist, double *yaw, double *pitch)
@@ -126,6 +188,20 @@ static int loadScene(const char *path)
 			char v[64] = "earth", w[64] = "";
 			sscanf(line, "%*s %63s %63s", v, w);
 			pivotSubsolar = strcmp(v, "subsolar") == 0;
+			pivotTerrain = 0;
+			if (strcmp(v, "terrain") == 0) {
+				double lat, lon;
+				pivotTerrain = strcmp(w, "rugged") == 0 ? 2 : strcmp(w, "plain") == 0 ? 3 : 1;
+				if (sscanf(line, "%*s %*s %lf %lf", &lat, &lon) == 2) {
+					lat *= M_PI / 180.0;
+					lon *= M_PI / 180.0;
+					pivotSpot[0] = cos(lat) * cos(lon);
+					pivotSpot[1] = cos(lat) * sin(lon);
+					pivotSpot[2] = sin(lat);
+					pivotTerrain = 4;
+				}
+				w[0] = '\0';
+			}
 			/* "pivot subsolar <body>": that body's sub-solar point. */
 			if (pivotSubsolar && w[0])
 				strcpy(v, w);
@@ -165,6 +241,10 @@ static int loadScene(const char *path)
 			sscanf(line, "%*s %u", &SolarSystem_Params()->seed);
 		} else if (strcmp(tok, "timescale") == 0) {
 			sscanf(line, "%*s %lf", &timeScale);
+		} else if (strcmp(tok, "sunelev") == 0) {
+			char v[64] = "";
+			sscanf(line, "%*s %lf %63s", &sunElevDeg, v);
+			sunPm = strcmp(v, "pm") == 0;
 		} else if (strcmp(tok, "simtime") == 0) {
 			sscanf(line, "%*s %lf", &simStart);
 		} else if (strcmp(tok, "key") == 0 && nKeys < MAX_KEYS) {
@@ -296,6 +376,39 @@ void Bench_UpdateCamera(void)
 	double dist, yaw, pitch;
 	interpPose((double)frame, &dist, &yaw, &pitch);
 	dvec3 pivot = Bodies_Get(pivotBody)->position;
+	if (pivotTerrain) {
+		/* A landmark of the active planet's bake (body-local) to world, by
+		   the body's rotation (the inverse of TerrainDraw_GroundRadius's).
+		   The scene's yaw / pitch as for a sub-solar pivot, in the
+		   landmark's own east / up / north frame. */
+		const TerrainReliefStats *st = &TerrainGen_GenParams()->stats;
+		const double *l = pivotTerrain == 4 ? pivotSpot
+		                : pivotTerrain == 2 ? st->rugged : pivotTerrain == 3 ? st->plain : st->peak;
+		if (sunElevDeg > -90.0 && !sunSolved) {
+			solveSunTime(e, l);
+			sunSolved = 1;
+		}
+		dvec3 dir = landmarkWorld(e, l);
+		dvec3 worldY = { 0.0, 1.0, 0.0 }, east = dcross(dir, worldY);
+		if (dlengthvec3(east) < 1e-6)
+			east = (dvec3){ 1.0, 0.0, 0.0 };
+		east = dnormalize(east);
+		dvec3 north = dcross(east, dir);
+		double phi = yaw * (M_PI / 180.0), el = pitch * (M_PI / 180.0);
+		dvec3 u = daddvec3(dscalarvec3(daddvec3(dscalarvec3(east, cos(phi)), dscalarvec3(dir, sin(phi))), cos(el)),
+		                   dscalarvec3(north, sin(el)));
+		double base = pivotGround ? Earth_GroundRadius(dir, 1000.0 / e->radius) : e->radius;
+		if (frame == 0)
+			fprintf(stderr, "[bench] landmark ground (highest within 1 km, detail bound included): %.0f m above sea\n",
+			        Earth_GroundRadius(dir, 1000.0 / e->radius) - e->radius);
+		pivot = daddvec3(e->position, dscalarvec3(dir, base + pivotOff));
+		Camera_SetPivot(pivot);
+		if (localUp)
+			Camera_SetOrbitEyeDirUp(u.x, u.y, u.z, dir.x, dir.y, dir.z, (float)dist);
+		else
+			Camera_SetOrbitEyeDir(u.x, u.y, u.z, (float)dist);
+		return;
+	}
 	if (pivotSubsolar) {
 		/* True sub-solar point: the direction of the sun body itself, so
 		   the pivot is lit at any simTime (the phase key then slides the

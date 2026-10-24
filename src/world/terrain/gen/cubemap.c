@@ -174,15 +174,22 @@ float histoPctl(const Histo *Hs, double p)
 	return Hs->lo + ((float)bin + 0.5f) * (float)Hs->binToVal;
 }
 
-/* Linear stretch of [lo,hi] onto [0,1], clamped. */
+/* Linear stretch of [lo,hi] onto [0,1]: clamped below, rolled off above
+   STRETCH_KNEE (stays under 1). */
 void stretch01(float *h, size_t n, float lo, float hi)
 {
 	float range = hi - lo;
 	if (range < 1e-6f) range = 1.0f;
 	float inv = 1.0f / range;
+	const float k = 1.0f - STRETCH_KNEE;
 	for (size_t i = 0; i < n; i++) {
 		float v = (h[i] - lo) * inv;
 		if (!(v == v)) v = 0.0f;
-		h[i] = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+		/* The top rolls off toward 1 (tanh, slope 1 at the knee) instead of
+		   clipping: a clip turned the highest range's summits into flat
+		   tables at the full relief. */
+		if (v > STRETCH_KNEE)
+			v = STRETCH_KNEE + k * tanhf((v - STRETCH_KNEE) / k);
+		h[i] = v < 0.0f ? 0.0f : v;
 	}
 }

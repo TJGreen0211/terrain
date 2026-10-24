@@ -7,5 +7,7 @@
 GLFWwindow *Window_Create(const char *title, int fixedWidth, int fixedHeight);
 int Window_Width();
 int Window_Height();
+/* Puts text on the system clipboard (the current window's). */
+void Window_SetClipboard(const char *text);
 
 #endif

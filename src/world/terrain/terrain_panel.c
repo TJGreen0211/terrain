@@ -2,6 +2,7 @@
 #include "world/terrain/terrain_gen.h"
 #include "world/terrain/terrain_detail.h"
 #include "world/terrain/quad_tree.h"
+#include "world/bodies/solar_system.h"
 #include "world/WorldConfig.h"
 #include "engine/debug/debug_gui.h"
 #include "engine/debug/nk.h"
@@ -35,13 +36,14 @@ static void surfaceSection(struct nk_context *ctx)
 
 	DebugGUI_Group(ctx, "Relief (fraction of radius)");
 	/* The quadtree's culling bounds follow these live (earthReliefBounds). */
-	DebugGUI_Slider(ctx, "Land relief", &s->landRelief, 0.0f, 0.01f, 0.00005f, "%.5f");
-	DebugGUI_Slider(ctx, "Ocean relief", &s->oceanRelief, 0.0f, 0.01f, 0.00005f, "%.5f");
+	DebugGUI_Slider(ctx, "Land relief", &s->landRelief, 0.0f, 0.08f, 0.00005f, "%.5f");
+	DebugGUI_Slider(ctx, "Ocean relief", &s->oceanRelief, 0.0f, 0.02f, 0.00005f, "%.5f");
 
 	DebugGUI_Group(ctx, "Climate");
 	DebugGUI_Slider(ctx, "Temp offset", &s->tempOffset, -1.0f, 1.0f, 0.01f, "%+.2f");
 	DebugGUI_Slider(ctx, "Lapse rate", &s->lapseRate, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Snow temp", &s->snowTemp, -0.3f, 0.9f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Tree temp", &s->treeTemp, -0.3f, 0.9f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Humidity", &s->humidity, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Equator lush", &s->equatorLush, 0.0f, 3.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Hadley strength", &s->hadleyStrength, 0.0f, 1.0f, 0.01f, "%.2f");
@@ -85,11 +87,11 @@ static void generationSection(struct nk_context *ctx)
 	/* Upper bounds stay below the shader's fixed smoothstep tops. */
 	DebugGUI_Slider(ctx, "Hotspot rarity", &b->hotspotLo, 0.2f, 0.79f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Microcontinent rarity", &b->fragLo, 0.2f, 0.7f, 0.01f, "%.2f");
-	DebugGUI_Slider(ctx, "Rock detail", &b->detailAmt, 0.0f, 0.2f, 0.005f, "%.3f");
+	DebugGUI_Slider(ctx, "Land roughness", &b->detailAmt, 0.0f, 3.0f, 0.05f, "%.2f");
 
 	DebugGUI_Group(ctx, "Erosion");
 	DebugGUI_SliderInt(ctx, "Thermal passes", &b->thermalPasses, 0, 20);
-	DebugGUI_Slider(ctx, "Thermal talus", &b->thermalTalus, 0.001f, 0.03f, 0.0005f, "%.4f");
+	DebugGUI_Slider(ctx, "Thermal talus (rise/run)", &b->thermalTalus, 0.02f, 2.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Droplets / px (slow)", &b->dropletsPerPx, 0.0f, 1.5f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Erosion rate", &b->dropletErosion, 0.0f, 1.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Deposit rate", &b->dropletDeposit, 0.0f, 1.0f, 0.01f, "%.2f");
@@ -136,8 +138,32 @@ static void viewSection(struct nk_context *ctx)
 	nk_labelf(ctx, NK_TEXT_LEFT, "Walks: %d   CPU: %.2f ms", QuadTree_FrameStats()->walks, QuadTree_FrameStats()->walkMs);
 }
 
+/* The active planet's relief statistics (measured in its bake), in metres
+   and slopes at the live relief: the numbers docs/terrain-relief.md's
+   targets are checked against. */
+static void statsSection(struct nk_context *ctx)
+{
+	const TerrainReliefStats *st = &TerrainGen_GenParams()->stats;
+	double R = Bodies_Get(SolarSystem_ActiveBody())->radius;
+	TerrainReliefReport r;
+	TerrainGen_ReliefReport(st, TerrainGen_Style()->landRelief, R, &r);
+	nk_layout_row_dynamic(ctx, DebugGUI_RowHeight(), 1);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Land: %.1f%% of the map's texels", st->landShare * 100.0);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Height p50 %.0f  p90 %.0f  p99 %.0f  max %.0f m",
+	          r.elevM[0], r.elevM[1], r.elevM[2], r.elevM[3]);
+	nk_labelf(ctx, NK_TEXT_LEFT, "Slope (rise/run)    p50     p90     p99");
+	for (int b = 0; b < TERRAIN_STAT_BASES; b++)
+		nk_labelf(ctx, NK_TEXT_LEFT, "  over %5.1f km   %.4f  %.4f  %.4f",
+		          r.baseM[b] / 1000.0, r.slope[b][0], r.slope[b][1], r.slope[b][2]);
+	nk_labelf(ctx, NK_TEXT_LEFT, "(baked map only; the detail noise adds below it)");
+}
+
 void Terrain_DebugPanel(struct nk_context *ctx)
 {
+	if (nk_tree_push(ctx, NK_TREE_NODE, "Relief stats (baked)", NK_MINIMIZED)) {
+		statsSection(ctx);
+		nk_tree_pop(ctx);
+	}
 	if (nk_tree_push(ctx, NK_TREE_NODE, "Surface (live)", NK_MAXIMIZED)) {
 		surfaceSection(ctx);
 		nk_tree_pop(ctx);

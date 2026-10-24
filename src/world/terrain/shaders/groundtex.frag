@@ -99,10 +99,12 @@ float heightAt(vec2 uv)
 		float dunes = 0.5 + 0.6 * fbm(uv, 2, 3, 0.5, 71);
 		return clamp(0.35 * ripple + 0.55 * dunes + 0.1 * (0.5 + fbm(uv, 64, 2, 0.5, 81)), 0.0, 1.0);
 	}
-	// Snow: smooth drifts and faint sastrugi.
+	// Snow: smooth drifts, a faint fine crust. No sastrugi: the tile's
+	// scale follows the camera (two levels a texel per pixel apart), so
+	// stripes in the tile's own direction showed at every range as one
+	// set of parallel streaks across whole snowfields.
 	float drift = 0.5 + 0.6 * fbm(uv, 3, 5, 0.45, 91);
-	float sastrugi = 0.5 + 0.5 * sin(TAU * (uv.x * 14.0 + uv.y * 2.0 + 0.7 * fbm(uv, 4, 3, 0.5, 97)));
-	return clamp(0.85 * drift + 0.15 * sastrugi, 0.0, 1.0);
+	return clamp(0.9 * drift + 0.1 * (0.5 + fbm(uv, 16, 3, 0.5, 97)), 0.0, 1.0);
 }
 
 float albedoAt(vec2 uv, float h)

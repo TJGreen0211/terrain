@@ -12,8 +12,10 @@
 // It depends only on the point and its distance, so every patch sharing a
 // vertex agrees on it. d: direction, vDist: camera distance, q: cube point;
 // addr / addrUV: a patch holding the point and its uv there (the detail
-// lattice). gradCube: the detail's vertex slope (detail.glsl).
-float terrainLift(vec3 d, float vDist, vec3 q, ivec4 addr, vec2 addrUV, out vec2 gradCube)
+// lattice). gradCube: the detail's vertex slope (detail.glsl); detailM: its
+// height (m).
+float terrainLift(vec3 d, float vDist, vec3 q, ivec4 addr, vec2 addrUV, out vec2 gradCube,
+                  out float detailM)
 {
 	// Vertex texture fetch of the shaping field at the resolution of the
 	// patches at this distance (never finer than a pixel footprint either).
@@ -21,17 +23,23 @@ float terrainLift(vec3 d, float vDist, vec3 q, ivec4 addr, vec2 addrUV, out vec2
 	float lodCell = log2(max(vDist*lodCellK, 1e-30));
 	float lodPix = log2(max(vDist*lodK, 1e-30));
 	float lod = clamp(max(lodCell, lodPix) + planetMapLodBias(d), 0.0, planetMapMaxLod(heightMap));
-	float h = textureLod(heightMap, d, lod).r;
+	// Full-precision filtering (planetMapFine): the hardware's 8-bit
+	// sub-texel weights make the ~12 km texels a staircase of ~50 m steps,
+	// tens of metres high on steep ground (rows of terraces, saw-tooth
+	// silhouettes). Catmull-Rom everywhere (the band spans all heights): a
+	// continuous slope, so no crease along the texel grid either.
+	float h = planetMapFine(heightMap, d, lod, vec2(-1e9, 1e9));
 
 	float s = clamp((seaLevel - h) / max(oceanDepth, 1e-4), 0.0, 1.0);
 	float alt01 = max(h - seaLevel, 0.0) / max(1.0 - seaLevel, 1e-3);
 	float relief = landRelief * alt01 - oceanRelief * s * s;
 
 	// Detail noise on land, in metres -> body radii.
-	float mapSlope = h > seaLevel ? length(textureLod(surfaceMap, d, lod).xyz) : 0.0;
-	float env = detailEnvelope(landRelief * alt01 * detailRadius, mapSlope);
-	float detail = detailVertex(addr, addrUV, length(q), vDist * detailPix, env, gradCube);
-	return relief + detail / detailRadius;
+	vec3 mapGrad = h > seaLevel ? textureLod(surfaceMap, d, lod).xyz : vec3(0.0);
+	DetailSpec spec = detailSpec(landRelief * alt01 * detailRadius, length(mapGrad), alt01, length(q));
+	detailM = detailVertex(addr, addrUV, length(q), vDist * detailPix, spec,
+	                       detailCubeGrad(addr.x, q, mapGrad * detailSlopeToRise), gradCube);
+	return relief + detailM / detailRadius;
 }
 
 // The lift grid vertex uv is drawn at: its own (lift), or on an edge
@@ -43,10 +51,11 @@ float terrainLiftStitched(vec2 uv, float lift)
 	if (!patchStitch(uv, ps))
 		return lift;
 	vec2 g;
+	float dm;
 	vec3 dA = patchDir(ps.uvA), dB = patchDir(ps.uvB);
 	float a = terrainLift(dA, length(patchSphere(ps.uvA, dA, model) - lodCameraPos),
-	                      patchCube(ps.uvA), ps.addr, ps.aA, g);
+	                      patchCube(ps.uvA), ps.addr, ps.aA, g, dm);
 	float b = terrainLift(dB, length(patchSphere(ps.uvB, dB, model) - lodCameraPos),
-	                      patchCube(ps.uvB), ps.addr, ps.aB, g);
+	                      patchCube(ps.uvB), ps.addr, ps.aB, g, dm);
 	return mix(a, b, ps.t);
 }

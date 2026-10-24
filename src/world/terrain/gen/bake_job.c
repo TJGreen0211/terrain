@@ -23,15 +23,16 @@ static TerrainBakeSettings g_terrainBake = {
 	.ridgeH = 0.28f,
 	.hotspotLo = 0.50f,
 	.fragLo = 0.42f,
-	.detailAmt = 0.06f,
+	.detailAmt = 1.0f,
 	.thermalPasses = 6,
-	.thermalTalus = 0.006f,    /* only the steepest crests/cliffs exceed it */
+	.thermalTalus = 0.7f,      /* rise / run: only cliffs at map scale exceed it */
 	.dropletsPerPx = 0.35f,
 	.dropletErosion = 0.3f,
 	.dropletDeposit = 0.3f,
 	.dropletCapacity = 4.0f,
 	.dropletEvap = 0.02f,
 	.dropletInertia = 0.05f,
+	.radiusM = (float)EARTH_RADIUS_M,
 };
 
 /* Debug: when TERRAIN_DUMP names a file, write the final normalized field
@@ -76,6 +77,7 @@ struct TerrainBakeJob {
 	unsigned char *climatePx, *oceanPx;
 	unsigned short *surfacePx;    /* half floats */
 	float seaLevel, oceanDepth, landStepRms;
+	TerrainReliefStats stats;
 	/* Upload results (STAGE_UPLOAD: one per poll) */
 	GLuint climateTex, oceanTex, surfaceTex, heightTex;
 	double uploadS;
@@ -131,7 +133,7 @@ static void shapeStrips(TerrainBakeJob *job, int end)
 	if (!scissor) glDisable(GL_SCISSOR_TEST);
 }
 
-#define READBACK_BYTES (CUBE_TEXELS * 2 * sizeof(float))
+#define READBACK_BYTES (CUBE_TEXELS * 3 * sizeof(float))
 
 static float *allocRG(void)
 {
@@ -143,15 +145,15 @@ static float *allocRG(void)
 	return p;
 }
 
-/* Blocking readback of the whole target into job->rg (only the two
-   channels the bake uses: half the copy). */
+/* Blocking readback of the whole target into job->rg (the three channels
+   the bake uses). */
 static void readbackNow(TerrainBakeJob *job)
 {
 	job->rg = allocRG();
 	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadPixels(0, 0, FACE_N, 6 * FACE_N, GL_RG, GL_FLOAT, job->rg);
+	glReadPixels(0, 0, FACE_N, 6 * FACE_N, GL_RGB, GL_FLOAT, job->rg);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	job->t[1] = clock();
 }
@@ -165,7 +167,7 @@ static void readbackStart(TerrainBakeJob *job)
 	glBindFramebuffer(GL_FRAMEBUFFER, workFBO);
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadPixels(0, 0, FACE_N, 6 * FACE_N, GL_RG, GL_FLOAT, (void *)0);
+	glReadPixels(0, 0, FACE_N, 6 * FACE_N, GL_RGB, GL_FLOAT, (void *)0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 	job->fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -211,19 +213,26 @@ static void bakeCPU(TerrainBakeJob *job)
 
 	xsState = bs->seed * 2654435761u | 1u;
 
-	/* 2. Split the readback (r = shaped h, g = climate anomaly). */
+	/* 2. Split the readback (r = shaped h, g = climate anomaly, b = land
+	   roughness in km). */
 	float *h = malloc(n * sizeof(float));
 	float *anom = malloc(n * sizeof(float));
+	float *rough = malloc(n * sizeof(float));
 	float *dep = calloc(n, sizeof(float));
-	if (!h || !anom || !dep) {
+	if (!h || !anom || !rough || !dep) {
 		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
 		exit(1);
 	}
-	for (size_t i = 0; i < n; i++) { h[i] = job->rg[i * 2]; anom[i] = job->rg[i * 2 + 1]; }
+	for (size_t i = 0; i < n; i++) {
+		h[i] = job->rg[i * 3];
+		anom[i] = job->rg[i * 3 + 1];
+		rough[i] = job->rg[i * 3 + 2];
+	}
 	free(job->rg);
 	job->rg = NULL;
 	clampFinite(h, n);
 	clampFinite(anom, n);
+	clampFinite(rough, n);
 
 	/* Pre-normalize so the erosion constants are in fixed [0,1] units. The
 	   shaper's sea level is raw 0; track where it lands. */
@@ -231,14 +240,51 @@ static void bakeCPU(TerrainBakeJob *job)
 	float preLo = histoPctl(&hf, PRE_LO_PCT), preHi = histoPctl(&hf, PRE_HI_PCT);
 	stretch01(h, n, preLo, preHi);
 	float seaLevel0 = (0.0f - preLo) / fmaxf(preHi - preLo, 1e-6f);
+
+	/* Hypsometry: land heights (fraction of the relief) raised to
+	   TERRAIN_HYPSO_GAMMA, so most land stays low and the ranges keep their
+	   peaks; before the roughness, which it would otherwise flatten in the
+	   lowlands. The sea floor is untouched. */
+	float span0 = fmaxf(1.0f - seaLevel0, 1e-3f);
+	for (size_t i = 0; i < n; i++)
+		if (h[i] > seaLevel0) {
+			float a = fminf((h[i] - seaLevel0) / span0, 1.0f);
+			h[i] = seaLevel0 + span0 * powf(a, (float)TERRAIN_HYPSO_GAMMA);
+		}
+
 	job->t[2] = clock();
 
 	/* 3. Thermal erosion (weathering), then 4. hydraulic droplet erosion. */
-	thermalErode(h, bs->thermalPasses, bs->thermalTalus, job->step);
+	/* The talus is a true slope; erosion works on the pre-normalized field,
+	   where the land's relief spans about 1 - seaLevel0 and distance is in
+	   reference texels (REF_TEXEL_RAD of arc): per-planet, so the same
+	   slopes survive whatever the relief or radius. */
+	float talus = bs->thermalTalus * (float)REF_TEXEL_RAD * (1.0f - seaLevel0)
+	            / fmaxf(job->style.landRelief, 1e-6f);
+	thermalErode(h, bs->thermalPasses, talus, job->step);
 	job->t[3] = clock();
 
 	/* Droplets spawn only on land; reaching the sea is a river mouth. */
 	hydraulicErode(h, dep, seaLevel0, bs, job->step);
+
+	/* Land roughness in metres (the shaper's km): the land's relief spans
+	   about 1 - seaLevel0 here, i.e. landRelief x radius metres. After the
+	   erosion: the droplets' deposits filled its valleys (a third of the
+	   slopes gone), and the shapes they carve (drainage, the rivers) are
+	   the large ones. The field without it (hDrain) stays for the drainage:
+	   rivers and lakes follow the large shapes, so the roughness's
+	   countless small hollows stay dry ground instead of each filling with
+	   a lake (real ones would have been cut open by their streams). */
+	float *hDrain = malloc(n * sizeof(float));
+	if (!hDrain) {
+		fprintf(stderr, "[terrain] out of memory during heightmap bake\n");
+		exit(1);
+	}
+	memcpy(hDrain, h, n * sizeof(float));
+	double metresPerUnit = (double)job->style.landRelief * bs->radiusM / span0;
+	for (size_t i = 0; i < n; i++)
+		h[i] += (float)(rough[i] * 1000.0 / metresPerUnit);
+	free(rough);
 	job->t[4] = clock();
 
 	/* 5. Percentile-stretch the relief to [0,1], carrying the sea level
@@ -252,6 +298,7 @@ static void bakeCPU(TerrainBakeJob *job)
 	float seaLevel = (seaLevel0 - lo) / range;
 	seaLevel = seaLevel < 0.0f ? 0.0f : (seaLevel > 1.0f ? 1.0f : seaLevel);
 	stretch01(h, n, lo, hi);
+	stretch01(hDrain, n, lo, hi);
 
 	/* Area-weighted depth histogram over the ocean texels: depths lie in
 	   (0, seaLevel]. */
@@ -285,12 +332,15 @@ static void bakeCPU(TerrainBakeJob *job)
 	debugDump(h, n);
 	job->t[5] = clock();
 
-	/* 7. Climate map (moisture, rivers, alluvium, lakes) and ocean map. The
-	   latitude streams (moisture, fetch) run on an equirect copy. */
-	float *hEq = cubeToEquirect(h), *anomEq = cubeToEquirect(anom);
-	job->climatePx = climatePixels(&job->style, h, hEq, anomEq, dep, seaLevel);
+	/* 7. Climate map (moisture, rivers, alluvium, lakes) and ocean map, from
+	   the field without the land roughness (above). The latitude streams
+	   (moisture, fetch) run on an equirect copy. */
+	float *hEq = cubeToEquirect(hDrain), *anomEq = cubeToEquirect(anom);
+	job->climatePx = climatePixels(&job->style, hDrain, hEq, anomEq, dep, seaLevel);
+	free(hDrain);
 	job->oceanPx = oceanPixels(hEq, anom, seaLevel);
 	job->surfacePx = surfacePixels(&job->style, h, seaLevel, oceanDepth, &job->landStepRms);
+	reliefStats(h, seaLevel, job->climatePx, &job->stats);
 	free(hEq);
 	free(anomEq);
 	free(anom);
@@ -430,6 +480,7 @@ static GLuint bakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
 	out->seaLevel = job->seaLevel;
 	out->oceanDepth = job->oceanDepth;
 	out->landStepRms = job->landStepRms;
+	out->stats = job->stats;
 	out->pyramid = job->pyramid;
 	job->pyramid = NULL;
 	GLuint heightTex = job->heightTex;
@@ -442,6 +493,17 @@ static GLuint bakeFinish(TerrainBakeJob *job, PlanetGenParams *out)
 	        (double)(t[1] - t[0]) / s, (double)(t[2] - t[1]) / s, (double)(t[3] - t[2]) / s,
 	        (double)(t[4] - t[3]) / s, (double)(t[5] - t[4]) / s, (double)(t[6] - t[5]) / s,
 	        job->uploadS, job->seaLevel, job->oceanDepth, job->landStepRms);
+	/* Radius-free: heights as a share of the relief, slopes as rise / run
+	   at the baked relief, baselines in texels (the debug panel's relief
+	   stats show metres). */
+	const TerrainReliefStats *st = &job->stats;
+	double lr = job->style.landRelief;
+	fprintf(stderr, "[terrain] relief: land %.3f of texels; height p50 %.3f p90 %.3f p99 %.3f max %.3f of the relief; "
+	        "slope p50/p90/p99 over 1 texel %.4f/%.4f/%.4f, 4 texels %.4f/%.4f/%.4f, 16 texels %.4f/%.4f/%.4f\n",
+	        st->landShare, st->elev[0], st->elev[1], st->elev[2], st->elev[3],
+	        st->slope[0][0] * lr, st->slope[0][1] * lr, st->slope[0][2] * lr,
+	        st->slope[2][0] * lr, st->slope[2][1] * lr, st->slope[2][2] * lr,
+	        st->slope[4][0] * lr, st->slope[4][1] * lr, st->slope[4][2] * lr);
 
 	freeJob(job);
 	return heightTex;

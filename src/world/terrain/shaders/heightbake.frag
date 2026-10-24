@@ -43,7 +43,13 @@ const float PI = 3.14159265359;
 
 /* ---- Shaping recipe; distances are radians on the sphere. The uniforms are
    TerrainBakeSettings (terrain_gen.c, debug panel); defaults noted inline.
-   The #defines are fixed here. ---- */
+   The #defines are fixed here. Two kinds of distance (docs/terrain-relief.md
+   section 0): the plate layout (plates, coasts, shelves, oceanic features)
+   scales with the sphere; the land's ground-scale features (range widths,
+   the ridges in them, hills, rock texture) are set in metres in
+   WorldConfig.h and arrive here converted for this planet (upload.c), as
+   radians (widths) or frequencies in 1 / radius (noise), with octave counts
+   that stop at two map texels. ---- */
 #define PLATE_WARP      0.28   // boundary waviness (warp of the Voronoi lookup)
 #define PLATE_WARP_FREQ 1.3
 uniform float COAST_FREQ;      // coastline roughness: bays, peninsulas, islands [default 2.2]
@@ -60,14 +66,19 @@ uniform float PLATEAU_H;       // raised flat plateaus [default 0.30]
 #define PLATEAU_LO      0.16   // plateau mask noise band (lower = more plateaus)
 #define PLATEAU_HI      0.22   //   narrow band -> steep scarps, flat tops
 #define TIBET_H         0.30   // extra plateau behind continental collisions
-#define TIBET_WIDTH     0.22
+uniform float TIBET_WIDTH;     // rad (TERRAIN_TIBET_WIDTH_M)
 uniform float COLLIDE_H;       // suture range height (continent/continent) [default 1.30]
-#define COLLIDE_WIDTH   0.09
+uniform float COLLIDE_WIDTH;   // rad (TERRAIN_COLLIDE_WIDTH_M)
 uniform float ANDES_H;         // coastal range height (continent over ocean) [default 0.95]
-#define ANDES_WIDTH     0.075
+uniform float ANDES_WIDTH;     // rad (TERRAIN_ANDES_WIDTH_M)
 uniform float OLD_RANGE_H;     // eroded intraplate ranges (Appalachians/Urals) [default 0.35]
-#define FREQ_MOUNT      2.6
-#define OCT_MOUNT       5
+uniform float FREQ_MOUNT;      // the ranges' ridges (TERRAIN_MOUNT_WAVELENGTH_M)
+uniform int OCT_MOUNT;
+uniform float GAIN_MOUNT;      // their amplitude per octave (TERRAIN_MOUNT_GAIN)
+uniform float FREQ_OLD;        // old ranges (TERRAIN_OLD_RANGE_WAVELENGTH_M)
+uniform int OCT_OLD;
+uniform float FREQ_HILL;       // hill country (TERRAIN_HILL_WAVELENGTH_M)
+uniform int OCT_HILL;
 
 uniform float OCEAN_BASE;      // abyssal plain depth [default -0.70]
 #define OCEAN_NOISE     0.10
@@ -86,9 +97,18 @@ uniform float HOTSPOT_LO;      // cone noise threshold: higher = rarer islands [
 #define FRAG_FREQ       2.3    // microcontinent fragments on oceanic crust
 uniform float FRAG_LO;         //   (Madagascar / New Zealand) threshold; higher = fewer [default 0.42]
 
-#define FREQ_DETAIL     13.0   // high-frequency rock texture
-#define OCT_DETAIL      3
-uniform float DETAIL_AMT;      // rock texture amplitude [default 0.06]
+// Land roughness (BakeOut.b, km; bake_job.c adds it in metres): the
+// land's roughness spectrum (TERRAIN_ROUGH_*, shared with the detail noise
+// below the map, detail.glsl) from TERRAIN_ROUGH_MAP_WAVELENGTH_M down to
+// two map texels.
+uniform float FREQ_ROUGH;      // first octave's frequency (1 / radius)
+uniform int OCT_ROUGH;
+uniform float ROUGH_L0;        // first octave's wavelength / 10 km
+uniform vec2 ROUGH_A10;        // amplitude at a 10 km wavelength (km): plains, mountains
+uniform vec2 ROUGH_H;          // amplitude ~ wavelength^H: plains, mountains
+uniform vec2 ROUGH_KNEE;       // knee wavelength / 10 km: plains, mountains
+uniform float ROUGH_H_LONG;    // amplitude ~ wavelength^H_LONG above the knee
+uniform float DETAIL_AMT;      // x the roughness [default 1.0]
 #define FREQ_ANOMALY    1.7    // climate anomaly: continent-scale wet/dry regions
 #define OCT_ANOMALY     3
 
@@ -152,14 +172,42 @@ float fbm(vec3 p, float frq, int oct) {
 	return v;
 }
 
-float ridged(vec3 p, float frq, int oct, float k) {
-	float v = 0.0;
+// Ridged noise with amplitude gain per octave (0.5: the classic sum,
+// higher: rougher at short wavelengths), normalized so its range does not
+// grow with the octave count or the gain.
+float ridgedG(vec3 p, float frq, int oct, float k, float gain) {
+	float v = 0.0, norm = 0.0;
 	float amp = 0.5;
 	for (int i = 0; i < oct; i++) {
 		float n = 1.0 - abs(snoise(p * frq));
 		v += amp * pow(n, k);
+		norm += amp;
 		frq *= 2.0;
-		amp *= 0.5;
+		amp *= gain;
+	}
+	return v / max(norm, 1e-6);
+}
+
+float ridged(vec3 p, float frq, int oct, float k) {
+	return ridgedG(p, frq, oct, k, 0.5);
+}
+
+// The land's roughness (km) at ruggedness r (0 plains .. 1 mountains):
+// octaves of amplitude A10 (lambda / 10 km)^H up to the knee, growing as
+// lambda^H_LONG above it; A10 and the knee between the plains' and the
+// mountains' (geometrically), H linearly. Soft noise on plains, ridged
+// (sharp crests, V valleys) in mountains.
+float roughness(vec3 p, float r) {
+	float a10 = exp(mix(log(ROUGH_A10.x), log(ROUGH_A10.y), r));
+	float H = mix(ROUGH_H.x, ROUGH_H.y, r);
+	float knee = exp(mix(log(ROUGH_KNEE.x), log(ROUGH_KNEE.y), r));
+	float l = ROUGH_L0, frq = FREQ_ROUGH, v = 0.0;
+	for (int i = 0; i < OCT_ROUGH; i++) {
+		float amp = a10 * pow(min(l, knee), H) * pow(max(l, knee) / knee, ROUGH_H_LONG);
+		float n = snoise(p * frq + vec3(31.0, 47.0, 11.0) * float(i));
+		v += amp * mix(n, 1.0 - 2.0 * abs(n), r);
+		frq *= 2.0;
+		l *= 0.5;
 	}
 	return v;
 }
@@ -255,7 +303,7 @@ void main()
 	float h_land = PLAINS_H + PLAINS_NOISE * fbm(p, 3.0, 4);
 	// Hill country in patches.
 	float hillMask = smoothstep(0.05, 0.35, fbm(p + vec3(51.0, 2.0, 17.0), 1.6, 2));
-	h_land += hillMask * HILL_AMT * (0.5 + fbm(p + vec3(8.0, 31.0, 4.0), 5.0, 4));
+	h_land += hillMask * HILL_AMT * (0.5 + fbm(p + vec3(8.0, 31.0, 4.0), FREQ_HILL, OCT_HILL));
 	// Plateaus: narrow noise band -> flat tops with scarp edges.
 	float plateau = smoothstep(PLATEAU_LO, PLATEAU_HI, fbm(p + vec3(83.0, 7.0, 59.0), 1.2, 3));
 	// Tibet: broad uplift behind continental collisions.
@@ -265,7 +313,7 @@ void main()
 	h_land += plateau * PLATEAU_H + tibet * TIBET_H;
 	h_land += plateau * 0.03 * fbm(p + vec3(4.0, 4.0, 90.0), 4.0, 3);   // keep tops nearly flat
 	// Mountain belts along active boundaries only.
-	float mount = ridged(p, FREQ_MOUNT, OCT_MOUNT, 2.0);
+	float mount = ridgedG(p, FREQ_MOUNT, OCT_MOUNT, 2.0, GAIN_MOUNT);
 	// The coastal range sits just inland of an active margin, on whichever
 	// side is continental (both terms keep it continuous at the bisector).
 	float andes = contA * (1.0 - contB) * band(bdist - ANDES_WIDTH, ANDES_WIDTH)
@@ -275,7 +323,7 @@ void main()
 	h_land += belt * mount;
 	// Old worn ranges inside the plates, low and rounded.
 	float oldMask = smoothstep(0.25, 0.50, snoise(p * 1.4 + vec3(61.0, 13.0, 37.0)));
-	h_land += oldMask * OLD_RANGE_H * ridged(p + vec3(19.0, 3.0, 7.0), 3.5, 4, 1.2);
+	h_land += oldMask * OLD_RANGE_H * ridged(p + vec3(19.0, 3.0, 7.0), FREQ_OLD, OCT_OLD, 1.2);
 
 	// ---- Oceanic elevation.
 	float h_ocean = OCEAN_BASE + OCEAN_NOISE * fbm(p + vec3(29.0, 71.0, 5.0), 2.4, 4);
@@ -302,11 +350,13 @@ void main()
 
 	float h = mix(h_ocean, h_land, land);
 
-	// High-frequency ridged detail (rock texture), weighted to rugged land.
-	float rugged = clamp(belt + hillMask * 0.4 + oldMask * 0.4, 0.0, 1.0);
-	float detail = ridged(p, FREQ_DETAIL, OCT_DETAIL, 1.5);
-	h += (detail - 0.5) * DETAIL_AMT * (0.2 + 0.8 * rugged) * (0.3 + 0.7 * land);
+	// Land roughness, in km: the ruggedness from the shaper's own masks
+	// (ranges, hill country, old ranges, plateaus) and from height (high
+	// ground is broken ground: range flanks, uplands), on land only.
+	float rugged = clamp(belt * 1.5 + hillMask * 0.6 + oldMask * 0.6 + plateau * 0.5
+	                     + 0.6 * smoothstep(0.25, 0.8, h_land), 0.0, 1.0);
+	float rough = DETAIL_AMT * land * roughness(p + vec3(23.0, 5.0, 61.0), rugged);
 
 	float anomaly = fbm(p + vec3(5.3, 71.9, 23.1), FREQ_ANOMALY, OCT_ANOMALY);
-	BakeOut = vec4(h, anomaly, 0.0, 1.0);
+	BakeOut = vec4(h, anomaly, rough, 1.0);
 }

@@ -258,18 +258,64 @@
 #define QT_SKIRT_WIDTH_FRACTION   0.02
 
 /* ---- Relief (PlanetStyle.landRelief / oceanRelief, terrain_gen.h) ---------
-   Real Earth: land up to its highest peak (8.85 km), the seafloor down to
-   its deepest trench (11 km) along the shelf profile. Generated planets
-   draw theirs as a fraction of their radius from the ranges below
-   (solar_system.c): rocky ones from flat to Mars-like rugged (Olympus Mons
-   is 0.0065 of Mars's radius), dwarfs rougher. Edited live in the debug
+   About twice real Earth (docs/terrain-relief.md): land up to ~18 km, the
+   seafloor down to ~22 km along the shelf profile. Relief is a ground-scale
+   quantity, chosen in metres whatever the planet's radius (the terrain keeps
+   a human-scale look on a shrunken planet too; the style stores it as a
+   fraction of the radius, converted once). Generated planets draw theirs
+   from the metre ranges below (solar_system.c). Edited live in the debug
    panel's Surface section (a re-bake updates the occlusion). */
-#define EARTH_LAND_RELIEF_M       8850.0
-#define EARTH_OCEAN_RELIEF_M      11000.0
-#define ROCKY_LAND_RELIEF_MIN     0.0008
-#define ROCKY_LAND_RELIEF_MAX     0.0035
-#define DWARF_LAND_RELIEF_MIN     0.002
-#define DWARF_LAND_RELIEF_MAX     0.008
+#define EARTH_LAND_RELIEF_M       17700.0
+#define EARTH_OCEAN_RELIEF_M      22000.0
+#define ROCKY_LAND_RELIEF_MIN_M   8000.0
+#define ROCKY_LAND_RELIEF_MAX_M   30000.0
+#define DWARF_LAND_RELIEF_MIN_M   6000.0
+#define DWARF_LAND_RELIEF_MAX_M   20000.0
+
+/* Ground-scale shaping (heightbake.frag via upload.c), in metres whatever
+   the planet's radius (docs/terrain-relief.md section 0): the mountain
+   belts' widths (Gaussian half-widths about the plate boundary; the
+   coastal range sits one width inland), the high plateau behind a
+   collision, and the starting wavelengths of the noise in the ranges, the
+   old worn ranges, hill country and rock texture (each runs down to two
+   map texels). TERRAIN_MOUNT_GAIN: the ranges' ridges' amplitude per
+   octave (0.5 = smooth classic sum; higher = more ridges and valleys at
+   tens of km). TERRAIN_HYPSO_GAMMA: the land's heights (fraction of the
+   relief) are raised to this power after the bake, so most land stays low
+   and the peaks keep their height (Earth's hypsometric curve). */
+#define TERRAIN_COLLIDE_WIDTH_M         250000.0
+#define TERRAIN_ANDES_WIDTH_M           180000.0
+#define TERRAIN_TIBET_WIDTH_M           900000.0
+#define TERRAIN_MOUNT_WAVELENGTH_M      500000.0
+#define TERRAIN_MOUNT_GAIN              0.8
+#define TERRAIN_OLD_RANGE_WAVELENGTH_M  400000.0
+#define TERRAIN_HILL_WAVELENGTH_M       300000.0
+#define TERRAIN_HYPSO_GAMMA             1.3
+
+/* The land's roughness spectrum, one for the whole planet and every scale:
+   octave amplitude A(lambda) = A10 x (lambda / 10 km)^H up to the knee
+   (below), between the plains' and the mountains' by ruggedness (A10
+   geometrically). H = 1
+   keeps the slope the same at every scale; lower is rougher at short
+   wavelengths. The bake carries it from TERRAIN_ROUGH_MAP_WAVELENGTH_M down
+   to two map texels (heightbake.frag, in metres via bake_job.c); the
+   detail noise carries it below the map's texel (detail.glsl). Values for
+   ~2x Earth (docs/terrain-relief.md). */
+#define TERRAIN_ROUGH_A10_PLAINS_M      80.0
+#define TERRAIN_ROUGH_A10_MOUNTAIN_M    1500.0
+#define TERRAIN_ROUGH_H_PLAINS          1.0
+#define TERRAIN_ROUGH_H_MOUNTAIN        0.9
+/* Above the knee wavelength the amplitude grows only as lambda^H_LONG:
+   plains are flat at long wavelengths (their roughness is short: gullies,
+   low hills), mountains rough at every scale (their knee is past the map).
+   The knee goes between the two geometrically by ruggedness. */
+#define TERRAIN_ROUGH_KNEE_PLAINS_M     5000.0
+#define TERRAIN_ROUGH_KNEE_MOUNTAIN_M   1000000.0
+#define TERRAIN_ROUGH_H_LONG            0.2
+#define TERRAIN_ROUGH_MAP_WAVELENGTH_M  50000.0
+/* Below this wavelength (m) the amplitude falls with the wavelength (the
+   slope stops growing: rock, not ever-steeper fractal spikes). */
+#define TERRAIN_ROUGH_LAMBDA_C_M        100.0
 
 /* ---- Baked terrain maps (terrain_gen.c, shaders/planetmap.glsl) ------------
    Height, climate and ocean maps are cube maps over the body-local sphere:
@@ -285,32 +331,46 @@
    geometry while the triangles can carry them and as shading normals down
    to ~2 px. Noise stays off the seafloor and ramps in above the shore so
    land never dips below sea level.
-   It continues the map's own spectrum: the coarsest octave is one map
-   texel long (its lattice is the map's texel grid), and its amplitude is
-   the map's measured height step between neighbouring land texels
-   (PlanetGenParams.landStepRms, in metres at the current landRelief) times
-   the roughness, scaled per place by the map's local slope against that
-   average: rugged where the map is steep, smooth on plains. */
-/* Roughness: coarsest amplitude / the map's RMS texel step (debug panel). */
+   It continues the land's roughness spectrum (TERRAIN_ROUGH_*, above)
+   below the map: the coarsest octave is one map texel long (its lattice is
+   the map's texel grid; the bake carries the longer ones), each octave's
+   amplitude the spectrum's at its wavelength, by the ruggedness there:
+   from the baked map's slope (rise / run, TERRAIN_RUGGED_SLOPE_LO .. _HI)
+   or its height (fraction of the relief, TERRAIN_RUGGED_ALT_LO .. _HI,
+   up to 0.6 from height alone). */
+/* x every amplitude (debug panel "Detail roughness"). */
 #define TERRAIN_DETAIL_ROUGHNESS        1.0
-/* Local scale: the map's slope here over its RMS, clamped to
-   [TERRAIN_DETAIL_PLAINS, TERRAIN_DETAIL_LOCAL_MAX]. The maximum bounds the
-   detail (culling, skirts). */
-#define TERRAIN_DETAIL_LOCAL_MAX        4.0
-/* Amplitude ratio from one octave to the next (0.5 keeps the slope
-   similar at every scale; higher = rougher close up). */
-#define TERRAIN_DETAIL_GAIN             0.5
+/* Mountain shape (detail.glsl): rugged ground's octaves are ridged and
+   damped by the coarser octaves' slope under them, 1 / (1 + ERODE x
+   ruggedness x slope^2) (slope as rise / run): their steep flanks
+   smoother, gentle ground detailed. */
+#define TERRAIN_DETAIL_ERODE            2.0
+#define TERRAIN_RUGGED_SLOPE_LO         0.01
+#define TERRAIN_RUGGED_SLOPE_HI         0.15
+#define TERRAIN_RUGGED_ALT_LO           0.3
+#define TERRAIN_RUGGED_ALT_HI           0.8
 /* Finest octave's wavelength (m); no finer than ~QT_MIN_VERTEX_SPACING_M
    matters for geometry, finer still only for close-up shading. */
 #define TERRAIN_DETAIL_MIN_WAVELENGTH_M 1.0
-/* Least local scale (flat ground still gets some detail). */
-#define TERRAIN_DETAIL_PLAINS           0.3
 /* Detail shaded per pixel below the triangle size (normals only, up to 3
    octaves, down to half a triangle edge). 0 = the vertices' slope only.
    The most expensive part of the detail: about +9 ms for the first octave
    and +4 ms for each further one with land filling the screen on an
    integrated GPU at 2880x1880. Compiled into quad.frag (restart to change). */
 #define TERRAIN_DETAIL_PIXEL_OCTAVES    3
+
+/* Surface materials by height in metres (quad.frag), the same on any
+   planet (ground scale). Temperature is quad.frag's unit: 1 at the equator
+   at sea level, -0.2 at the poles, snow below PlanetStyle.snowTemp (0.12
+   on Earth), forest above treeTemp (0.33). The lapse puts Earth's
+   equatorial snowline at (1 - 0.12) / LAPSE = 10 km and its treeline at
+   ~7.6 km; at 45 deg ~6 and ~3.6 km, at 60 deg ~3.2 and ~0.8 km. That is
+   2x real, as the relief: ranges keep Earth's share of snow (at the real
+   5 km, 10% of the land is above it and whole massifs are white). Dry
+   ground lapses x (1 - LAPSE_DRY), its snowline higher (as the dry
+   Andes'). */
+#define TERRAIN_LAPSE_PER_KM            0.088
+#define TERRAIN_LAPSE_DRY               0.2
 
 /* ---- Atmosphere (atmosphere.c, atmosphere.frag) -------------------------
    A stylised single-scattering shell (O'Neill, GPU Gems 2 ch. 16), tuned

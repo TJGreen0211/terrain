@@ -6,9 +6,9 @@
 // first, then green, so sand in the shallows turns turquoise and the deep
 // sea navy. The water surface's alpha carries the blue (least absorbed)
 // channel; quad.frag tints the floor by the extra red/green loss. Set for
-// the look, not real water: 2900 kept the sea's colours when the seafloor
-// went from 64 km to Earth's real 11 km (it was 500 against 64 km).
-const float WATER_ABSORB = 2900.0;
+// the look, not real water, so it scales with 1 / the ocean relief: 500
+// against the old 64 km seafloor, 1450 against today's 22 km (2x Earth's).
+const float WATER_ABSORB = 1450.0;
 const vec3 WATER_ABSORB_RGB = WATER_ABSORB * vec3(6.0, 2.2, 1.0);
 // Optical path: the geometric column (oceanRelief dT^2, the drawn seafloor
 // profile) plus a shelf term linear in dT. The squared profile alone keeps

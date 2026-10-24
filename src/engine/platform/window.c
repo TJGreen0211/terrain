@@ -66,3 +66,9 @@ int Window_Height() {
 int Window_Width() {
 	return windowWidth;
 }
+
+void Window_SetClipboard(const char *text) {
+	GLFWwindow *w = glfwGetCurrentContext();
+	if (w)
+		glfwSetClipboardString(w, text);
+}

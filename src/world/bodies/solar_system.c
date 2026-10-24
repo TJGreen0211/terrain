@@ -181,14 +181,16 @@ static void generateRocky(Rng *r, PlanetInfo *p, const Body *b, double temp, int
 	s->equatorLush = 0.0f;
 	s->hadleyStrength = 0.0f;
 	s->riverThreshold = 2.0f;      /* no rivers */
-	s->landRelief = dwarf ? frange(r, DWARF_LAND_RELIEF_MIN, DWARF_LAND_RELIEF_MAX)
-	                      : frange(r, ROCKY_LAND_RELIEF_MIN, ROCKY_LAND_RELIEF_MAX);
+	/* Chosen in metres (a ground-scale quantity), stored per radius. */
+	s->landRelief = (float)((dwarf ? range(r, DWARF_LAND_RELIEF_MIN_M, DWARF_LAND_RELIEF_MAX_M)
+	                               : range(r, ROCKY_LAND_RELIEF_MIN_M, ROCKY_LAND_RELIEF_MAX_M)) / b->radius);
 	s->oceanRelief = 0.0f;
 
 	/* Terrain recipe: Earth's, varied. Fewer droplets: no rain carving
 	   (and a faster bake). */
 	TerrainBakeSettings *k = &p->bake;
 	*k = baseBake;
+	k->radiusM = (float)b->radius;
 	k->seed = (unsigned int)(splitmix(&r->s) & 0x7fffffff);
 	k->plateCount = 3 + (int)(rnd(r) * 16.0);
 	k->continentArea = frange(r, 0.25, 0.7);

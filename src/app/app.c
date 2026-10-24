@@ -121,6 +121,61 @@ static void updateCamSpeed(double dt)
 	camSpeedLastFocus = focus;
 }
 
+/* The current view as a bench scene (app/bench.c keywords) on the
+   clipboard and in the log, to reproduce what is on screen offline: a
+   pivot 100 m ahead along the view, on Earth by body-local lat / lon and
+   height above the sea-level sphere, the camera on the eye side of it in
+   the pivot's east / up / north frame (bench.c's), and the sim time (the
+   Sun). The roll is not kept. */
+static void copyViewAsBench(void)
+{
+	const double D = 100.0;
+	const Body *e = Bodies_Get(BODY_EARTH);
+	mat4 r = Camera_ViewRotation();
+	dvec3 front = { -r.m[2][0], -r.m[2][1], -r.m[2][2] };
+	front = dscalarvec3(front, 1.0 / dlengthvec3(front));
+	dvec3 p = dsubvec3(daddvec3(Camera_Position(), dscalarvec3(front, D)), e->position);
+	double len = dlengthvec3(p);
+	dvec3 dir = dscalarvec3(p, 1.0 / len);
+	/* Body-local direction: the inverse of the body's rotation. */
+	const double (*m)[4] = e->rotation.m;
+	double l[3];
+	for (int j = 0; j < 3; j++)
+		l[j] = m[0][j] * dir.x + m[1][j] * dir.y + m[2][j] * dir.z;
+	double lat = asin(fmax(-1.0, fmin(1.0, l[2]))) * (180.0 / M_PI);
+	double lon = atan2(l[1], l[0]) * (180.0 / M_PI);
+	/* bench.c's frame at the pivot: east = dir x worldY, north = east x dir;
+	   the camera sits at pivot + u D, u = -front. */
+	dvec3 worldY = { 0.0, 1.0, 0.0 };
+	dvec3 east = { dir.y * worldY.z - dir.z * worldY.y, dir.z * worldY.x - dir.x * worldY.z,
+	               dir.x * worldY.y - dir.y * worldY.x };
+	double el = dlengthvec3(east);
+	east = el < 1e-6 ? (dvec3){ 1.0, 0.0, 0.0 } : dscalarvec3(east, 1.0 / el);
+	dvec3 north = { east.y * dir.z - east.z * dir.y, east.z * dir.x - east.x * dir.z,
+	                east.x * dir.y - east.y * dir.x };
+	dvec3 u = dscalarvec3(front, -1.0);
+	double ue = u.x * east.x + u.y * east.y + u.z * east.z;
+	double ud = u.x * dir.x + u.y * dir.y + u.z * dir.z;
+	double un = u.x * north.x + u.y * north.y + u.z * north.z;
+	double yaw = atan2(ud, ue) * (180.0 / M_PI);
+	double pitch = asin(fmax(-1.0, fmin(1.0, un))) * (180.0 / M_PI);
+	char text[512];
+	snprintf(text, sizeof text,
+	         "# Captured view (Camera tab)\n"
+	         "view orbit\n"
+	         "pivot terrain %.6f %.6f\n"
+	         "poff %.1f\n"
+	         "localup\n"
+	         "frames 90\n"
+	         "simtime %.3f\n"
+	         "timescale 0\n"
+	         "key 0  %.1f %.3f %.3f\n"
+	         "key 90 %.1f %.3f %.3f\n",
+	         lat, lon, len - e->radius, Bodies_SimTime(), D, yaw, pitch, D, yaw, pitch);
+	Window_SetClipboard(text);
+	fprintf(stderr, "[camera] view copied as a bench scene:\n%s", text);
+}
+
 /* The Camera tab of the debug panel: altitude above the focus body's
    sea-level sphere, and speed relative to it. */
 static void cameraPanel(struct nk_context *ctx)
@@ -137,6 +192,8 @@ static void cameraPanel(struct nk_context *ctx)
 		nk_labelf(ctx, NK_TEXT_LEFT, "Speed: %.1f m/s", camSpeed);
 	else
 		nk_labelf(ctx, NK_TEXT_LEFT, "Speed: %.1f km/s", camSpeed / 1000.0);
+	if (nk_button_label(ctx, "Copy view as bench scene"))
+		copyViewAsBench();
 }
 
 /* Tone map tab: the engine's settings, then the gains of the passes still
@@ -371,7 +428,11 @@ static double terrainSpeedScale(dvec3 cam)
 		double ground = b->radius;
 		if (i == active) {
 			double cap = fmax(d - b->radius, TERRAIN_FLIGHT_GROUND_CAP_M) / b->radius;
-			ground = TerrainDraw_GroundRadius(b, dscalarvec3(rel, 1.0 / d), cap);
+			/* The map's highest ground, without the detail's bound (several
+			   km in mountains, mostly air): flying low over it is near the
+			   ground, not under it. */
+			ground = TerrainDraw_GroundRadius(b, dscalarvec3(rel, 1.0 / d), cap)
+			       - TerrainDetail_Amplitude(b->radius) * b->radius;
 		}
 		/* Distance to the surface from either side: under the ground (a
 		   debugging clip through the planet) speed builds up again. */

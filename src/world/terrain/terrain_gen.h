@@ -7,6 +7,41 @@
 /* CPU min/max pyramid of a baked height field (terrain_gen.c). */
 typedef struct TerrainPyramid TerrainPyramid;
 
+/* The land's relief, measured in the bake (gen/stats.c) in units that do
+   not depend on the planet's size or its relief setting, so the debug
+   panel and the bake log convert them live (TerrainGen_StatsReport):
+   heights as a fraction of the land relief (alt01, 0 at sea level, 1 at
+   the top), slopes in alt01 per radian of arc (x landRelief = rise / run),
+   over baselines of 1, 2, 4, 8 and 16 map texels (both axes of every face,
+   land at both ends; per texel, not area-weighted). docs/terrain-relief.md
+   sets the targets. */
+#define TERRAIN_STAT_BASES 5
+typedef struct TerrainReliefStats {
+	float landShare;                     /* of the map's texels */
+	float elev[4];                       /* land height p50, p90, p99, max (alt01) */
+	float baseRad[TERRAIN_STAT_BASES];   /* each baseline's mean arc (rad) */
+	float slope[TERRAIN_STAT_BASES][3];  /* p50, p90, p99 slope over it (alt01 / rad) */
+	/* Body-local unit directions of landmarks for review views
+	   ("pivot terrain <name>" in bench scenes): the highest texel, the
+	   most rugged spot (steepest over 16 texels both ways, 20-90% of the
+	   relief up, off lakes), a typical lowland plain (2-15% of the relief up, within
+	   ~45 deg of the equator, land all round, the land's 25th-percentile slope over 8 texels: the
+	   flattest land is a lake). */
+	double peak[3], rugged[3], plain[3];
+} TerrainReliefStats;
+
+/* Stats converted for a planet of this radius (m) and land relief
+   (fraction of the radius): heights in metres (p50, p90, p99, max); per
+   baseline its length at the face centre (m) and the slope's p50, p90,
+   p99 as rise / run. */
+typedef struct TerrainReliefReport {
+	double elevM[4];
+	double baseM[TERRAIN_STAT_BASES];
+	double slope[TERRAIN_STAT_BASES][3];
+} TerrainReliefReport;
+void TerrainGen_ReliefReport(const TerrainReliefStats *s, double landRelief, double radius,
+                             TerrainReliefReport *r);
+
 /* One baked planet: sea level + ocean depth derived from the baked, eroded
    height field (both shaders must use the identical values or the water
    discard edge drifts off the drawn coastline), its climate and ocean maps
@@ -38,8 +73,10 @@ typedef struct {
 	   TerrainGen_FreePlanet. */
 	unsigned int surfaceTex;
 	/* RMS raw-height step between neighbouring land texels: the map's own
-	   roughness at its finest scale (the detail noise is sized from it). */
+	   roughness at its finest scale (logged with the bake). */
 	float landStepRms;
+	/* The land's relief statistics (TerrainReliefStats below). */
+	TerrainReliefStats stats;
 	/* Height bounds for the quadtree (TerrainGen_HeightRange). */
 	TerrainPyramid *pyramid;
 } PlanetGenParams;
@@ -57,8 +94,9 @@ typedef struct {
 	float biome[3][3][3];
 	float rock[3], snow[3], sand[3], salt[3], water[3];
 	float tempOffset;      /* + warms the whole planet, - cools it */
-	float lapseRate;       /* temperature drop from sea level to the top */
+	float lapseRate;       /* x the temperature drop with height (TERRAIN_LAPSE_PER_KM) */
 	float snowTemp;        /* temperature below which snow/ice settles */
+	float treeTemp;        /* temperature below which forest gives way to alpine ground */
 	float humidity;        /* global moisture multiplier */
 	float equatorLush;     /* 0 = no equatorial rain belt, 1 = Earth, >1 wetter */
 	float hadleyStrength;  /* 0 = ignore latitude rain bands, 1 = full */
@@ -107,10 +145,11 @@ typedef struct {
 	float ridgeH;          /* mid-ocean ridge rise */
 	float hotspotLo;       /* volcanic island threshold: higher = rarer */
 	float fragLo;          /* microcontinent threshold: higher = fewer */
-	float detailAmt;       /* high-frequency rock texture */
+	float detailAmt;       /* x the land roughness (TERRAIN_ROUGH_*, metres) */
 	/* Erosion (CPU), in pre-normalized [0,1] height units */
 	int thermalPasses;     /* weathering iterations */
-	float thermalTalus;    /* max stable height step per reference texel of distance */
+	float thermalTalus;    /* steepest stable slope (rise / run, true metres at the
+	                          baked planet's relief; converted per bake) */
 	float dropletsPerPx;   /* droplet count = per-px * 2048 * 1024 (the reference
 	                          equirect grid, terrain_gen.c), whatever the map
 	                          size; dominates bake time */
@@ -119,6 +158,10 @@ typedef struct {
 	float dropletCapacity; /* sediment capacity coefficient */
 	float dropletEvap;     /* fraction of water evaporated per step */
 	float dropletInertia;  /* 0 = runs straight downhill, 1 = keeps its heading */
+	/* The planet's radius (m): converts the ground-scale shaping constants
+	   (WorldConfig.h, metres) for its sphere. Set with the planet, not a
+	   knob. */
+	float radiusM;
 } TerrainBakeSettings;
 
 /* Bake inputs: edits apply on the next bake (debug panel). */

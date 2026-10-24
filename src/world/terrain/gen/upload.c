@@ -162,9 +162,42 @@ void uploadPlates(const TerrainBakeSettings *bs)
 	glUniform4fv(glGetUniformLocation(bakeProgram, "plateMotion"), np, &mo[0][0]);
 }
 
+/* Octaves of noise from wavelength lambda (m) down to two map texels at
+   the face centre (at least one). */
+static int octavesDownTo(double lambda, double radius)
+{
+	double texel = 2.0 * radius / FACE_N;
+	int n = (int)floor(log2(lambda / (2.0 * texel))) + 1;
+	return n < 1 ? 1 : (n > 10 ? 10 : n);
+}
+
+/* A ground-scale wavelength (m) as heightbake.frag's noise frequency: its
+   coordinates are the unit sphere's, so features ~1 / frequency radii. */
+static void uniformWave(const char *freq, const char *oct, double lambda, double radius)
+{
+	glUniform1f(glGetUniformLocation(bakeProgram, freq), (float)(radius / lambda));
+	glUniform1i(glGetUniformLocation(bakeProgram, oct), octavesDownTo(lambda, radius));
+}
+
 /* Shaping recipe uniforms (heightbake.frag keeps the #define names). */
 void uploadShaping(const TerrainBakeSettings *bs)
 {
+	double R = bs->radiusM > 0.0f ? bs->radiusM : EARTH_RADIUS_M;
+	glUniform1f(glGetUniformLocation(bakeProgram, "COLLIDE_WIDTH"), (float)(TERRAIN_COLLIDE_WIDTH_M / R));
+	glUniform1f(glGetUniformLocation(bakeProgram, "ANDES_WIDTH"), (float)(TERRAIN_ANDES_WIDTH_M / R));
+	glUniform1f(glGetUniformLocation(bakeProgram, "TIBET_WIDTH"), (float)(TERRAIN_TIBET_WIDTH_M / R));
+	uniformWave("FREQ_MOUNT", "OCT_MOUNT", TERRAIN_MOUNT_WAVELENGTH_M, R);
+	glUniform1f(glGetUniformLocation(bakeProgram, "GAIN_MOUNT"), (float)TERRAIN_MOUNT_GAIN);
+	uniformWave("FREQ_OLD", "OCT_OLD", TERRAIN_OLD_RANGE_WAVELENGTH_M, R);
+	uniformWave("FREQ_HILL", "OCT_HILL", TERRAIN_HILL_WAVELENGTH_M, R);
+	uniformWave("FREQ_ROUGH", "OCT_ROUGH", TERRAIN_ROUGH_MAP_WAVELENGTH_M, R);
+	glUniform1f(glGetUniformLocation(bakeProgram, "ROUGH_L0"), (float)(TERRAIN_ROUGH_MAP_WAVELENGTH_M / 10000.0));
+	glUniform2f(glGetUniformLocation(bakeProgram, "ROUGH_A10"),
+	            (float)(TERRAIN_ROUGH_A10_PLAINS_M / 1000.0), (float)(TERRAIN_ROUGH_A10_MOUNTAIN_M / 1000.0));
+	glUniform2f(glGetUniformLocation(bakeProgram, "ROUGH_H"), (float)TERRAIN_ROUGH_H_PLAINS, (float)TERRAIN_ROUGH_H_MOUNTAIN);
+	glUniform2f(glGetUniformLocation(bakeProgram, "ROUGH_KNEE"),
+	            (float)(TERRAIN_ROUGH_KNEE_PLAINS_M / 10000.0), (float)(TERRAIN_ROUGH_KNEE_MOUNTAIN_M / 10000.0));
+	glUniform1f(glGetUniformLocation(bakeProgram, "ROUGH_H_LONG"), (float)TERRAIN_ROUGH_H_LONG);
 	glUniform1f(glGetUniformLocation(bakeProgram, "COAST_FREQ"), bs->coastFreq);
 	glUniform1f(glGetUniformLocation(bakeProgram, "COAST_AMT"), bs->coastAmt);
 	glUniform1f(glGetUniformLocation(bakeProgram, "PLAINS_H"), bs->plainsH);

@@ -47,7 +47,8 @@ void main()
 			// this walk's coarser triangles (detailTriPx =
 			// QT_SHADOW_TRIANGLE_PX) and stitched to this walk's leaves.
 			vec2 gradCube;
-			lift = terrainLift(d, length(sphere - lodCameraPos), patchCube(uv), pAddr, uv, gradCube);
+			float detailM;
+			lift = terrainLift(d, length(sphere - lodCameraPos), patchCube(uv), pAddr, uv, gradCube, detailM);
 			lift = terrainLiftStitched(uv, lift);
 		}
 		// Skirt: same drop as quad.vert, as an offset from 1.
