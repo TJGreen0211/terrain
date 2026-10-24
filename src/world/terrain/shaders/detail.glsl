@@ -105,6 +105,11 @@ const ivec3 DETAIL_SHIFT = ivec3(17, 31, 47);
 #define DETAIL_VERT_FADE   vec2(2.0, 4.0)
 #define DETAIL_FINE_FADE   vec2(0.5, 1.0)
 #define DETAIL_PIX_FADE    vec2(1.0, 2.0)
+// The materials (quad.frag) take an octave as resolved only from 2-4 px:
+// their thresholds (snowline, rock) are sharp, and an octave of 1-2 px
+// flips them pixel to pixel (salt speckle from orbit). The rest goes into
+// their variance.
+#define DETAIL_MAT_FADE    vec2(2.0, 4.0)
 #ifndef DETAIL_PIXEL_OCTAVES
 #define DETAIL_PIXEL_OCTAVES 3
 #endif
@@ -386,13 +391,17 @@ float detailVertex(ivec4 addr, vec2 uv, float qLen, float footM, DetailSpec s, v
 // footprint for aliasing, which can be wider (grazing views). d2: the
 // vertices' detail slope^2 (m/m), where the erosion starts; startCube: the
 // map's and the vertices' slope (metres per cube unit), where the gullies
-// start. hPix gets these octaves' height (m) that the geometry leaves out
-// (below its fade; coastal ramp NOT applied), for the materials' height.
+// start. For the materials (DETAIL_MAT_FADE; coastal ramp NOT applied):
+// hPix gets these octaves' height (m) that the geometry leaves out (below
+// its fade), gradMat their slope (as the return value), matVar the
+// variance of what they leave out, x slope (m/m)^2, y height (m^2).
 vec2 detailPixel(ivec4 addr, vec2 uv, float qLen, float footM, float pixM, DetailSpec s, float d2,
-                 vec2 startCube, out float hPix)
+                 vec2 startCube, out float hPix, out vec2 gradMat, out vec2 matVar)
 {
 	vec2 grad = vec2(0.0);
 	hPix = 0.0;
+	gradMat = vec2(0.0);
+	matVar = vec2(0.0);
 	if (detailOctaves <= 0)
 		return grad;
 	float lambda0 = detailWavelength0(qLen);
@@ -405,13 +414,16 @@ vec2 detailPixel(ivec4 addr, vec2 uv, float qLen, float footM, float pixM, Detai
 	if (last < first)
 		return grad;
 	float toRise = qLen / detailRadius;
+	float g2 = mix(0.514, 1.316, s.r);   // as detailUnresolvedVar
 	vec2 slope = vec2(0.0);
 	float lambda = lambda0 * exp2(-float(first));
 	for (int i = first; i <= last; i++) {
 		float r = lambda / tri;
-		float w = smoothstep(DETAIL_PIX_FADE.x, DETAIL_PIX_FADE.y, lambda / pixM)
-		        * smoothstep(DETAIL_FINE_FADE.x, DETAIL_FINE_FADE.y, r)
-		        * (1.0 - smoothstep(DETAIL_VERT_FADE.x, DETAIL_VERT_FADE.y, r));
+		float band = smoothstep(DETAIL_FINE_FADE.x, DETAIL_FINE_FADE.y, r)
+		           * (1.0 - smoothstep(DETAIL_VERT_FADE.x, DETAIL_VERT_FADE.y, r));
+		float w = smoothstep(DETAIL_PIX_FADE.x, DETAIL_PIX_FADE.y, lambda / pixM) * band;
+		float wm = smoothstep(DETAIL_MAT_FADE.x, DETAIL_MAT_FADE.y, lambda / pixM);
+		float wh = 1.0 - smoothstep(DETAIL_GEOM_FADE.x, DETAIL_GEOM_FADE.y, r);
 		int n = detailOctave0 + i;
 		ivec2 cell;
 		vec2 f;
@@ -421,8 +433,10 @@ vec2 detailPixel(ivec4 addr, vec2 uv, float qLen, float footM, float pixM, Detai
 		vec2 g = w * amp * exp2(float(n - 1)) * o.yz;
 		grad += g;
 		slope += g;
-		hPix += smoothstep(DETAIL_PIX_FADE.x, DETAIL_PIX_FADE.y, lambda / pixM)
-		      * (1.0 - smoothstep(DETAIL_GEOM_FADE.x, DETAIL_GEOM_FADE.y, r)) * amp * o.x;
+		gradMat += wm * band * amp * exp2(float(n - 1)) * o.yz;
+		hPix += wm * wh * amp * o.x;
+		float out1 = (1.0 - wm) * band, outH = (1.0 - wm) * wh;
+		matVar += vec2(g2 * out1 * out1 / (lambda * lambda), 0.0313 * outH * outH) * amp * amp;
 		lambda *= 0.5;
 	}
 	return grad;

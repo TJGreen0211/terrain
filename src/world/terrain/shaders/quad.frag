@@ -96,7 +96,9 @@ const float PI = 3.14159265359;
 #define VALLEY_LOD      3.65    // extra mips for the river-valley greening
 #define LAKE_LOD        2.65    // lakes must survive this many mips (no pit specks)
 #define COAST_LOD       4.65    // beaches need open sea within ~2^COAST_LOD texels
+#define MAT_MAP_LOD     2.0     // the materials read the map's texels at >= ~4 px
 #define SNOW_EDGE       0.015   // snowline half-width in temperature
+#define SNOW_NOISE      0.04    // snowline wander at 1-4 km (~450 m of height)
 #define SNOW_SMOOTH     0.7     // share of the per-pixel detail's slope snow hides
 #define ASPECT_TEMP     0.1    // temperature per unit slope facing the equator (~1.1 km of snowline)
 
@@ -355,28 +357,58 @@ void main()
 	// not shade (detailUnresolvedVar), for the materials.
 	vec3 gDetail = vec3(0.0);
 	vec3 gPixel = vec3(0.0);   // the per-pixel octaves' share of gDetail
+	vec3 gMat = vec3(0.0);     // their share the materials take (DETAIL_MAT_FADE)
 	float hPixel = 0.0;        // and their height the geometry leaves out (m)
 	float slopeVar = 0.0, heightVar = 0.0;
+	float eMat = e;            // the map's height and slope for the materials
+	vec3 gradMat = grad;
 	if (e >= seaLevel) {
 		float altD = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
 		gDetail = fDetailSlope;
 		vec3 qD = detailCubePoint(fPatchAddr, fPatchUV);
 		DetailSpec specD = detailSpec(landRelief * altD * detailRadius, length(grad), altD, length(qD));
+		// The map near pixel size (orbit), for the materials, as
+		// DETAIL_MAT_FADE does for the detail: read MAT_MAP_LOD mips
+		// coarser where its texels are under ~4 px, and take the dropped
+		// mips' roughness (the bake's spectrum, the detail's: rms 0.177 x
+		// the amplitude at 3 texels of each) as height variance. The bake
+		// carries roughness down to two texels, and a sharp snowline on
+		// it flips pixel to pixel (salt speckle).
+		float lodM = clamp(log2(max(length(camDir)*lodK, 1e-4)) - log2(graz) + lodBias + MAT_MAP_LOD,
+		                   0.0, maxLod);
+		if (lodM > lod) {
+			eMat = clamp(textureLod(heightMap, dObj, lodM).r, 0.0, 1.0);
+			gradMat = textureLod(surfaceMap, dObj, lodM).xyz;
+			float texM = planetMapTexel(heightMap) * planetRadiusM;
+			float g2 = mix(0.514, 1.316, specD.r);
+			for (float l = lod; l < lodM; l += 1.0) {
+				float lam = 3.0 * texM * exp2(l);
+				float a = detailAmpAt(specD, lam);
+				float k = min(lodM - l, 1.0);
+				heightVar += 0.0313 * a * a * k;
+				slopeVar += g2 * a * a / (lam * lam) * k;
+			}
+		}
 		if (specD.coast > 0.0) {
 			float footM = length(camDir) * detailPix;
+			float sv0 = 0.0, hv0 = 0.0;
 #if DETAIL_PIXEL_OCTAVES > 0
+			vec2 gMatCube, matVar;
 			gPixel = specD.coast * detailSlope(fPatchAddr.x, qD,
 				detailPixel(fPatchAddr, fPatchUV, length(qD), footM, footM / graz, specD,
 				            dot(fDetailSlope, fDetailSlope),
 				            detailCubeGrad(fPatchAddr.x, qD, grad * detailSlopeToRise + fDetailSlope),
-				            hPixel));
+				            hPixel, gMatCube, matVar));
+			gMat = specD.coast * detailSlope(fPatchAddr.x, qD, gMatCube);
 			hPixel *= specD.coast;
 			gDetail += gPixel;
+			sv0 = matVar.x;
+			hv0 = matVar.y;
 #endif
-			slopeVar = specD.coast * specD.coast
-			         * detailUnresolvedVar(length(qD), footM, footM / graz, specD, dot(gDetail, gDetail),
-			                               heightVar);
-			heightVar *= specD.coast * specD.coast;
+			float hv;
+			float sv = detailUnresolvedVar(length(qD), footM, footM / graz, specD, dot(gDetail, gDetail), hv);
+			slopeVar += (sv0 + sv) * specD.coast * specD.coast;
+			heightVar += (hv0 + hv) * specD.coast * specD.coast;
 		}
 	}
 
@@ -426,18 +458,23 @@ void main()
 		// (no snow cap on every high desert plateau); a dry world (humidity
 		// 0) keeps the full lapse.
 		float cosLatS = sqrt(max(1.0 - dObj.z*dObj.z, 0.0));
-		float hM = max(landRelief * planetRadiusM * (e - seaLevel) / max(1.0 - seaLevel, 1e-3)
+		float hM = max(landRelief * planetRadiusM * (eMat - seaLevel) / max(1.0 - seaLevel, 1e-3)
 		               + fDetailH + hPixel, 0.0);
 		float dry = (1.0 - moist) * min(humidity * 4.0, 1.0);
 		// Aspect: slopes facing the equator are warmer, those facing the
 		// pole colder (sun exposure), so the snow and treelines follow the
 		// ridges instead of a contour.
-		vec3 slopeV = grad * (landRelief / max(1.0 - seaLevel, 1e-3)) + gDetail;
+		vec3 slopeV = gradMat * (landRelief / max(1.0 - seaLevel, 1e-3)) + fDetailSlope + gMat;
 		slopeV -= dObj * dot(slopeV, dObj);
 		vec3 poleward = vec3(0.0, 0.0, sign(dObj.z)) - dObj * abs(dObj.z);
 		float aspect = dot(slopeV, poleward) / max(length(poleward), 1e-4);
+		// Plus a little noise at 1-4 km (SNOW_NOISE), so the snow does not
+		// hold to every gully alike (rows of even fingers).
+		float nS = 0.6 * vnoiseLod(dObj, planetRadiusM / 4000.0, eps)
+		         + 0.4 * vnoiseLod(dObj, planetRadiusM / 1300.0, eps);
 		float temp = cosLatS * 1.2 - 0.2 - lapsePerM * hM * (1.0 - lapseDry * dry)
-		           + ASPECT_TEMP * clamp(aspect, -1.0, 1.0) + tempOffset + (n1 - 0.5) * 0.08;
+		           + ASPECT_TEMP * clamp(aspect, -1.0, 1.0) + tempOffset + (n1 - 0.5) * 0.08
+		           + (nS - 0.5) * 2.0 * SNOW_NOISE;
 		// Above the treeline (treeTemp): alpine meadow, then a fell field of
 		// thin soil and gravel toward the snowline.
 		float alpine = 1.0 - smoothstep(treeTemp - 0.03, treeTemp + 0.03, temp);
@@ -465,7 +502,10 @@ void main()
 		// The snowline is sharp (SNOW_EDGE, ~170 m of height); wider by the
 		// height spread a pixel holds but does not resolve, so from far
 		// away it is the share of the pixel's ground above it.
-		float snowW = sqrt(SNOW_EDGE * SNOW_EDGE + lapsePerM * lapsePerM * heightVar);
+		// The aspect term spreads too, by the unresolved slopes' component
+		// toward the pole (half their variance).
+		float snowW = sqrt(SNOW_EDGE * SNOW_EDGE + lapsePerM * lapsePerM * heightVar
+		                   + ASPECT_TEMP * ASPECT_TEMP * 0.5 * slopeVar);
 		float coldness = 1.0 - smoothstep(snowTemp - snowW, snowTemp + snowW, temp);
 
 		// Beach on gentle coasts only (steep coasts become cliffs): wet sand
