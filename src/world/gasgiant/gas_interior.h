@@ -26,6 +26,9 @@ typedef struct GasInteriorParams {
 	float murk;            /* murk density below the cloud tops, x GAS_DECK_MURK_PER_M */
 	float lightning;       /* flashes per second around the camera */
 	float flash;           /* their brightness, x the Sun */
+	float canyonFloor;     /* the canyons' middle-layer cover between the cloud ranges, 0..0.8 */
+	float topBreak;        /* how much mesoscale patches break up the zones' bright top cover, 0..1 */
+	float midErosion;      /* the middle layer's edge erosion, 0..1 */
 } GasInteriorParams;
 GasInteriorParams *GasInterior_Params(void);
 

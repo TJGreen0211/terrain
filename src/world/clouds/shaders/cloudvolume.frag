@@ -597,7 +597,14 @@ void marchPixel()
 			float ph = mix(hg(cosT, 0.6 * kc), hg(cosT, -0.25 * kc), 0.25);
 			Ls += bounce * (kb * ph * exp(-ka * tauL));
 			bounce *= orderHue;
+#ifdef DOME_AIR
 			ka *= 0.5;
+#else
+			// The higher orders reach deeper (the giants' clouds are tens of
+			// km thick): folds and shadowed faces glow instead of going
+			// near black, which read as rock.
+			ka *= 0.3;
+#endif
 			kb *= multiScatter;
 			kc *= 0.5;
 		}
@@ -615,7 +622,7 @@ void marchPixel()
 		vec3 amb = (skyLightAt(mus, 0.25) * skyGain * (0.4 + 0.6 * hs) * occ
 		          + skyLightAt(mus, 0.75) * groundGain * (1.0 - hs)) * ambient + NIGHT_FLOOR;
 #else
-		float occ = mix(0.35, 1.0, exp(-0.5 * tauU));
+		float occ = mix(0.5, 1.0, exp(-0.5 * tauU));
 		vec3 amb = (skyLin * (0.4 + 0.6 * hs) * occ + groundLin * (1.0 - hs)) * ambient * sunlight(mus, 2.0 * wrap);
 #endif
 		// x2: thick cloud reflects about like a sunlit Lambert surface

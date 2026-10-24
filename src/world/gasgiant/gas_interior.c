@@ -22,6 +22,7 @@ static GLuint program, emptyVAO;
    baked for. */
 static GLuint bakeProgram;
 static unsigned int bakedHash;
+static float bakedCanyon, bakedBreak;   /* the shaping sliders the map was baked with */
 static int bakedBody = -1;
 static double bakedExtent;
 static dvec3 bakedCenter, bakedEast, bakedNorth;   /* the map's frame, body-fixed */
@@ -45,6 +46,9 @@ static GasInteriorParams g_params = {
 	1.0f,     /* murk */
 	0.6f,     /* lightning */
 	3.0f,     /* flash */
+	0.35f,    /* canyonFloor */
+	0.8f,     /* topBreak */
+	0.8f,     /* midErosion */
 };
 
 GasInteriorParams *GasInterior_Params(void) { return &g_params; }
@@ -386,9 +390,13 @@ static void bakeWeather(int id, GasGiantStyle *s, const Body *b, double alt, dou
 	glUniform1f(glGetUniformLocation(bakeProgram, "lumZone"), (float)luminance(s->zone));
 	glUniform1f(glGetUniformLocation(bakeProgram, "lumBelt"), (float)luminance(s->belt));
 	glUniform1f(glGetUniformLocation(bakeProgram, "massifScale"), (float)GAS_CLOUD_MASSIF_M);
+	glUniform1f(glGetUniformLocation(bakeProgram, "canyonFloor"), g_params.canyonFloor);
+	glUniform1f(glGetUniformLocation(bakeProgram, "topBreak"), g_params.topBreak);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	CloudVolume_EndWeatherBake(id, center, extent, GAS_CLOUD_PLUME_M);
 	bakedHash = s->profileHash;
+	bakedCanyon = g_params.canyonFloor;
+	bakedBreak = g_params.topBreak;
 	bakedBody = id;
 	bakedCenter = center;
 	bakedEast = east;
@@ -419,11 +427,12 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	dvec3 east = dcross(pole, center);
 	east = dlengthvec3(east) > 1e-6 ? dnormal(east) : (dvec3){ 1.0, 0.0, 0.0 };
 	dvec3 north = dcross(center, east);
-	/* Re-bake when the camera has moved on, or the style changed (the
-	   stand-in pass, just before, rebuilt its profile). */
+	/* Re-bake when the camera has moved on, the style changed (the stand-in
+	   pass, just before, rebuilt its profile), or the shaping sliders moved. */
 	double extent = mapExtent(b->radius, alt);
 	if (CloudVolume_NeedsBake(id, camB, b->radius, extent) ||
-	    bakedBody != id || bakedHash != s->profileHash || bakedExtent != extent)
+	    bakedBody != id || bakedHash != s->profileHash || bakedExtent != extent ||
+	    bakedCanyon != g_params.canyonFloor || bakedBreak != g_params.topBreak)
 		bakeWeather(id, s, b, alt, extent, center, east, north);
 
 	const GasGiantParams *g = GasGiant_Params();
@@ -465,7 +474,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	top->ridges = 0.0f;
 	top->stretch = 1.0f;
 	top->streaks = 0.3f;
-	top->broad = 1.6f;
+	top->broad = 1.3f;
 	mid->base = (float)(GAS_CLOUD_MID_BASE_H * H);
 	mid->top = (float)(GAS_CLOUD_MID_TOP_H * H);
 	mid->density = 1.0f / 250.0f;
@@ -474,7 +483,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	mid->scale = 42.0e3f;
 	mid->sweep = 1.5f;
 	mid->shear = 0.3f;
-	mid->erosion = 0.7f;
+	mid->erosion = g_params.midErosion;
 	mid->anvil = 0.8f;
 	mid->shelf = 0.15f;
 	mid->ridges = 0.0f;
@@ -482,7 +491,7 @@ static void prepareClouds(const FrameContext *f, CloudVolumeScene *sc)
 	mid->carpet = 0.9f;
 	mid->plume = 1.0f;
 	mid->streaks = 0.4f;
-	mid->broad = 1.6f;
+	mid->broad = 1.1f;
 	/* The deck under them: the walls' feet sink into it. */
 	sc->deckOn = 1;
 	sc->deckAlt = (float)(GAS_CLOUD_DECK_H * H);
@@ -532,4 +541,7 @@ void GasInterior_DebugPanel(struct nk_context *ctx)
 	DebugGUI_Slider(ctx, "Murk density", &g_params.murk, 0.0f, 5.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Lightning (per s)", &g_params.lightning, 0.0f, 5.0f, 0.01f, "%.2f");
 	DebugGUI_Slider(ctx, "Flash brightness", &g_params.flash, 0.0f, 100.0f, 0.1f, "%.1f");
+	DebugGUI_Slider(ctx, "Canyon floor", &g_params.canyonFloor, 0.0f, 0.8f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Top break-up", &g_params.topBreak, 0.0f, 1.0f, 0.01f, "%.2f");
+	DebugGUI_Slider(ctx, "Mid erosion", &g_params.midErosion, 0.0f, 1.0f, 0.01f, "%.2f");
 }
