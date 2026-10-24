@@ -281,9 +281,16 @@ double QuadTree_SplitK(double trianglePx)
 	return Window_Height() / (QT_DIVISIONS * trianglePx * 2.0 * tanHalf);
 }
 
+/* A leaf did not split, so its centre line is at least splitK widths away
+   (nodeLod's dist); a point of it is up to its centre-to-corner chord,
+   ~0.71 of its width, nearer. So at distance d it is at most
+   d / (splitK - 0.75) wide, not d / splitK: with the water's large
+   triangles at 720p splitK is only ~1.8, and that 1.7x wider cell (2.7x
+   the chord sag) let the water shell's middles fall behind the pushed
+   seafloor from orbit (a grid of dark discs over the open sea). */
 double QuadTree_LeafCellK(double trianglePx)
 {
-	return 1.0 / (QT_DIVISIONS * QuadTree_SplitK(trianglePx));
+	return 1.0 / (QT_DIVISIONS * fmax(QuadTree_SplitK(trianglePx) - 0.75, 0.25));
 }
 
 static void buildWalk(qtWalk *w, const QuadTree_Body *body, mat4 viewProj, int useHorizon, int cullNear,

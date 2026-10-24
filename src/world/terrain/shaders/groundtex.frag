@@ -78,12 +78,12 @@ float ridged(vec2 uv, int p0, int octaves, float gain, int seed)
 float heightAt(vec2 uv)
 {
 	if (layer == 0) {
-		// Rock: ridged blocks, tilted strata, fine grain.
+		// Rock: ridged blocks, fine grain. Isotropic like every layer: the
+		// tiles' scale follows the camera, so anything with one direction
+		// in the tile (strata, ripples, sastrugi) shows at every range as
+		// parallel streaks across whole slopes.
 		float r = ridged(uv, 3, 7, 0.55, 11);
-		float warp = fbm(uv, 2, 3, 0.5, 21);
-		float strata = 0.5 + 0.5 * sin(TAU * (uv.y * 9.0 + uv.x * 2.0 + 0.6 * warp));
-		strata = smoothstep(0.2, 0.8, strata);
-		return clamp(0.7 * r + 0.12 * strata + 0.18 * (0.5 + fbm(uv, 32, 3, 0.5, 31)), 0.0, 1.0);
+		return clamp(0.8 * r + 0.2 * (0.5 + fbm(uv, 32, 3, 0.5, 31)), 0.0, 1.0);
 	}
 	if (layer == 1) {
 		// Ground: soft rolling soil, clumps.
@@ -92,17 +92,12 @@ float heightAt(vec2 uv)
 		return clamp(0.8 * base + 0.2 * clumps, 0.0, 1.0);
 	}
 	if (layer == 2) {
-		// Sand: wind ripples (steep lee side), warped, fine grain.
-		float phase = uv.x * 12.0 + uv.y * 4.0 + 0.9 * fbm(uv, 2, 4, 0.5, 61);
-		float r = fract(phase);
-		float ripple = smoothstep(0.0, 0.8, r) * (1.0 - smoothstep(0.8, 1.0, r));
+		// Sand: soft dunes and hummocks, fine grain (no ripples: see rock).
 		float dunes = 0.5 + 0.6 * fbm(uv, 2, 3, 0.5, 71);
-		return clamp(0.35 * ripple + 0.55 * dunes + 0.1 * (0.5 + fbm(uv, 64, 2, 0.5, 81)), 0.0, 1.0);
+		float hummocks = 0.5 + 0.5 * fbm(uv, 8, 3, 0.5, 61);
+		return clamp(0.6 * dunes + 0.3 * hummocks + 0.1 * (0.5 + fbm(uv, 64, 2, 0.5, 81)), 0.0, 1.0);
 	}
-	// Snow: smooth drifts, a faint fine crust. No sastrugi: the tile's
-	// scale follows the camera (two levels a texel per pixel apart), so
-	// stripes in the tile's own direction showed at every range as one
-	// set of parallel streaks across whole snowfields.
+	// Snow: smooth drifts, a faint fine crust (no sastrugi: see rock).
 	float drift = 0.5 + 0.6 * fbm(uv, 3, 5, 0.45, 91);
 	return clamp(0.9 * drift + 0.1 * (0.5 + fbm(uv, 16, 3, 0.5, 97)), 0.0, 1.0);
 }

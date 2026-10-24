@@ -1,26 +1,26 @@
 {
-    "generatedUtc":  "2026-10-23T15:21:36Z",
+    "generatedUtc":  "2026-10-24T04:30:17Z",
     "runs":  3,
     "scenes":  {
                    "grazing-sea":  {
-                                       "medianMs":  1.094,
-                                       "p95Ms":  1.193,
-                                       "p99Ms":  1.238
+                                       "medianMs":  2.502,
+                                       "p95Ms":  3.109,
+                                       "p99Ms":  3.283
                                    },
                    "orbit-mid":  {
-                                     "medianMs":  1.021,
-                                     "p95Ms":  1.185,
-                                     "p99Ms":  1.208
+                                     "medianMs":  2.396,
+                                     "p95Ms":  2.825,
+                                     "p99Ms":  3.002
                                  },
                    "topdown-detail":  {
-                                          "medianMs":  1.103,
-                                          "p95Ms":  1.266,
-                                          "p99Ms":  1.48
+                                          "medianMs":  2.629,
+                                          "p95Ms":  4.549,
+                                          "p99Ms":  4.675
                                       },
                    "whole-planet":  {
-                                        "medianMs":  0.72,
-                                        "p95Ms":  0.736,
-                                        "p99Ms":  0.89
+                                        "medianMs":  1.927,
+                                        "p95Ms":  2.144,
+                                        "p99Ms":  2.231
                                     }
                }
 }

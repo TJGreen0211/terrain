@@ -96,6 +96,7 @@ const float PI = 3.14159265359;
 #define VALLEY_LOD      3.65    // extra mips for the river-valley greening
 #define LAKE_LOD        2.65    // lakes must survive this many mips (no pit specks)
 #define COAST_LOD       4.65    // beaches need open sea within ~2^COAST_LOD texels
+#define SNOW_EDGE       0.015   // snowline half-width in temperature
 #define SNOW_SMOOTH     0.7     // share of the per-pixel detail's slope snow hides
 #define ASPECT_TEMP     0.1    // temperature per unit slope facing the equator (~1.1 km of snowline)
 
@@ -354,7 +355,8 @@ void main()
 	// not shade (detailUnresolvedVar), for the materials.
 	vec3 gDetail = vec3(0.0);
 	vec3 gPixel = vec3(0.0);   // the per-pixel octaves' share of gDetail
-	float slopeVar = 0.0;
+	float hPixel = 0.0;        // and their height the geometry leaves out (m)
+	float slopeVar = 0.0, heightVar = 0.0;
 	if (e >= seaLevel) {
 		float altD = (e - seaLevel) / max(1.0 - seaLevel, 1e-3);
 		gDetail = fDetailSlope;
@@ -366,11 +368,15 @@ void main()
 			gPixel = specD.coast * detailSlope(fPatchAddr.x, qD,
 				detailPixel(fPatchAddr, fPatchUV, length(qD), footM, footM / graz, specD,
 				            dot(fDetailSlope, fDetailSlope),
-				            detailCubeGrad(fPatchAddr.x, qD, grad * detailSlopeToRise + fDetailSlope)));
+				            detailCubeGrad(fPatchAddr.x, qD, grad * detailSlopeToRise + fDetailSlope),
+				            hPixel));
+			hPixel *= specD.coast;
 			gDetail += gPixel;
 #endif
 			slopeVar = specD.coast * specD.coast
-			         * detailUnresolvedVar(length(qD), footM, footM / graz, specD, dot(gDetail, gDetail));
+			         * detailUnresolvedVar(length(qD), footM, footM / graz, specD, dot(gDetail, gDetail),
+			                               heightVar);
+			heightVar *= specD.coast * specD.coast;
 		}
 	}
 
@@ -413,13 +419,15 @@ void main()
 		// snowline and treeline are in metres (lapsePerM, terrain_gen.c),
 		// the same on any planet. The height is the map's per pixel (the
 		// mesh's vertices read a coarser mip far away, which lowers narrow
-		// summits by km) plus the vertices' detail, so the snow follows the
-		// detail's peaks. Dry
+		// summits by km) plus the detail's, the vertices' and the per-pixel
+		// octaves', so the snow and treelines follow the relief down to a
+		// few pixels at any range. Dry
 		// ground lapses less (TERRAIN_LAPSE_DRY): a higher snowline there
 		// (no snow cap on every high desert plateau); a dry world (humidity
 		// 0) keeps the full lapse.
 		float cosLatS = sqrt(max(1.0 - dObj.z*dObj.z, 0.0));
-		float hM = max(landRelief * planetRadiusM * (e - seaLevel) / max(1.0 - seaLevel, 1e-3) + fDetailH, 0.0);
+		float hM = max(landRelief * planetRadiusM * (e - seaLevel) / max(1.0 - seaLevel, 1e-3)
+		               + fDetailH + hPixel, 0.0);
 		float dry = (1.0 - moist) * min(humidity * 4.0, 1.0);
 		// Aspect: slopes facing the equator are warmer, those facing the
 		// pole colder (sun exposure), so the snow and treelines follow the
@@ -454,7 +462,11 @@ void main()
 		                         vec3(rockS * 1.6, rockS, rockSlope * 1.8));
 		float steep = shares.x;
 		float scree = max(shares.y - steep, 0.0) * mix(0.3, 0.9, alpine);
-		float coldness = 1.0 - smoothstep(snowTemp - 0.06, snowTemp + 0.06, temp);
+		// The snowline is sharp (SNOW_EDGE, ~170 m of height); wider by the
+		// height spread a pixel holds but does not resolve, so from far
+		// away it is the share of the pixel's ground above it.
+		float snowW = sqrt(SNOW_EDGE * SNOW_EDGE + lapsePerM * lapsePerM * heightVar);
+		float coldness = 1.0 - smoothstep(snowTemp - snowW, snowTemp + snowW, temp);
 
 		// Beach on gentle coasts only (steep coasts become cliffs): wet sand
 		// at the waterline, dry above, grey shingle when cold.

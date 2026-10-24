@@ -386,11 +386,13 @@ float detailVertex(ivec4 addr, vec2 uv, float qLen, float footM, DetailSpec s, v
 // footprint for aliasing, which can be wider (grazing views). d2: the
 // vertices' detail slope^2 (m/m), where the erosion starts; startCube: the
 // map's and the vertices' slope (metres per cube unit), where the gullies
-// start.
+// start. hPix gets these octaves' height (m) that the geometry leaves out
+// (below its fade; coastal ramp NOT applied), for the materials' height.
 vec2 detailPixel(ivec4 addr, vec2 uv, float qLen, float footM, float pixM, DetailSpec s, float d2,
-                 vec2 startCube)
+                 vec2 startCube, out float hPix)
 {
 	vec2 grad = vec2(0.0);
+	hPix = 0.0;
 	if (detailOctaves <= 0)
 		return grad;
 	float lambda0 = detailWavelength0(qLen);
@@ -419,6 +421,8 @@ vec2 detailPixel(ivec4 addr, vec2 uv, float qLen, float footM, float pixM, Detai
 		vec2 g = w * amp * exp2(float(n - 1)) * o.yz;
 		grad += g;
 		slope += g;
+		hPix += smoothstep(DETAIL_PIX_FADE.x, DETAIL_PIX_FADE.y, lambda / pixM)
+		      * (1.0 - smoothstep(DETAIL_GEOM_FADE.x, DETAIL_GEOM_FADE.y, r)) * amp * o.x;
 		lambda *= 0.5;
 	}
 	return grad;
@@ -430,10 +434,12 @@ vec2 detailPixel(ivec4 addr, vec2 uv, float qLen, float footM, float pixM, Detai
 // the same share of a range from orbit as from the ground. Same arguments
 // as detailPixel; d2: the shaded detail's slope^2 (m/m), where the erosion
 // starts. One octave's mean square gradient per lattice cell, measured:
-// 0.514 soft, 1.316 ridged; a cell is one wavelength. Coastal ramp NOT
-// applied.
-float detailUnresolvedVar(float qLen, float footM, float pixM, DetailSpec s, float d2)
+// 0.514 soft, 1.316 ridged; a cell is one wavelength. hVar gets their
+// height's variance (m^2; rms 0.177 x the amplitude, noise and gullies
+// alike). Coastal ramp NOT applied.
+float detailUnresolvedVar(float qLen, float footM, float pixM, DetailSpec s, float d2, out float hVar)
 {
+	hVar = 0.0;
 	if (detailOctaves <= 0)
 		return 0.0;
 	float lambda0 = detailWavelength0(qLen);
@@ -453,6 +459,7 @@ float detailUnresolvedVar(float qLen, float footM, float pixM, DetailSpec s, flo
 	for (int i = i0; i < detailOctaves; i++) {
 		float ae = a / (1.0 + k * (d2 + var));
 		var += g2 * ae * ae;
+		hVar += 0.0313 * ae * ae * lambda * lambda;
 		a *= lambda > detailLambdaC ? stepH : 1.0;
 		lambda *= 0.5;
 	}
